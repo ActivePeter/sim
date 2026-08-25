@@ -4904,6 +4904,7 @@ export function TableGrid({
                                 row={row}
                                 columns={displayColumns}
                                 workspaceId={workspaceId}
+                                timeZone={timeZone}
                                 rowIndex={index}
                                 isFirstRow={index === 0}
                                 editingColumnName={
