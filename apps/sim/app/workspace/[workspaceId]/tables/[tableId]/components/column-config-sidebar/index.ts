@@ -3,6 +3,6 @@ export { ColumnConfigSidebar } from './column-config-sidebar'
 export {
   COLUMN_TYPE_OPTIONS,
   type ColumnTypeOption,
-  PLAIN_COLUMN_TYPE_OPTIONS,
+  columnTypeOptionsForTable,
   type SidebarColumnType,
 } from './column-types'

@@ -11,15 +11,17 @@ import {
   DropdownMenuSeparator,
   DropdownMenuTrigger,
   Plus,
+  Tooltip,
 } from '@sim/emcn'
 import { Sparkles } from '@sim/emcn/icons'
 import type { ColumnDefinition } from '@/lib/table'
-import { COLUMN_TYPE_OPTIONS } from '../column-config-sidebar'
+import { type ColumnTypeOption, columnTypeOptionsForTable } from '../column-config-sidebar'
 
 const CELL_HEADER =
   'border-[var(--border)] border-r border-b bg-[var(--bg)] px-2 py-[7px] text-left align-middle'
 
 interface NewColumnDropdownProps {
+  columns: readonly ColumnDefinition[]
   /** `'header'` renders the page-header trigger (subtle Button); `'inline-header'` renders
    *  the in-table column-header `<th>` trigger. Same dropdown content either way. */
   trigger: 'header' | 'inline-header'
@@ -37,12 +39,49 @@ interface NewColumnDropdownProps {
   onBlocked: () => void
 }
 
+interface ColumnTypeMenuItemProps {
+  option: ColumnTypeOption
+  onSelect: () => void
+}
+
+function ColumnTypeMenuItem({ option, onSelect }: ColumnTypeMenuItemProps) {
+  const Icon = option.icon
+  const item = (
+    <DropdownMenuItem
+      aria-disabled={option.disabledReason ? true : undefined}
+      className={
+        option.disabledReason ? 'cursor-not-allowed opacity-50 focus:bg-transparent' : undefined
+      }
+      onSelect={(event) => {
+        if (option.disabledReason) {
+          event.preventDefault()
+          return
+        }
+        onSelect()
+      }}
+    >
+      <Icon className='size-[14px] text-[var(--text-icon)]' />
+      {option.label}
+    </DropdownMenuItem>
+  )
+
+  if (!option.disabledReason) return item
+
+  return (
+    <Tooltip.Root>
+      <Tooltip.Trigger asChild>{item}</Tooltip.Trigger>
+      <Tooltip.Content>{option.disabledReason}</Tooltip.Content>
+    </Tooltip.Root>
+  )
+}
+
 /**
  * "+ New column" dropdown — the single entry point for creating a column.
  * Lists every column type plus "Workflow" and "Enrichments"; picking a type
  * opens the right sidebar pre-seeded.
  */
 export function NewColumnDropdown({
+  columns,
   trigger,
   disabled,
   onPickType,
@@ -98,18 +137,12 @@ export function NewColumnDropdown({
           </DropdownMenuItem>
           <DropdownMenuSeparator />
         </>
-        {COLUMN_TYPE_OPTIONS.map((option) => {
-          const Icon = option.icon
+        {columnTypeOptionsForTable(columns).map((option) => {
           const onSelect =
             option.type === 'workflow'
               ? onPickWorkflow
               : () => onPickType(option.type as ColumnDefinition['type'])
-          return (
-            <DropdownMenuItem key={option.type} onSelect={onSelect}>
-              <Icon className='size-[14px] text-[var(--text-icon)]' />
-              {option.label}
-            </DropdownMenuItem>
-          )
+          return <ColumnTypeMenuItem key={option.type} option={option} onSelect={onSelect} />
         })}
       </DropdownMenuContent>
     </DropdownMenu>
