@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest'
 import {
   advancePlanItem,
   createDemoPlanItems,
+  createDemoRoadmap,
   getBlockingItemIds,
   getMergeBlockingItemIds,
   getNextReadyItem,
@@ -11,6 +12,20 @@ import {
 } from '@/app/plan-graph-demo/plan-graph-model'
 
 describe('plan graph demo model', () => {
+  it('models the demo as an isolated roadmap document', () => {
+    const roadmap = createDemoRoadmap()
+    const secondRoadmap = createDemoRoadmap()
+
+    expect(roadmap).toMatchObject({
+      id: 'roadmap-agent-sessions',
+      kind: 'roadmap',
+      name: 'Agent Roadmap',
+      revision: 7,
+    })
+    expect(roadmap.items).not.toBe(secondRoadmap.items)
+    expect(roadmap.dependencies).not.toBe(secondRoadmap.dependencies)
+  })
+
   it('derives ready and blocked states from completed prerequisites', () => {
     const items = createDemoPlanItems()
     const resolved = resolvePlanItems(items)
@@ -66,6 +81,16 @@ describe('plan graph demo model', () => {
     ]
 
     expect(getBlockingItemIds('PG-01', items, dependencies)).toEqual(['PG-02'])
+  })
+
+  it('advances against the roadmap dependency set supplied by a caller', () => {
+    const items = createDemoPlanItems()
+    const next = advancePlanItem(items, 'PG-03', 'Codex 02', [])
+
+    expect(next.find((item) => item.id === 'PG-03')).toMatchObject({
+      lifecycle: 'active',
+      agent: 'Codex 02',
+    })
   })
 
   it('allows an integration consumer to start but blocks its merge', () => {

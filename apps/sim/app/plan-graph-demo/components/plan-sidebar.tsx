@@ -41,7 +41,7 @@ export function PlanSidebar({ counts, items }: PlanSidebarProps) {
   )
 
   return (
-    <aside className='hidden min-h-0 flex-col border-[var(--border)] border-r bg-[var(--surface-1)] lg:flex'>
+    <aside className='hidden min-h-0 w-[210px] shrink-0 flex-col border-[var(--border)] border-r bg-[var(--surface-1)] lg:flex'>
       <div className='border-[var(--border)] border-b px-4 py-4'>
         <div className='mb-3 flex items-center justify-between'>
           <p className='text-[var(--text-primary)] text-sm'>Plan progress</p>

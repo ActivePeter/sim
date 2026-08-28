@@ -1,3 +1,5 @@
+import type { CanvasDocumentKind } from '@/lib/canvas/types'
+
 export type StoredPlanLifecycle = 'planned' | 'active' | 'review' | 'done'
 export type PlanLifecycle = StoredPlanLifecycle | 'ready' | 'blocked'
 export type PlanNodeKind = 'contract' | 'implementation' | 'integration'
@@ -68,6 +70,15 @@ export interface PlanCounts {
 export interface PlanPosition {
   x: number
   y: number
+}
+
+export interface RoadmapDocument {
+  dependencies: PlanDependency[]
+  id: string
+  items: PlanItem[]
+  kind: Extract<CanvasDocumentKind, 'roadmap'>
+  name: string
+  revision: number
 }
 
 export const DEMO_AGENTS = ['Codex 01', 'Codex 02', 'Claude 01'] as const
@@ -208,6 +219,17 @@ export const PLAN_DEPENDENCIES: readonly PlanDependency[] = [
   { id: 'edge-04-06', source: 'PG-04', target: 'PG-06', kind: 'integrate-with' },
 ]
 
+export function createDemoRoadmap(): RoadmapDocument {
+  return {
+    id: 'roadmap-agent-sessions',
+    kind: 'roadmap',
+    name: 'Agent Roadmap',
+    revision: 7,
+    items: createDemoPlanItems(),
+    dependencies: PLAN_DEPENDENCIES.map((dependency) => ({ ...dependency })),
+  }
+}
+
 export const INITIAL_PLAN_POSITIONS: Readonly<Record<string, PlanPosition>> = {
   'PG-01': { x: 40, y: 250 },
   'PG-02': { x: 360, y: 250 },
@@ -296,21 +318,28 @@ export function getPlanCounts(items: readonly ResolvedPlanItem[]): PlanCounts {
   return counts
 }
 
-export function getNextReadyItem(items: readonly PlanItem[]): PlanItem | undefined {
-  return items.find((item) => resolvePlanLifecycle(item, items) === 'ready')
+export function getNextReadyItem(
+  items: readonly PlanItem[],
+  dependencies: readonly PlanDependency[] = PLAN_DEPENDENCIES
+): PlanItem | undefined {
+  return items.find((item) => resolvePlanLifecycle(item, items, dependencies) === 'ready')
 }
 
 export function advancePlanItem(
   items: readonly PlanItem[],
   itemId: string,
-  agent: string
+  agent: string,
+  dependencies: readonly PlanDependency[] = PLAN_DEPENDENCIES
 ): PlanItem[] {
   const item = items.find((candidate) => candidate.id === itemId)
   if (!item) return [...items]
 
-  const resolvedLifecycle = resolvePlanLifecycle(item, items)
+  const resolvedLifecycle = resolvePlanLifecycle(item, items, dependencies)
   if (!['ready', 'active', 'review'].includes(resolvedLifecycle)) return [...items]
-  if (resolvedLifecycle === 'review' && getMergeBlockingItemIds(itemId, items).length > 0) {
+  if (
+    resolvedLifecycle === 'review' &&
+    getMergeBlockingItemIds(itemId, items, dependencies).length > 0
+  ) {
     return [...items]
   }
 

@@ -123,7 +123,7 @@ export function NodeInspector({
     (item.resolvedLifecycle === 'review' && !mergeDependenciesPassed)
 
   return (
-    <aside className='hidden min-h-0 flex-col bg-[var(--surface-1)] xl:flex'>
+    <aside className='hidden min-h-0 w-[360px] shrink-0 flex-col border-[var(--border)] border-l bg-[var(--surface-1)] xl:flex'>
       <div className='flex items-start justify-between gap-3 border-[var(--border)] border-b px-4 py-4'>
         <div className='min-w-0'>
           <div className='mb-1.5 flex items-center gap-2'>

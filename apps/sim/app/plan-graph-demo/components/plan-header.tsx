@@ -5,11 +5,20 @@ import type { PlanCounts } from '@/app/plan-graph-demo/plan-graph-model'
 interface PlanHeaderProps {
   availableAgent?: string
   counts: PlanCounts
+  name: string
   onClaimNext: () => void
   onReset: () => void
+  revision: number
 }
 
-export function PlanHeader({ availableAgent, counts, onClaimNext, onReset }: PlanHeaderProps) {
+export function PlanHeader({
+  availableAgent,
+  counts,
+  name,
+  onClaimNext,
+  onReset,
+  revision,
+}: PlanHeaderProps) {
   return (
     <header className='flex h-[58px] shrink-0 items-center justify-between gap-4 border-[var(--border)] border-b bg-[var(--surface-1)] px-4'>
       <div className='flex min-w-0 items-center gap-3'>
@@ -18,13 +27,13 @@ export function PlanHeader({ availableAgent, counts, onClaimNext, onReset }: Pla
         </div>
         <div className='min-w-0'>
           <div className='flex items-center gap-2'>
-            <h1 className='truncate text-[var(--text-primary)] text-sm'>Agent Session Plan</h1>
+            <h1 className='truncate text-[var(--text-primary)] text-sm'>{name}</h1>
             <Badge variant='purple' size='sm'>
-              Interactive demo
+              Roadmap
             </Badge>
           </div>
           <p className='truncate text-[var(--text-muted)] text-xs'>
-            ActivePeter/sim · main · graph revision 7
+            ActivePeter/sim · plan graph · revision {revision}
           </p>
         </div>
       </div>

@@ -4,6 +4,7 @@ import { useCallback, useMemo, useState } from 'react'
 import { Badge } from '@sim/emcn'
 import { generateShortId } from '@sim/utils/id'
 import { ReactFlowProvider } from 'reactflow'
+import { CanvasEditorFrame } from '@/components/canvas'
 import {
   ActivityPanel,
   NodeInspector,
@@ -14,12 +15,11 @@ import {
 } from '@/app/plan-graph-demo/components'
 import {
   advancePlanItem,
-  createDemoPlanItems,
+  createDemoRoadmap,
   DEMO_AGENTS,
   getMergeBlockingItemIds,
   getNextReadyItem,
   getPlanCounts,
-  PLAN_DEPENDENCIES,
   resolvePlanItems,
   resolvePlanLifecycle,
 } from '@/app/plan-graph-demo/plan-graph-model'
@@ -48,13 +48,17 @@ const INITIAL_ACTIVITIES: readonly PlanActivity[] = [
   },
 ]
 
-export function PlanGraphDemo() {
-  const [items, setItems] = useState(createDemoPlanItems)
+export function RoadmapDemo() {
+  const [roadmap, setRoadmap] = useState(createDemoRoadmap)
   const [selectedItemId, setSelectedItemId] = useState('PG-02')
   const [activities, setActivities] = useState<PlanActivity[]>([...INITIAL_ACTIVITIES])
   const [canvasRevision, setCanvasRevision] = useState(0)
 
-  const resolvedItems = useMemo(() => resolvePlanItems(items), [items])
+  const items = roadmap.items
+  const resolvedItems = useMemo(
+    () => resolvePlanItems(items, roadmap.dependencies),
+    [items, roadmap.dependencies]
+  )
   const counts = useMemo(() => getPlanCounts(resolvedItems), [resolvedItems])
   const selectedItem = resolvedItems.find((item) => item.id === selectedItemId) ?? resolvedItems[0]
   const activeAgents = new Set(
@@ -70,18 +74,28 @@ export function PlanGraphDemo() {
       const currentItem = items.find((item) => item.id === itemId)
       if (!currentItem) return
 
-      const lifecycle = resolvePlanLifecycle(currentItem, items)
+      const lifecycle = resolvePlanLifecycle(currentItem, items, roadmap.dependencies)
       const assignedAgent = currentItem.agent ?? availableAgent
       if (lifecycle === 'ready' && !assignedAgent) return
-      if (lifecycle === 'review' && getMergeBlockingItemIds(itemId, items).length > 0) return
+      if (
+        lifecycle === 'review' &&
+        getMergeBlockingItemIds(itemId, items, roadmap.dependencies).length > 0
+      ) {
+        return
+      }
 
       const readyBefore = new Set(
-        resolvePlanItems(items)
+        resolvePlanItems(items, roadmap.dependencies)
           .filter((item) => item.resolvedLifecycle === 'ready')
           .map((item) => item.id)
       )
-      const nextItems = advancePlanItem(items, itemId, assignedAgent ?? DEMO_AGENTS[0])
-      const newlyReady = resolvePlanItems(nextItems)
+      const nextItems = advancePlanItem(
+        items,
+        itemId,
+        assignedAgent ?? DEMO_AGENTS[0],
+        roadmap.dependencies
+      )
+      const newlyReady = resolvePlanItems(nextItems, roadmap.dependencies)
         .filter((item) => item.resolvedLifecycle === 'ready' && !readyBefore.has(item.id))
         .map((item) => item.id)
 
@@ -116,21 +130,21 @@ export function PlanGraphDemo() {
         }
       }
 
-      setItems(nextItems)
+      setRoadmap((current) => ({ ...current, items: nextItems }))
       setActivities((current) => [activity, ...current].slice(0, 8))
     },
-    [availableAgent, items]
+    [availableAgent, items, roadmap.dependencies]
   )
 
   const handleClaimNext = useCallback(() => {
-    const nextItem = getNextReadyItem(items)
+    const nextItem = getNextReadyItem(items, roadmap.dependencies)
     if (!nextItem || !availableAgent) return
     setSelectedItemId(nextItem.id)
     advanceItem(nextItem.id)
-  }, [advanceItem, availableAgent, items])
+  }, [advanceItem, availableAgent, items, roadmap.dependencies])
 
   const handleReset = useCallback(() => {
-    setItems(createDemoPlanItems())
+    setRoadmap(createDemoRoadmap())
     setSelectedItemId('PG-02')
     setActivities([...INITIAL_ACTIVITIES])
     setCanvasRevision((current) => current + 1)
@@ -143,17 +157,30 @@ export function PlanGraphDemo() {
       <PlanHeader
         availableAgent={availableAgent}
         counts={counts}
+        name={roadmap.name}
         onClaimNext={handleClaimNext}
         onReset={handleReset}
+        revision={roadmap.revision}
       />
 
-      <main className='grid min-h-0 flex-1 grid-cols-[minmax(0,1fr)] lg:grid-cols-[210px_minmax(0,1fr)] xl:grid-cols-[210px_minmax(0,1fr)_360px]'>
-        <PlanSidebar counts={counts} items={resolvedItems} />
-
-        <section className='flex min-h-0 min-w-0 flex-col'>
+      <CanvasEditorFrame
+        className='min-h-0 flex-1'
+        leadingPanel={<PlanSidebar counts={counts} items={resolvedItems} />}
+        bottomPanel={<ActivityPanel activities={activities} />}
+        sidePanel={
+          <NodeInspector
+            availableAgent={availableAgent}
+            dependencies={roadmap.dependencies}
+            item={selectedItem}
+            items={resolvedItems}
+            onAdvance={() => advanceItem(selectedItem.id)}
+          />
+        }
+      >
+        <section className='flex min-h-0 min-w-0 flex-1 flex-col'>
           <div className='flex h-10 shrink-0 items-center justify-between gap-3 border-[var(--border)] border-b bg-[var(--surface-1)] px-3'>
             <div className='flex items-center gap-3 text-[var(--text-muted)] text-xs'>
-              <span className='hidden sm:inline'>Development DAG</span>
+              <span className='hidden sm:inline'>Roadmap graph</span>
               <span className='flex items-center gap-1.5'>
                 <span className='h-px w-5 bg-[var(--text-placeholder)]' />
                 requires
@@ -176,7 +203,7 @@ export function PlanGraphDemo() {
             <ReactFlowProvider>
               <PlanCanvas
                 key={canvasRevision}
-                dependencies={PLAN_DEPENDENCIES}
+                dependencies={roadmap.dependencies}
                 items={items}
                 resolvedItems={resolvedItems}
                 selectedItemId={selectedItemId}
@@ -184,18 +211,8 @@ export function PlanGraphDemo() {
               />
             </ReactFlowProvider>
           </div>
-
-          <ActivityPanel activities={activities} />
         </section>
-
-        <NodeInspector
-          availableAgent={availableAgent}
-          dependencies={PLAN_DEPENDENCIES}
-          item={selectedItem}
-          items={resolvedItems}
-          onAdvance={() => advanceItem(selectedItem.id)}
-        />
-      </main>
+      </CanvasEditorFrame>
     </div>
   )
 }

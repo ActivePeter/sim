@@ -1,10 +1,16 @@
 'use client'
 
-import { useCallback, useEffect, useMemo, useState } from 'react'
-import { createLogger } from '@sim/logger'
-import type { Edge, EdgeTypes, Node, NodeChange, NodeTypes } from 'reactflow'
-import ReactFlow, { MarkerType, useStoreApi } from 'reactflow'
-import 'reactflow/dist/style.css'
+import { useCallback, useMemo, useState } from 'react'
+import {
+  type Edge,
+  type EdgeTypes,
+  MarkerType,
+  type Node,
+  type NodeChange,
+  type NodeTypes,
+  SelectionMode,
+} from 'reactflow'
+import { type CanvasInteractionMode, CanvasSurface } from '@/components/canvas'
 import { CanvasControls } from '@/app/plan-graph-demo/components/canvas-controls'
 import { PlanEdge, type PlanEdgeData } from '@/app/plan-graph-demo/components/plan-edge'
 import { PlanNodeCard, type PlanNodeData } from '@/app/plan-graph-demo/components/plan-node-card'
@@ -17,18 +23,8 @@ import {
   type ResolvedPlanItem,
 } from '@/app/plan-graph-demo/plan-graph-model'
 
-const PRO_OPTIONS = { hideAttribution: true } as const
 const NODE_TYPES: NodeTypes = { planNode: PlanNodeCard }
 const EDGE_TYPES: EdgeTypes = { planEdge: PlanEdge }
-const logger = createLogger('PlanGraphCanvas')
-
-/**
- * ReactFlow 11 misreports error 002 when React 19 Strict Mode double-invokes memo initializers.
- */
-function handleReactFlowError(code: string, message: string) {
-  if (code === '002') return
-  logger.warn('React Flow reported an error', { code, message })
-}
 
 interface PlanCanvasProps {
   dependencies: readonly PlanDependency[]
@@ -45,11 +41,10 @@ export function PlanCanvas({
   selectedItemId,
   onSelectItem,
 }: PlanCanvasProps) {
-  const store = useStoreApi()
   const [positions, setPositions] = useState<Record<string, PlanPosition>>({
     ...INITIAL_PLAN_POSITIONS,
   })
-  const [isErrorHandlerReady, setIsErrorHandlerReady] = useState(false)
+  const [canvasMode, setCanvasMode] = useState<CanvasInteractionMode>('hand')
   const nodes = useMemo<Node<PlanNodeData>[]>(
     () =>
       resolvedItems.map((item) => ({
@@ -96,21 +91,10 @@ export function PlanCanvas({
     })
   }, [])
 
-  useEffect(() => {
-    const previousOnError = store.getState().onError
-    store.setState({ onError: handleReactFlowError })
-    setIsErrorHandlerReady(true)
-
-    return () => store.setState({ onError: previousOnError })
-  }, [store])
-
-  if (!isErrorHandlerReady) {
-    return <div className='h-full min-h-0 w-full bg-[var(--bg)]' />
-  }
-
   return (
-    <div className='relative h-full min-h-0 w-full bg-[radial-gradient(circle,var(--border)_1px,transparent_1px)] [background-size:20px_20px]'>
-      <ReactFlow
+    <div className='relative h-full min-h-0 w-full'>
+      <CanvasSurface
+        documentKind='roadmap'
         nodes={nodes}
         edges={edges}
         nodeTypes={NODE_TYPES}
@@ -122,16 +106,18 @@ export function PlanCanvas({
         minZoom={0.35}
         maxZoom={1.35}
         panOnScroll
+        panOnDrag={canvasMode === 'hand'}
+        selectionOnDrag={canvasMode === 'cursor'}
+        selectionMode={SelectionMode.Partial}
+        selectionKeyCode={canvasMode === 'cursor' ? 'Shift' : null}
         nodesConnectable={false}
         elementsSelectable
         nodesDraggable
         edgesFocusable={false}
-        onError={handleReactFlowError}
-        proOptions={PRO_OPTIONS}
-        className='bg-transparent [&_.react-flow__pane:active]:cursor-grabbing [&_.react-flow__pane]:cursor-grab'
+        className='workflow-container [&_.react-flow__pane:active]:cursor-grabbing [&_.react-flow__pane]:cursor-grab'
       >
-        <CanvasControls />
-      </ReactFlow>
+        <CanvasControls mode={canvasMode} onModeChange={setCanvasMode} />
+      </CanvasSurface>
     </div>
   )
 }
