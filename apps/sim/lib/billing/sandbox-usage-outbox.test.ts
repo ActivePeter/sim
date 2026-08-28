@@ -95,6 +95,13 @@ function costTotalUpdate(index: number): { text: string; params: unknown[] } {
   }
 }
 
+function executedSqlIndex(substring: string): number {
+  return dbChainMockFns.execute.mock.calls.findIndex(([query]) => {
+    const strings = (query as { strings?: readonly string[] } | null)?.strings
+    return Array.isArray(strings) && strings.some((value) => value.includes(substring))
+  })
+}
+
 afterAll(resetDbChainMock)
 
 describe('sandbox usage outbox finalizer', () => {
@@ -126,7 +133,9 @@ describe('sandbox usage outbox finalizer', () => {
         ],
       })
     )
-    expect(dbChainMockFns.execute).toHaveBeenCalledOnce()
+    expect(dbChainMockFns.execute).toHaveBeenCalledTimes(2)
+    expect(executedSqlIndex('lock_timeout')).toBe(0)
+    expect(executedSqlIndex('pg_advisory_xact_lock')).toBe(1)
     expect(dbChainMockFns.update).toHaveBeenCalled()
     expect(costTotalUpdate(0)).toEqual({
       text: 'GREATEST(COALESCE(, 0) + ::numeric, ::numeric)',
@@ -157,6 +166,18 @@ describe('sandbox usage outbox finalizer', () => {
     await expect(
       runHandler(payload({ terminatedAt: undefined, cleanupStatus: 'pending_reconciliation' }))
     ).rejects.toThrow('provider unavailable')
+    expect(mockRecordUsage).not.toHaveBeenCalled()
+  })
+
+  it('propagates advisory lock timeouts so the generic outbox retries', async () => {
+    const lockTimeout = Object.assign(new Error('canceling statement due to lock timeout'), {
+      code: '55P03',
+    })
+    dbChainMockFns.execute.mockResolvedValueOnce([]).mockRejectedValueOnce(lockTimeout)
+
+    await expect(runHandler(payload())).rejects.toBe(lockTimeout)
+    expect(executedSqlIndex('lock_timeout')).toBe(0)
+    expect(executedSqlIndex('pg_advisory_xact_lock')).toBe(1)
     expect(mockRecordUsage).not.toHaveBeenCalled()
   })
 

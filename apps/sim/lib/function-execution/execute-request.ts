@@ -2682,6 +2682,22 @@ export async function executeFunctionRequest(
     )
   } catch (error: any) {
     const executionTime = Date.now() - startTime
+    if (isSandboxUsagePersistenceError(error)) {
+      const persistenceResponse = {
+        success: false,
+        error: getErrorMessage(error),
+        retryable: false,
+        code: 'sandbox_usage_persistence_failed',
+        output: { result: null, stdout: cleanStdout(stdout), executionTime },
+      }
+      return routeContext
+        ? functionJsonResponse(persistenceResponse, routeContext, { status: 503 })
+        : appendPrivateResolvedSecretNames(
+            NextResponse.json(persistenceResponse, { status: 503 }),
+            includePrivateResolvedSecretNames ? [] : null,
+            privateResolvedSecretNamesMetadataType
+          )
+    }
     if (executionSignal.aborted || (error instanceof Error && error.name === 'AbortError')) {
       const timedOut =
         executionDeadlineController?.isTimedOut() === true ||
@@ -2793,23 +2809,6 @@ export async function executeFunctionRequest(
         ? functionJsonResponse(indeterminateResponse, routeContext, { status: 503 })
         : appendPrivateResolvedSecretNames(
             NextResponse.json(indeterminateResponse, { status: 503 }),
-            includePrivateResolvedSecretNames ? [] : null,
-            privateResolvedSecretNamesMetadataType
-          )
-    }
-
-    if (isSandboxUsagePersistenceError(error)) {
-      const persistenceResponse = {
-        success: false,
-        error: getErrorMessage(error),
-        retryable: false,
-        code: 'sandbox_usage_persistence_failed',
-        output: { result: null, stdout: cleanStdout(stdout), executionTime },
-      }
-      return routeContext
-        ? functionJsonResponse(persistenceResponse, routeContext, { status: 503 })
-        : appendPrivateResolvedSecretNames(
-            NextResponse.json(persistenceResponse, { status: 503 }),
             includePrivateResolvedSecretNames ? [] : null,
             privateResolvedSecretNamesMetadataType
           )

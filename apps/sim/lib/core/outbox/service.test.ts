@@ -28,6 +28,7 @@ import {
   deferOutboxHandler,
   enqueueOrReschedulePendingOutboxEvent,
   enqueueOutboxEvent,
+  enqueueOutboxEventIfAbsent,
   enqueueOutboxEvents,
   outboxEventHasSourceOperationId,
   outboxPayloadHasSourceOperationId,
@@ -96,6 +97,19 @@ describe('enqueueOutboxEvent', () => {
     expect((dbChainMockFns.values.mock.calls[0][0] as { availableAt: Date }).availableAt).toBe(
       future
     )
+  })
+
+  it('ensures a stable event exists without failing on a duplicate ID', async () => {
+    const id = await enqueueOutboxEventIfAbsent(
+      dbChainMock.db,
+      'test.event',
+      { foo: 'bar' },
+      { id: 'stable-event-id' }
+    )
+
+    expect(id).toBe('stable-event-id')
+    expect(dbChainMockFns.values.mock.calls[0][0]).toMatchObject({ id: 'stable-event-id' })
+    expect(dbChainMockFns.onConflictDoNothing).toHaveBeenCalledWith({ target: outboxEvent.id })
   })
 
   it('inserts a bounded event batch in one statement', async () => {

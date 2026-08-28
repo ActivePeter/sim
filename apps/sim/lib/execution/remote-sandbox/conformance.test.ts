@@ -153,6 +153,16 @@ import type { SandboxUsageContext } from '@/lib/execution/remote-sandbox/types'
 type Provider = 'e2b' | 'daytona'
 const PROVIDERS: Provider[] = ['e2b', 'daytona']
 
+function deferred<T>() {
+  let resolve!: (value: T | PromiseLike<T>) => void
+  let reject!: (reason?: unknown) => void
+  const promise = new Promise<T>((resolvePromise, rejectPromise) => {
+    resolve = resolvePromise
+    reject = rejectPromise
+  })
+  return { promise, resolve, reject }
+}
+
 const usageContext: SandboxUsageContext = {
   workspaceId: 'ws-1',
   workflowId: 'wf-1',
@@ -405,7 +415,7 @@ describe.each(PROVIDERS)('sandbox conformance [%s]', (provider) => {
     )
   })
 
-  it('kills without running user code when initial usage persistence fails', async () => {
+  it('kills and recovers usage without running user code when initial persistence fails', async () => {
     mockBeginSandboxUsage.mockRejectedValueOnce(new Error('database unavailable'))
 
     await expect(
@@ -424,7 +434,94 @@ describe.each(PROVIDERS)('sandbox conformance [%s]', (provider) => {
     expect(
       provider === 'e2b' ? mockE2BCommandsRun : mockExecuteSessionCommand
     ).not.toHaveBeenCalled()
+    expect(mockBeginSandboxUsage).toHaveBeenCalledTimes(2)
+    expect(mockReleaseAndProcessSandboxUsage).toHaveBeenCalledWith(
+      'sandbox-usage-event',
+      expect.objectContaining({
+        outcome: 'infrastructure_error',
+        cleanupStatus: 'terminated',
+      })
+    )
+  })
+
+  it('preserves usage persistence failure when cancellation races admission', async () => {
+    const controller = new AbortController()
+    const persistence = deferred<string>()
+    mockBeginSandboxUsage.mockImplementationOnce(() => persistence.promise)
+
+    const execution = executeInSandbox({
+      code: 'x',
+      language: CodeLanguage.Python,
+      timeoutMs: 1000,
+      signal: controller.signal,
+      usageContext,
+    })
+    const rejection = expect(execution).rejects.toMatchObject({
+      name: 'SandboxUsagePersistenceError',
+      retryable: false,
+    })
+
+    await vi.waitFor(() => expect(mockBeginSandboxUsage).toHaveBeenCalledOnce())
+    controller.abort(new DOMException('cancelled', 'AbortError'))
+    persistence.reject(new Error('database unavailable'))
+
+    await rejection
+    expect(
+      provider === 'e2b' ? mockE2BCommandsRun : mockExecuteSessionCommand
+    ).not.toHaveBeenCalled()
+  })
+
+  it('durably releases cleanup when persistence and live teardown initially fail', async () => {
+    mockBeginSandboxUsage.mockRejectedValueOnce(new Error('database unavailable'))
+    const teardown = provider === 'e2b' ? mockE2BKill : mockDelete
+    teardown.mockRejectedValue(new Error('provider unavailable'))
+
+    await expect(
+      executeInSandbox({
+        code: 'x',
+        language: CodeLanguage.Python,
+        timeoutMs: 1000,
+        usageContext,
+      })
+    ).rejects.toMatchObject({ name: 'SandboxUsagePersistenceError', retryable: false })
+
+    expect(teardown).toHaveBeenCalledTimes(2)
+    expect(mockBeginSandboxUsage).toHaveBeenCalledTimes(2)
+    expect(mockReleaseAndProcessSandboxUsage).toHaveBeenCalledWith(
+      'sandbox-usage-event',
+      expect.objectContaining({
+        outcome: 'infrastructure_error',
+        cleanupStatus: 'pending_reconciliation',
+      })
+    )
+    expect(
+      provider === 'e2b' ? mockE2BCommandsRun : mockExecuteSessionCommand
+    ).not.toHaveBeenCalled()
+  })
+
+  it('falls back to termination by ID when persistence recovery also fails', async () => {
+    mockBeginSandboxUsage.mockRejectedValue(new Error('database unavailable'))
+    const teardown = provider === 'e2b' ? mockE2BKill : mockDelete
+    teardown.mockRejectedValue(new Error('provider unavailable'))
+
+    await expect(
+      executeInSandbox({
+        code: 'x',
+        language: CodeLanguage.Python,
+        timeoutMs: 1000,
+        usageContext,
+      })
+    ).rejects.toMatchObject({ name: 'SandboxUsagePersistenceError', retryable: false })
+
+    if (provider === 'e2b') {
+      expect(mockE2BStaticKill).toHaveBeenCalledWith('sb_1', { apiKey: 'test-key' })
+    } else {
+      expect(mockDaytonaGet).toHaveBeenCalledWith('sb_1')
+    }
     expect(mockReleaseAndProcessSandboxUsage).not.toHaveBeenCalled()
+    expect(
+      provider === 'e2b' ? mockE2BCommandsRun : mockExecuteSessionCommand
+    ).not.toHaveBeenCalled()
   })
 
   it('releases returned user errors as billable usage', async () => {

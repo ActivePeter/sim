@@ -174,6 +174,34 @@ export async function enqueueOutboxEvent<T>(
   return id
 }
 
+/**
+ * Ensures an outbox event with a caller-owned stable ID exists.
+ *
+ * This is reserved for recovery after an insert returned an indeterminate
+ * result: PostgreSQL may have committed the first insert before the client saw
+ * a connection failure, so retrying must collapse on the event ID instead of
+ * surfacing a duplicate-key error.
+ */
+export async function enqueueOutboxEventIfAbsent<T>(
+  executor: Pick<typeof db, 'insert'>,
+  eventType: string,
+  payload: T,
+  options: EnqueueOptions & { id: string }
+): Promise<string> {
+  await executor
+    .insert(outboxEvent)
+    .values({
+      id: options.id,
+      eventType,
+      payload: payload as never,
+      maxAttempts: options.maxAttempts ?? DEFAULT_MAX_ATTEMPTS,
+      availableAt: options.availableAt ?? new Date(),
+    })
+    .onConflictDoNothing({ target: outboxEvent.id })
+  logger.info('Ensured outbox event exists', { id: options.id, eventType })
+  return options.id
+}
+
 export async function enqueueOutboxEvents<T>(
   executor: Pick<typeof db, 'insert'>,
   eventType: string,

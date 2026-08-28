@@ -19,7 +19,7 @@ import {
 import { checkAndBillPayerOverageThreshold } from '@/lib/billing/threshold-billing'
 import { isBillingEnabled } from '@/lib/core/config/env-flags'
 import {
-  enqueueOutboxEvent,
+  enqueueOutboxEventIfAbsent,
   type OutboxEventContext,
   type OutboxHandlerRegistry,
   patchAndReleasePendingOutboxEvent,
@@ -36,6 +36,7 @@ const logger = createLogger('SandboxUsageOutbox')
 
 export const SANDBOX_USAGE_OUTBOX_EVENT_TYPE = 'sandbox.usage.finalize'
 const CRASH_RECOVERY_GRACE_MS = 60_000
+const SANDBOX_USAGE_LOCK_TIMEOUT_MS = 10_000
 
 export type SandboxUsageCleanupStatus = 'active' | 'terminated' | 'pending_reconciliation'
 
@@ -199,7 +200,7 @@ export async function beginSandboxUsage(params: BeginSandboxUsageParams): Promis
     pricing: createSandboxPricingSnapshot(params.provider),
   }
 
-  await enqueueOutboxEvent(db, SANDBOX_USAGE_OUTBOX_EVENT_TYPE, payload, {
+  await enqueueOutboxEventIfAbsent(db, SANDBOX_USAGE_OUTBOX_EVENT_TYPE, payload, {
     id: eventId,
     availableAt: new Date(params.providerExpiresAt.getTime() + CRASH_RECOVERY_GRACE_MS),
   })
@@ -276,6 +277,9 @@ async function finalizeSandboxUsage(
   const billingContext = toBillingContext(payload.billingAttribution)
 
   await db.transaction(async (tx) => {
+    await tx.execute(
+      sql`select set_config('lock_timeout', ${`${SANDBOX_USAGE_LOCK_TIMEOUT_MS}ms`}, true)`
+    )
     await tx.execute(sql`select pg_advisory_xact_lock(hashtextextended(${payload.executionId}, 0))`)
     const insertedCost = await recordUsage({
       userId: payload.billingAttribution.actorUserId,

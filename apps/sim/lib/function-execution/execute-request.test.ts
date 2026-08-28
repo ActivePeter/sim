@@ -20,6 +20,7 @@ import {
   serializeBillingAttributionHeader,
 } from '@/lib/billing/core/billing-attribution'
 import { INTERNAL_EXECUTION_DEADLINE_HEADER } from '@/lib/execution/execution-deadline-header'
+import { SandboxUsagePersistenceError } from '@/lib/execution/non-retryable-error'
 import {
   MOUNTED_WORKSPACE_FILES_PROVENANCE_KEY,
   PRIVATE_SECRET_PROVENANCE_BUNDLE_V1,
@@ -1972,6 +1973,38 @@ describe('Function execution request', () => {
 
       expect(response.status).toBe(status)
       expect(data.error).toContain(message)
+    })
+
+    it('preserves non-retryable usage persistence failures when the request also aborts', async () => {
+      envFlagsMock.isRemoteSandboxEnabled = true
+      const controller = new AbortController()
+      const req = new NextRequest('http://localhost:3000/internal/function-execution', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          code: 'print("running")',
+          language: 'python',
+          workspaceId: 'workspace-1',
+          timeout: 30_000,
+        }),
+        signal: controller.signal,
+      })
+      mockExecuteInSandbox.mockImplementationOnce(async () => {
+        controller.abort(new DOMException('cancelled', 'AbortError'))
+        throw new SandboxUsagePersistenceError('E2B', {
+          cause: new Error('database unavailable'),
+        })
+      })
+
+      const response = await POST(req)
+      const data = await response.json()
+
+      expect(response.status).toBe(503)
+      expect(data).toMatchObject({
+        success: false,
+        retryable: false,
+        code: 'sandbox_usage_persistence_failed',
+      })
     })
 
     it.each([

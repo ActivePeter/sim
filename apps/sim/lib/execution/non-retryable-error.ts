@@ -32,7 +32,7 @@ export class SandboxUsagePersistenceError extends NonRetryableExecutionError {
 
   constructor(provider: string, options?: ErrorOptions) {
     super(
-      `${provider} created a Function sandbox, but Sim could not persist its usage record. The sandbox was stopped before user code ran.`,
+      `${provider} created a Function sandbox, but Sim could not persist its usage record. User code was not run, and Sim initiated sandbox cleanup before returning.`,
       options
     )
     this.name = 'SandboxUsagePersistenceError'

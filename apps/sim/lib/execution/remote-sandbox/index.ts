@@ -22,7 +22,7 @@ import {
   SandboxOutputLimitError,
 } from '@/lib/execution/remote-sandbox/output-limits'
 import { resolvePiSandboxLifetimeMs } from '@/lib/execution/remote-sandbox/pi-lifetime'
-import { resolveProvider } from '@/lib/execution/remote-sandbox/provider'
+import { getSandboxProvider, resolveProvider } from '@/lib/execution/remote-sandbox/provider'
 import {
   provisionRuntimeDependencies,
   type ResolvedSandbox,
@@ -68,6 +68,10 @@ interface SandboxCleanupResult {
   cleanupStatus: 'terminated' | 'pending_reconciliation'
   terminationRequestedAt: Date
   terminatedAt?: Date
+}
+
+interface SandboxAbortRaceState {
+  usageAdmission?: Promise<string | undefined>
 }
 
 async function createSandbox(
@@ -142,13 +146,31 @@ function remainingSandboxBudgetMs(signal: AbortSignal): number {
  * currently in flight does not accept an AbortSignal. The operation remains
  * observed, and the lifecycle's abort binding tears down any sandbox it creates.
  */
-function raceSandboxAbort<T>(operation: Promise<T>, signal: AbortSignal): Promise<T> {
+function raceSandboxAbort<T>(
+  operation: Promise<T>,
+  signal: AbortSignal,
+  state: SandboxAbortRaceState
+): Promise<T> {
   if (signal.aborted) return Promise.reject(abortReason(signal))
 
   return new Promise<T>((resolve, reject) => {
     const onAbort = () => {
       signal.removeEventListener('abort', onAbort)
-      reject(abortReason(signal))
+      const usageAdmission = state.usageAdmission
+      if (!usageAdmission) {
+        reject(abortReason(signal))
+        return
+      }
+
+      /**
+       * A created metered sandbox must finish its durable usage admission before
+       * cancellation can decide the response. Success preserves the abort;
+       * failure surfaces the non-retryable persistence error after cleanup.
+       */
+      void usageAdmission.then(
+        () => reject(abortReason(signal)),
+        (error) => reject(error)
+      )
     }
     signal.addEventListener('abort', onAbort, { once: true })
     operation.then(
@@ -167,16 +189,17 @@ function raceSandboxAbort<T>(operation: Promise<T>, signal: AbortSignal): Promis
 async function withSandboxExecutionBudget<T>(
   timeoutMs: number,
   parentSignal: AbortSignal | undefined,
-  execute: (signal: AbortSignal) => Promise<T>
+  execute: (signal: AbortSignal, state: SandboxAbortRaceState) => Promise<T>
 ): Promise<T> {
   if (!Number.isFinite(timeoutMs) || timeoutMs <= 0) {
     throw new DOMException('timeout', 'AbortError')
   }
 
   const controller = createTimeoutAbortController(timeoutMs, parentSignal)
+  const state: SandboxAbortRaceState = {}
   try {
     throwIfAborted(controller.signal)
-    return await raceSandboxAbort(execute(controller.signal), controller.signal)
+    return await raceSandboxAbort(execute(controller.signal, state), controller.signal, state)
   } finally {
     controller.cleanup()
   }
@@ -251,20 +274,86 @@ async function beginUsageOrStop(
 ): Promise<string | undefined> {
   if (!usageContext) return undefined
 
+  const usageParams = {
+    provider: created.provider,
+    providerSandboxId: created.handle.sandboxId,
+    sandboxKind,
+    providerRequestedAt: created.providerRequestedAt,
+    providerReadyAt: created.providerReadyAt,
+    providerExpiresAt: created.providerExpiresAt,
+    usageContext,
+  } as const
+
   try {
-    return await beginSandboxUsage({
-      provider: created.provider,
-      providerSandboxId: created.handle.sandboxId,
-      sandboxKind,
-      providerRequestedAt: created.providerRequestedAt,
-      providerReadyAt: created.providerReadyAt,
-      providerExpiresAt: created.providerExpiresAt,
-      usageContext,
-    })
+    return await beginSandboxUsage(usageParams)
   } catch (error) {
+    const persistenceError = new SandboxUsagePersistenceError(created.provider, { cause: error })
     abortBinding.detach()
-    await abortBinding.cleanup()
-    throw new SandboxUsagePersistenceError(created.provider, { cause: error })
+    const [cleanup, recovery] = await Promise.all([
+      abortBinding.cleanup(),
+      beginSandboxUsage(usageParams).then(
+        (eventId) => ({ eventId }) as const,
+        (recoveryError: unknown) => ({ recoveryError }) as const
+      ),
+    ])
+
+    let durableRecoveryReleased = false
+    if ('eventId' in recovery) {
+      try {
+        await releaseAndProcessSandboxUsage(recovery.eventId, {
+          ...cleanup,
+          outcome: 'infrastructure_error',
+        })
+        durableRecoveryReleased = true
+      } catch (releaseError) {
+        logger.error('Failed to release recovered Function sandbox usage event', {
+          provider: created.provider,
+          sandboxId: created.handle.sandboxId,
+          eventId: recovery.eventId,
+          error: getErrorMessage(releaseError),
+        })
+      }
+    } else {
+      logger.error('Failed to recover Function sandbox usage event', {
+        provider: created.provider,
+        sandboxId: created.handle.sandboxId,
+        providerExpiresAt: created.providerExpiresAt,
+        error: getErrorMessage(recovery.recoveryError),
+      })
+    }
+
+    if (cleanup.cleanupStatus === 'pending_reconciliation' && !durableRecoveryReleased) {
+      try {
+        await getSandboxProvider(created.provider).terminateById(created.handle.sandboxId)
+      } catch (terminationError) {
+        logger.error('Failed all Function sandbox usage persistence and cleanup recovery paths', {
+          provider: created.provider,
+          sandboxId: created.handle.sandboxId,
+          providerExpiresAt: created.providerExpiresAt,
+          error: getErrorMessage(terminationError),
+        })
+      }
+    }
+
+    throw persistenceError
+  }
+}
+
+async function admitSandboxUsage(
+  created: CreatedSandbox,
+  sandboxKind: 'code' | 'shell',
+  usageContext: SandboxUsageContext | undefined,
+  abortBinding: ReturnType<typeof bindSandboxAbort>,
+  state: SandboxAbortRaceState
+): Promise<string | undefined> {
+  const admission = beginUsageOrStop(created, sandboxKind, usageContext, abortBinding)
+  if (!usageContext) return admission
+
+  state.usageAdmission = admission
+  try {
+    return await admission
+  } finally {
+    if (state.usageAdmission === admission) state.usageAdmission = undefined
   }
 }
 
@@ -619,7 +708,8 @@ async function provisionWithinBudget(
 }
 
 async function executeInSandboxWithinBudget(
-  req: SandboxExecutionRequest
+  req: SandboxExecutionRequest,
+  state: SandboxAbortRaceState
 ): Promise<SandboxExecutionResult> {
   const { code, language } = req
   const signal = req.signal as AbortSignal
@@ -649,7 +739,13 @@ async function executeInSandboxWithinBudget(
   const sandbox = created.handle
   const sandboxId = sandbox.sandboxId
   const abortBinding = bindSandboxAbort(sandbox, created.provider, signal)
-  const usageEventId = await beginUsageOrStop(created, 'code', req.usageContext, abortBinding)
+  const usageEventId = await admitSandboxUsage(
+    created,
+    'code',
+    req.usageContext,
+    abortBinding,
+    state
+  )
   let outcome: SandboxUsageOutcome = 'infrastructure_error'
 
   try {
@@ -753,13 +849,14 @@ async function executeInSandboxWithinBudget(
 }
 
 export function executeInSandbox(req: SandboxExecutionRequest): Promise<SandboxExecutionResult> {
-  return withSandboxExecutionBudget(req.timeoutMs, req.signal, (signal) =>
-    executeInSandboxWithinBudget({ ...req, signal })
+  return withSandboxExecutionBudget(req.timeoutMs, req.signal, (signal, state) =>
+    executeInSandboxWithinBudget({ ...req, signal }, state)
   )
 }
 
 async function executeShellInSandboxWithinBudget(
-  req: SandboxShellExecutionRequest
+  req: SandboxShellExecutionRequest,
+  state: SandboxAbortRaceState
 ): Promise<SandboxExecutionResult> {
   const { code, envs } = req
   const signal = req.signal as AbortSignal
@@ -784,7 +881,13 @@ async function executeShellInSandboxWithinBudget(
   const sandbox = created.handle
   const sandboxId = sandbox.sandboxId
   const abortBinding = bindSandboxAbort(sandbox, created.provider, signal)
-  const usageEventId = await beginUsageOrStop(created, 'shell', req.usageContext, abortBinding)
+  const usageEventId = await admitSandboxUsage(
+    created,
+    'shell',
+    req.usageContext,
+    abortBinding,
+    state
+  )
   let outcome: SandboxUsageOutcome = 'infrastructure_error'
 
   try {
@@ -871,8 +974,8 @@ async function executeShellInSandboxWithinBudget(
 export function executeShellInSandbox(
   req: SandboxShellExecutionRequest
 ): Promise<SandboxExecutionResult> {
-  return withSandboxExecutionBudget(req.timeoutMs, req.signal, (signal) =>
-    executeShellInSandboxWithinBudget({ ...req, signal })
+  return withSandboxExecutionBudget(req.timeoutMs, req.signal, (signal, state) =>
+    executeShellInSandboxWithinBudget({ ...req, signal }, state)
   )
 }
 
