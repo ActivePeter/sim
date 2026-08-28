@@ -27,6 +27,7 @@ vi.mock('ioredis', () => ({
 import {
   acquireLock,
   closeRedisConnection,
+  describeRedisConnection,
   extendLock,
   getRedisClient,
   onRedisReconnect,
@@ -38,6 +39,8 @@ describe('redis config', () => {
     vi.clearAllMocks()
     vi.useFakeTimers()
     resetForTesting()
+    mockRedisInstance.status = 'ready'
+    Object.assign(mockRedisInstance, { offlineQueue: undefined })
     mockEnv.REDIS_URL = 'redis://localhost:6379'
     mockEnv.REDIS_TLS_SERVERNAME = undefined
     MockRedisConstructor.mockImplementation(
@@ -156,6 +159,76 @@ describe('redis config', () => {
 
       expect(badListener).toHaveBeenCalledTimes(1)
       expect(goodListener).toHaveBeenCalledTimes(1)
+    })
+  })
+
+  describe('describeRedisConnection', () => {
+    it('reports no client before one is built', () => {
+      const d = describeRedisConnection()
+
+      expect(d.status).toBe('no-client')
+      expect(d.clientAgeMs).toBeNull()
+      expect(d.readyAgeMs).toBeNull()
+      expect(d.connects).toBe(0)
+    })
+
+    it('separates a connecting client from a ready one', () => {
+      // The constructor copies the mock's fields, so each state has to be set
+      // before the client is built.
+      mockRedisInstance.status = 'connecting'
+      getRedisClient()
+      expect(describeRedisConnection().status).toBe('connecting')
+
+      resetForTesting()
+      mockRedisInstance.status = 'ready'
+      getRedisClient()
+      expect(describeRedisConnection().status).toBe('ready')
+    })
+
+    it('surfaces the offline queue depth that proves a command was waiting on the connection', () => {
+      Object.assign(mockRedisInstance, { offlineQueue: { length: 3 } })
+      getRedisClient()
+
+      expect(describeRedisConnection().queuedCommands).toBe(3)
+    })
+
+    it('counts lifecycle events so a reconnect is distinguishable from a first connect', async () => {
+      getRedisClient()
+      const handler = (event: string) =>
+        mockRedisInstance.on.mock.calls.find((c: unknown[]) => c[0] === event)?.[1] as
+          | (() => void)
+          | undefined
+
+      handler('connect')?.()
+      handler('ready')?.()
+      const afterConnect = describeRedisConnection()
+      expect(afterConnect.connects).toBe(1)
+      expect(afterConnect.readyAgeMs).not.toBeNull()
+
+      const errorHandler = mockRedisInstance.on.mock.calls.find(
+        (c: unknown[]) => c[0] === 'error'
+      )?.[1] as ((e: Error) => void) | undefined
+      errorHandler?.(new Error('ECONNRESET'))
+
+      const afterError = describeRedisConnection()
+      expect(afterError.errors).toBe(1)
+      expect(afterError.lastErrorMessage).toBe('ECONNRESET')
+    })
+
+    it('classifies the host without ever exposing the URL that carries the auth token', () => {
+      mockEnv.REDIS_URL = 'rediss://10.0.0.5:6379'
+      mockEnv.REDIS_TLS_SERVERNAME = 'primary.example.cache.amazonaws.com'
+
+      const d = describeRedisConnection()
+
+      expect(d).toMatchObject({ hostKind: 'ip', tls: true, sniOverride: true })
+      expect(JSON.stringify(d)).not.toContain('10.0.0.5')
+    })
+
+    it('reports a DNS host so resolution latency can be ruled in or out', () => {
+      mockEnv.REDIS_URL = 'rediss://primary.example.cache.amazonaws.com:6379'
+
+      expect(describeRedisConnection()).toMatchObject({ hostKind: 'dns', sniOverride: false })
     })
   })
 

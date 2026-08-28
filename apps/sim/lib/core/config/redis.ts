@@ -59,6 +59,13 @@ interface RedisState {
   pingInterval: NodeJS.Timeout | null
   pingInFlight: boolean
   reconnectListeners: Array<() => void>
+  clientCreatedAt: number | null
+  lastReadyAt: number | null
+  lastPingOkAt: number | null
+  connects: number
+  reconnects: number
+  errors: number
+  lastErrorMessage: string | null
 }
 
 const g = globalThis as typeof globalThis & { _redisState?: RedisState }
@@ -69,9 +76,103 @@ if (!g._redisState) {
     pingInterval: null,
     pingInFlight: false,
     reconnectListeners: [],
+    clientCreatedAt: null,
+    lastReadyAt: null,
+    lastPingOkAt: null,
+    connects: 0,
+    reconnects: 0,
+    errors: 0,
+    lastErrorMessage: null,
   }
 }
 const state = g._redisState
+
+/**
+ * A command that never gets a reply fails identically whichever of three states
+ * the client was in — still establishing its connection, reconnecting with the
+ * command parked in the offline queue, or holding a socket that has silently
+ * died. ioredis reports all three the same way: an `Error: Command timed out`
+ * whose stack contains only its own timer frames, with no app frame naming the
+ * call and no lifecycle event to say which happened.
+ *
+ * This snapshot is what separates them. `status` alone is usually decisive
+ * (`connecting`/`reconnecting`/`ready`), and `queuedCommands` confirms it: a
+ * command parked in the offline queue was waiting on connection setup, while a
+ * command written to a `ready` socket that never answered means the socket is
+ * dead in a way nothing reported.
+ */
+export interface RedisConnectionDiagnostics {
+  status: string
+  /** Age of the client object — distinguishes one created for this unit of work from an inherited one. */
+  clientAgeMs: number | null
+  /** Time since the connection last reached `ready`. */
+  readyAgeMs: number | null
+  /** Time since the last PING round-trip actually completed; the health check runs every 15s. */
+  msSinceLastPingOk: number | null
+  /** Depth of ioredis's offline queue — non-zero means commands are waiting on the connection. */
+  queuedCommands: number | null
+  connects: number
+  reconnects: number
+  errors: number
+  lastErrorMessage: string | null
+  /** Whether REDIS_URL targets an IP literal or a DNS name. Names DNS resolution in or out. */
+  hostKind: 'ip' | 'dns' | 'unknown'
+  tls: boolean
+  /** Whether the TLS SNI override is in play (set when the host is a bare IP). */
+  sniOverride: boolean
+}
+
+/** ioredis keeps no public accessor for its offline queue, but its depth is the tiebreaker above. */
+interface OfflineQueueView {
+  offlineQueue?: { length?: number }
+}
+
+function describeRedisUrl(
+  url: string | null
+): Pick<RedisConnectionDiagnostics, 'hostKind' | 'tls' | 'sniOverride'> {
+  if (!url) return { hostKind: 'unknown', tls: false, sniOverride: false }
+  try {
+    const parsed = new URL(url)
+    const isIp = /^\d{1,3}(\.\d{1,3}){3}$/.test(parsed.hostname)
+    const tls = parsed.protocol === 'rediss:'
+    return { hostKind: isIp ? 'ip' : 'dns', tls, sniOverride: tls && isIp }
+  } catch {
+    return { hostKind: 'unknown', tls: false, sniOverride: false }
+  }
+}
+
+/**
+ * Connection state at a point in time, safe to attach to any log line.
+ *
+ * Derives only non-sensitive facts from REDIS_URL — never the URL itself, which
+ * carries the AUTH token.
+ */
+export function describeRedisConnection(): RedisConnectionDiagnostics {
+  const now = Date.now()
+  let url: string | null = null
+  try {
+    url = getConfiguredRedisUrl()
+  } catch {
+    url = null
+  }
+
+  const client = state.client
+  // double-cast-allowed: ioredis omits offlineQueue from its public type, and its depth is what separates a command waiting on connection setup from one written to a live socket
+  const queued = (client as unknown as OfflineQueueView | null)?.offlineQueue?.length
+
+  return {
+    status: client?.status ?? 'no-client',
+    clientAgeMs: state.clientCreatedAt === null ? null : now - state.clientCreatedAt,
+    readyAgeMs: state.lastReadyAt === null ? null : now - state.lastReadyAt,
+    msSinceLastPingOk: state.lastPingOkAt === null ? null : now - state.lastPingOkAt,
+    queuedCommands: typeof queued === 'number' ? queued : null,
+    connects: state.connects,
+    reconnects: state.reconnects,
+    errors: state.errors,
+    lastErrorMessage: state.lastErrorMessage,
+    ...describeRedisUrl(url),
+  }
+}
 
 const PING_INTERVAL_MS = 15_000
 const MAX_PING_FAILURES = 2
@@ -103,6 +204,7 @@ function startPingHealthCheck(redis: Redis): void {
     try {
       await redis.ping()
       state.pingFailures = 0
+      state.lastPingOkAt = Date.now()
     } catch (error) {
       state.pingFailures++
       logger.warn('Redis PING failed', {
@@ -172,6 +274,7 @@ export function getRedisClient(): Redis | null {
         const base = Math.min(1000 * 2 ** (times - 1), 10000)
         const jitter = randomFloat() * base * 0.3
         const delay = Math.round(base + jitter)
+        state.reconnects++
         logger.warn('Redis reconnecting', { attempt: times, nextRetryMs: delay })
         return delay
       },
@@ -182,9 +285,30 @@ export function getRedisClient(): Redis | null {
       },
     })
 
-    state.client.on('connect', () => logger.info('Redis connected'))
-    state.client.on('ready', () => logger.info('Redis ready'))
+    state.clientCreatedAt = Date.now()
+    state.lastReadyAt = null
+    state.lastPingOkAt = null
+
+    state.client.on('connect', () => {
+      state.connects++
+      // Elapsed since construction, because the wait before a connection becomes
+      // usable is the number this path has never been able to produce: it is
+      // spent inside a command's deadline, where it surfaces as a command
+      // timeout rather than as connection latency.
+      logger.info('Redis connected', {
+        elapsedMs: state.clientCreatedAt === null ? null : Date.now() - state.clientCreatedAt,
+        attempt: state.connects,
+      })
+    })
+    state.client.on('ready', () => {
+      state.lastReadyAt = Date.now()
+      logger.info('Redis ready', {
+        elapsedMs: state.clientCreatedAt === null ? null : Date.now() - state.clientCreatedAt,
+      })
+    })
     state.client.on('error', (err: Error) => {
+      state.errors++
+      state.lastErrorMessage = err.message
       logger.error('Redis error', { error: err.message, code: (err as any).code })
     })
     state.client.on('close', () => logger.warn('Redis connection closed'))
@@ -355,4 +479,11 @@ export function resetForTesting(): void {
   state.pingFailures = 0
   state.pingInFlight = false
   state.reconnectListeners.length = 0
+  state.clientCreatedAt = null
+  state.lastReadyAt = null
+  state.lastPingOkAt = null
+  state.connects = 0
+  state.reconnects = 0
+  state.errors = 0
+  state.lastErrorMessage = null
 }

@@ -44,6 +44,28 @@ function getRedisConnectionDefaultsImpl(url?: string): {
 }
 
 /**
+ * Mirrors the real `describeRedisConnection` under its Redis-unavailable
+ * default: no client, no lifecycle history, and nothing derivable from an
+ * unset REDIS_URL.
+ */
+function describeRedisConnectionImpl() {
+  return {
+    status: 'no-client',
+    clientAgeMs: null,
+    readyAgeMs: null,
+    msSinceLastPingOk: null,
+    queuedCommands: null,
+    connects: 0,
+    reconnects: 0,
+    errors: 0,
+    lastErrorMessage: null,
+    hostKind: 'unknown' as const,
+    tls: false,
+    sniOverride: false,
+  }
+}
+
+/**
  * Controllable mock functions for `@/lib/core/config/redis`.
  * Default: `getConfiguredRedisUrl` and `getRedisClient` return `null` (tests
  * that need Redis override them), matching the real module's database-cache
@@ -69,6 +91,7 @@ export const redisConfigMockFns = {
   mockExtendLock: vi.fn().mockResolvedValue(true),
   mockCloseRedisConnection: vi.fn().mockResolvedValue(undefined),
   mockResetForTesting: vi.fn(),
+  mockDescribeRedisConnection: vi.fn(describeRedisConnectionImpl),
 }
 
 /**
@@ -86,6 +109,9 @@ export function resetRedisConfigMock(): void {
   redisConfigMockFns.mockExtendLock.mockReset().mockResolvedValue(true)
   redisConfigMockFns.mockCloseRedisConnection.mockReset().mockResolvedValue(undefined)
   redisConfigMockFns.mockResetForTesting.mockReset()
+  redisConfigMockFns.mockDescribeRedisConnection
+    .mockReset()
+    .mockImplementation(describeRedisConnectionImpl)
 }
 
 /**
@@ -107,4 +133,5 @@ export const redisConfigMock = {
   extendLock: redisConfigMockFns.mockExtendLock,
   closeRedisConnection: redisConfigMockFns.mockCloseRedisConnection,
   resetForTesting: redisConfigMockFns.mockResetForTesting,
+  describeRedisConnection: redisConfigMockFns.mockDescribeRedisConnection,
 }
