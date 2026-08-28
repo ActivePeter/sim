@@ -76,7 +76,8 @@ export function PlanNodeCard({ data, selected }: NodeProps<PlanNodeData>) {
       <Handle
         type='target'
         position={Position.Left}
-        className='!size-2 !border-2 !border-[var(--surface-2)] !bg-[var(--text-muted)]'
+        title='Drop a dependency here'
+        className='!size-3 !cursor-crosshair !border-2 !border-[var(--surface-2)] !bg-[var(--brand-secondary)]'
       />
 
       <div className='flex items-center justify-between gap-2 border-[var(--border)] border-b px-3 py-2'>
@@ -112,7 +113,8 @@ export function PlanNodeCard({ data, selected }: NodeProps<PlanNodeData>) {
       <Handle
         type='source'
         position={Position.Right}
-        className='!size-2 !border-2 !border-[var(--surface-2)] !bg-[var(--text-muted)]'
+        title='Drag to another node to add a dependency'
+        className='!size-3 !cursor-crosshair !border-2 !border-[var(--surface-2)] !bg-[var(--brand-secondary)]'
       />
     </article>
   )

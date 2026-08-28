@@ -78,7 +78,16 @@ export interface RoadmapDocument {
   items: PlanItem[]
   kind: Extract<CanvasDocumentKind, 'roadmap'>
   name: string
+  positions: Record<string, PlanPosition>
   revision: number
+}
+
+export interface RoadmapItemUpdate {
+  humanOwner?: string
+  issueNumber?: number
+  primaryPrNumber?: number
+  summary?: string
+  title?: string
 }
 
 export const DEMO_AGENTS = ['Codex 01', 'Codex 02', 'Claude 01'] as const
@@ -227,6 +236,7 @@ export function createDemoRoadmap(): RoadmapDocument {
     revision: 7,
     items: createDemoPlanItems(),
     dependencies: PLAN_DEPENDENCIES.map((dependency) => ({ ...dependency })),
+    positions: structuredClone(INITIAL_PLAN_POSITIONS),
   }
 }
 
@@ -248,6 +258,193 @@ export function createDemoPlanItems(): PlanItem[] {
     primaryPr: { ...item.primaryPr },
     execution: item.execution ? { ...item.execution } : undefined,
   }))
+}
+
+export function getNextRoadmapItemId(items: readonly PlanItem[]): string {
+  const nextNumber =
+    items.reduce((highest, item) => {
+      const match = /^PG-(\d+)$/.exec(item.id)
+      return match ? Math.max(highest, Number(match[1])) : highest
+    }, 0) + 1
+
+  return `PG-${String(nextNumber).padStart(2, '0')}`
+}
+
+export function addRoadmapItem(document: RoadmapDocument, itemId: string): RoadmapDocument {
+  if (document.items.some((item) => item.id === itemId)) return document
+
+  const wave = Math.max(0, ...document.items.map((item) => item.wave))
+  const itemsInWave = document.items.filter((item) => item.wave === wave).length
+  const issueNumber = Math.max(0, ...document.items.map((item) => item.issue.number)) + 1
+  const primaryPrNumber = Math.max(0, ...document.items.map((item) => item.primaryPr.number)) + 1
+  const item: PlanItem = {
+    id: itemId,
+    title: 'Untitled roadmap item',
+    summary: 'Describe the outcome this node must deliver before its dependents can proceed.',
+    kind: 'implementation',
+    wave,
+    lifecycle: 'planned',
+    humanOwner: 'Unassigned',
+    authorityScope: ['Define authority scope'],
+    expectedPaths: [],
+    issue: { number: issueNumber, state: 'Open' },
+    primaryPr: {
+      number: primaryPrNumber,
+      state: 'Pending',
+      checks: 'Pending',
+      review: 'Pending',
+    },
+  }
+
+  return {
+    ...document,
+    revision: document.revision + 1,
+    items: [...document.items, item],
+    positions: {
+      ...document.positions,
+      [itemId]: { x: 40 + wave * 330, y: 80 + itemsInWave * 250 },
+    },
+  }
+}
+
+export function updateRoadmapItem(
+  document: RoadmapDocument,
+  itemId: string,
+  update: RoadmapItemUpdate
+): RoadmapDocument {
+  const currentItem = document.items.find((item) => item.id === itemId)
+  if (!currentItem) return document
+
+  const nextItem: PlanItem = {
+    ...currentItem,
+    title: update.title ?? currentItem.title,
+    summary: update.summary ?? currentItem.summary,
+    humanOwner: update.humanOwner ?? currentItem.humanOwner,
+    issue:
+      update.issueNumber === undefined
+        ? currentItem.issue
+        : { ...currentItem.issue, number: update.issueNumber },
+    primaryPr:
+      update.primaryPrNumber === undefined
+        ? currentItem.primaryPr
+        : { ...currentItem.primaryPr, number: update.primaryPrNumber },
+  }
+
+  if (
+    nextItem.title === currentItem.title &&
+    nextItem.summary === currentItem.summary &&
+    nextItem.humanOwner === currentItem.humanOwner &&
+    nextItem.issue.number === currentItem.issue.number &&
+    nextItem.primaryPr.number === currentItem.primaryPr.number
+  ) {
+    return document
+  }
+
+  return {
+    ...document,
+    revision: document.revision + 1,
+    items: document.items.map((item) => (item.id === itemId ? nextItem : item)),
+  }
+}
+
+export function removeRoadmapItem(document: RoadmapDocument, itemId: string): RoadmapDocument {
+  if (!document.items.some((item) => item.id === itemId)) return document
+
+  const positions = { ...document.positions }
+  delete positions[itemId]
+
+  return {
+    ...document,
+    revision: document.revision + 1,
+    items: document.items.filter((item) => item.id !== itemId),
+    dependencies: document.dependencies.filter(
+      (dependency) => dependency.source !== itemId && dependency.target !== itemId
+    ),
+    positions,
+  }
+}
+
+export function wouldCreateRoadmapCycle(
+  dependencies: readonly PlanDependency[],
+  source: string,
+  target: string
+): boolean {
+  if (source === target) return true
+
+  const targetsBySource = new Map<string, string[]>()
+  for (const dependency of dependencies) {
+    const targets = targetsBySource.get(dependency.source) ?? []
+    targets.push(dependency.target)
+    targetsBySource.set(dependency.source, targets)
+  }
+
+  const pending = [target]
+  const visited = new Set<string>()
+  while (pending.length > 0) {
+    const current = pending.pop()
+    if (!current || visited.has(current)) continue
+    if (current === source) return true
+    visited.add(current)
+    pending.push(...(targetsBySource.get(current) ?? []))
+  }
+
+  return false
+}
+
+export function addRoadmapDependency(
+  document: RoadmapDocument,
+  dependency: PlanDependency
+): RoadmapDocument {
+  const itemIds = new Set(document.items.map((item) => item.id))
+  const duplicate = document.dependencies.some(
+    (candidate) => candidate.source === dependency.source && candidate.target === dependency.target
+  )
+  if (
+    !itemIds.has(dependency.source) ||
+    !itemIds.has(dependency.target) ||
+    duplicate ||
+    wouldCreateRoadmapCycle(document.dependencies, dependency.source, dependency.target)
+  ) {
+    return document
+  }
+
+  return {
+    ...document,
+    revision: document.revision + 1,
+    dependencies: [...document.dependencies, dependency],
+  }
+}
+
+export function updateRoadmapDependencyKind(
+  document: RoadmapDocument,
+  dependencyId: string,
+  kind: PlanDependencyKind
+): RoadmapDocument {
+  const dependency = document.dependencies.find((candidate) => candidate.id === dependencyId)
+  if (!dependency || dependency.kind === kind) return document
+
+  return {
+    ...document,
+    revision: document.revision + 1,
+    dependencies: document.dependencies.map((candidate) =>
+      candidate.id === dependencyId ? { ...candidate, kind } : candidate
+    ),
+  }
+}
+
+export function removeRoadmapDependency(
+  document: RoadmapDocument,
+  dependencyId: string
+): RoadmapDocument {
+  if (!document.dependencies.some((dependency) => dependency.id === dependencyId)) {
+    return document
+  }
+
+  return {
+    ...document,
+    revision: document.revision + 1,
+    dependencies: document.dependencies.filter((dependency) => dependency.id !== dependencyId),
+  }
 }
 
 export function getBlockingItemIds(

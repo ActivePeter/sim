@@ -14,14 +14,23 @@ import {
   PlanSidebar,
 } from '@/app/plan-graph-demo/components'
 import {
+  addRoadmapDependency,
+  addRoadmapItem,
   advancePlanItem,
   createDemoRoadmap,
   DEMO_AGENTS,
   getMergeBlockingItemIds,
   getNextReadyItem,
+  getNextRoadmapItemId,
   getPlanCounts,
+  type PlanDependencyKind,
+  type RoadmapItemUpdate,
+  removeRoadmapDependency,
+  removeRoadmapItem,
   resolvePlanItems,
   resolvePlanLifecycle,
+  updateRoadmapDependencyKind,
+  updateRoadmapItem,
 } from '@/app/plan-graph-demo/plan-graph-model'
 
 const INITIAL_ACTIVITIES: readonly PlanActivity[] = [
@@ -68,6 +77,97 @@ export function RoadmapDemo() {
       .filter((agent): agent is string => Boolean(agent))
   )
   const availableAgent = DEMO_AGENTS.find((agent) => !activeAgents.has(agent))
+
+  const handleAddItem = useCallback(() => {
+    const itemId = getNextRoadmapItemId(items)
+    setRoadmap((current) => addRoadmapItem(current, itemId))
+    setSelectedItemId(itemId)
+    setActivities((current) =>
+      [
+        {
+          id: generateShortId(),
+          title: `${itemId} added to the roadmap`,
+          detail:
+            'Edit its bindings in the inspector, then drag a connector to define a dependency.',
+          kind: 'plan' as const,
+          time: 'Now',
+        },
+        ...current,
+      ].slice(0, 8)
+    )
+  }, [items])
+
+  const handleUpdateItem = useCallback((itemId: string, update: RoadmapItemUpdate) => {
+    setRoadmap((current) => updateRoadmapItem(current, itemId, update))
+  }, [])
+
+  const handleRemoveItem = useCallback(
+    (itemId: string) => {
+      if (items.length <= 1) return
+      const nextSelectedItemId = items.find((item) => item.id !== itemId)?.id
+      setRoadmap((current) => removeRoadmapItem(current, itemId))
+      if (selectedItemId === itemId && nextSelectedItemId) {
+        setSelectedItemId(nextSelectedItemId)
+      }
+      setActivities((current) =>
+        [
+          {
+            id: generateShortId(),
+            title: `${itemId} removed`,
+            detail: 'Its position and connected dependency edges were removed atomically.',
+            kind: 'plan' as const,
+            time: 'Now',
+          },
+          ...current,
+        ].slice(0, 8)
+      )
+    },
+    [items, selectedItemId]
+  )
+
+  const handleConnectItems = useCallback(
+    (sourceId: string, targetId: string) => {
+      const dependency = {
+        id: `edge-${generateShortId()}`,
+        source: sourceId,
+        target: targetId,
+        kind: 'requires' as const,
+      }
+      const nextRoadmap = addRoadmapDependency(roadmap, dependency)
+      const accepted = nextRoadmap !== roadmap
+      if (accepted) setRoadmap(nextRoadmap)
+      setActivities((current) =>
+        [
+          {
+            id: generateShortId(),
+            title: accepted ? `${sourceId} → ${targetId} connected` : 'Dependency rejected',
+            detail: accepted
+              ? 'A requires edge was added. Select the target node to change its policy.'
+              : 'Roadmaps reject duplicate, self-referential, and cyclic dependencies.',
+            kind: 'plan' as const,
+            time: 'Now',
+          },
+          ...current,
+        ].slice(0, 8)
+      )
+    },
+    [roadmap]
+  )
+
+  const handleUpdateDependencyKind = useCallback(
+    (dependencyId: string, kind: PlanDependencyKind) => {
+      setRoadmap((current) => updateRoadmapDependencyKind(current, dependencyId, kind))
+    },
+    []
+  )
+
+  const handleRemoveDependency = useCallback((dependencyId: string) => {
+    setRoadmap((current) => removeRoadmapDependency(current, dependencyId))
+  }, [])
+
+  const handlePositionsChange = useCallback((positions: typeof roadmap.positions) => {
+    setRoadmap((current) => ({ ...current, positions }))
+  }, [])
 
   const advanceItem = useCallback(
     (itemId: string) => {
@@ -158,6 +258,7 @@ export function RoadmapDemo() {
         availableAgent={availableAgent}
         counts={counts}
         name={roadmap.name}
+        onAddNode={handleAddItem}
         onClaimNext={handleClaimNext}
         onReset={handleReset}
         revision={roadmap.revision}
@@ -174,6 +275,11 @@ export function RoadmapDemo() {
             item={selectedItem}
             items={resolvedItems}
             onAdvance={() => advanceItem(selectedItem.id)}
+            onRemoveDependency={handleRemoveDependency}
+            onRemoveItem={() => handleRemoveItem(selectedItem.id)}
+            onUpdateDependencyKind={handleUpdateDependencyKind}
+            onUpdateItem={(update) => handleUpdateItem(selectedItem.id, update)}
+            canRemoveItem={items.length > 1}
           />
         }
       >
@@ -195,7 +301,7 @@ export function RoadmapDemo() {
               </span>
             </div>
             <Badge variant='gray-secondary' size='sm'>
-              Drag nodes · pan · zoom · select
+              Drag nodes · connect right handle to left handle · edit in inspector
             </Badge>
           </div>
 
@@ -205,9 +311,12 @@ export function RoadmapDemo() {
                 key={canvasRevision}
                 dependencies={roadmap.dependencies}
                 items={items}
+                onConnectItems={handleConnectItems}
+                onPositionsChange={handlePositionsChange}
                 resolvedItems={resolvedItems}
                 selectedItemId={selectedItemId}
                 onSelectItem={setSelectedItemId}
+                positions={roadmap.positions}
               />
             </ReactFlowProvider>
           </div>

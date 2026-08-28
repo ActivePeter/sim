@@ -1,11 +1,12 @@
 import { Badge, Chip, ChipLink } from '@sim/emcn'
-import { Play, RefreshCw, SquareArrowUpRight, Workflow } from '@sim/emcn/icons'
+import { Play, Plus, RefreshCw, SquareArrowUpRight, Workflow } from '@sim/emcn/icons'
 import type { PlanCounts } from '@/app/plan-graph-demo/plan-graph-model'
 
 interface PlanHeaderProps {
   availableAgent?: string
   counts: PlanCounts
   name: string
+  onAddNode: () => void
   onClaimNext: () => void
   onReset: () => void
   revision: number
@@ -15,6 +16,7 @@ export function PlanHeader({
   availableAgent,
   counts,
   name,
+  onAddNode,
   onClaimNext,
   onReset,
   revision,
@@ -60,6 +62,9 @@ export function PlanHeader({
         >
           Epic #1
         </ChipLink>
+        <Chip leftIcon={Plus} onClick={onAddNode}>
+          Add node
+        </Chip>
         <Chip leftIcon={RefreshCw} onClick={onReset}>
           Reset
         </Chip>

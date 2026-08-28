@@ -1,14 +1,21 @@
 import { describe, expect, it } from 'vitest'
 import {
+  addRoadmapDependency,
+  addRoadmapItem,
   advancePlanItem,
   createDemoPlanItems,
   createDemoRoadmap,
   getBlockingItemIds,
   getMergeBlockingItemIds,
   getNextReadyItem,
+  getNextRoadmapItemId,
   type PlanDependency,
   type PlanItem,
+  removeRoadmapDependency,
+  removeRoadmapItem,
   resolvePlanItems,
+  updateRoadmapDependencyKind,
+  updateRoadmapItem,
 } from '@/app/plan-graph-demo/plan-graph-model'
 
 describe('plan graph demo model', () => {
@@ -24,6 +31,64 @@ describe('plan graph demo model', () => {
     })
     expect(roadmap.items).not.toBe(secondRoadmap.items)
     expect(roadmap.dependencies).not.toBe(secondRoadmap.dependencies)
+    expect(roadmap.positions).not.toBe(secondRoadmap.positions)
+  })
+
+  it('adds and edits a roadmap node with artifact bindings', () => {
+    const roadmap = createDemoRoadmap()
+    const itemId = getNextRoadmapItemId(roadmap.items)
+    const withItem = addRoadmapItem(roadmap, itemId)
+    const updated = updateRoadmapItem(withItem, itemId, {
+      title: 'Editable roadmap node',
+      issueNumber: 42,
+      primaryPrNumber: 84,
+    })
+
+    expect(itemId).toBe('PG-07')
+    expect(updated.items.find((item) => item.id === itemId)).toMatchObject({
+      title: 'Editable roadmap node',
+      issue: { number: 42 },
+      primaryPr: { number: 84 },
+    })
+    expect(updated.positions[itemId]).toBeDefined()
+  })
+
+  it('adds editable dependencies while preserving the DAG invariant', () => {
+    const roadmap = createDemoRoadmap()
+    const dependency: PlanDependency = {
+      id: 'edge-new',
+      source: 'PG-05',
+      target: 'PG-04',
+      kind: 'requires',
+    }
+    const withDependency = addRoadmapDependency(roadmap, dependency)
+    const changedKind = updateRoadmapDependencyKind(withDependency, dependency.id, 'integrate-with')
+    const cyclic = addRoadmapDependency(changedKind, {
+      id: 'edge-cycle',
+      source: 'PG-05',
+      target: 'PG-01',
+      kind: 'requires',
+    })
+    const removed = removeRoadmapDependency(changedKind, dependency.id)
+
+    expect(changedKind.dependencies.find((candidate) => candidate.id === dependency.id)?.kind).toBe(
+      'integrate-with'
+    )
+    expect(cyclic).toBe(changedKind)
+    expect(removed.dependencies.some((candidate) => candidate.id === dependency.id)).toBe(false)
+  })
+
+  it('removes a roadmap node together with its position and dependencies', () => {
+    const roadmap = createDemoRoadmap()
+    const next = removeRoadmapItem(roadmap, 'PG-02')
+
+    expect(next.items.some((item) => item.id === 'PG-02')).toBe(false)
+    expect(next.positions['PG-02']).toBeUndefined()
+    expect(
+      next.dependencies.some(
+        (dependency) => dependency.source === 'PG-02' || dependency.target === 'PG-02'
+      )
+    ).toBe(false)
   })
 
   it('derives ready and blocked states from completed prerequisites', () => {

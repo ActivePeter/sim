@@ -156,8 +156,8 @@ export function PlanSidebar({ counts, items }: PlanSidebarProps) {
             Human authority
           </div>
           <p className='text-[var(--text-muted)] text-xs leading-5'>
-            Peter owns graph revision 7. Agents may execute Ready nodes, but cannot rewrite
-            dependencies.
+            Humans own graph revisions and dependency policy. Agents claim and execute Ready nodes
+            within those constraints.
           </p>
         </section>
       </div>

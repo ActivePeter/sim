@@ -2,6 +2,7 @@
 
 import { useCallback, useMemo, useState } from 'react'
 import {
+  type Connection,
   type Edge,
   type EdgeTypes,
   MarkerType,
@@ -15,7 +16,6 @@ import { CanvasControls } from '@/app/plan-graph-demo/components/canvas-controls
 import { PlanEdge, type PlanEdgeData } from '@/app/plan-graph-demo/components/plan-edge'
 import { PlanNodeCard, type PlanNodeData } from '@/app/plan-graph-demo/components/plan-node-card'
 import {
-  INITIAL_PLAN_POSITIONS,
   isDependencySatisfied,
   type PlanDependency,
   type PlanItem,
@@ -29,21 +29,24 @@ const EDGE_TYPES: EdgeTypes = { planEdge: PlanEdge }
 interface PlanCanvasProps {
   dependencies: readonly PlanDependency[]
   items: readonly PlanItem[]
+  onConnectItems: (sourceId: string, targetId: string) => void
+  onPositionsChange: (positions: Record<string, PlanPosition>) => void
+  onSelectItem: (itemId: string) => void
+  positions: Readonly<Record<string, PlanPosition>>
   resolvedItems: readonly ResolvedPlanItem[]
   selectedItemId: string
-  onSelectItem: (itemId: string) => void
 }
 
 export function PlanCanvas({
   dependencies,
   items,
+  onConnectItems,
+  onPositionsChange,
+  onSelectItem,
+  positions,
   resolvedItems,
   selectedItemId,
-  onSelectItem,
 }: PlanCanvasProps) {
-  const [positions, setPositions] = useState<Record<string, PlanPosition>>({
-    ...INITIAL_PLAN_POSITIONS,
-  })
   const [canvasMode, setCanvasMode] = useState<CanvasInteractionMode>('hand')
   const nodes = useMemo<Node<PlanNodeData>[]>(
     () =>
@@ -74,22 +77,31 @@ export function PlanCanvas({
     [dependencies, items]
   )
 
-  const handleNodesChange = useCallback((changes: NodeChange[]) => {
-    const positionChanges = changes.filter(
-      (change) => change.type === 'position' && change.position
-    )
-    if (positionChanges.length === 0) return
+  const handleNodesChange = useCallback(
+    (changes: NodeChange[]) => {
+      const positionChanges = changes.filter(
+        (change) => change.type === 'position' && change.position
+      )
+      if (positionChanges.length === 0) return
 
-    setPositions((current) => {
-      const next = { ...current }
+      const next = { ...positions }
       for (const change of positionChanges) {
         if (change.type === 'position' && change.position) {
           next[change.id] = change.position
         }
       }
-      return next
-    })
-  }, [])
+      onPositionsChange(next)
+    },
+    [onPositionsChange, positions]
+  )
+
+  const handleConnect = useCallback(
+    (connection: Connection) => {
+      if (!connection.source || !connection.target) return
+      onConnectItems(connection.source, connection.target)
+    },
+    [onConnectItems]
+  )
 
   return (
     <div className='relative h-full min-h-0 w-full'>
@@ -100,6 +112,7 @@ export function PlanCanvas({
         nodeTypes={NODE_TYPES}
         edgeTypes={EDGE_TYPES}
         onNodesChange={handleNodesChange}
+        onConnect={handleConnect}
         onNodeClick={(_event, node) => onSelectItem(node.id)}
         fitView
         fitViewOptions={{ padding: 0.18, maxZoom: 1 }}
@@ -110,7 +123,7 @@ export function PlanCanvas({
         selectionOnDrag={canvasMode === 'cursor'}
         selectionMode={SelectionMode.Partial}
         selectionKeyCode={canvasMode === 'cursor' ? 'Shift' : null}
-        nodesConnectable={false}
+        nodesConnectable
         elementsSelectable
         nodesDraggable
         edgesFocusable={false}
