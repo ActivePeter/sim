@@ -1741,8 +1741,9 @@ export class ExecutionLogger implements IExecutionLoggerService {
             // display total contains Mothership cost owned by Go update-cost.
             const ledgerSum =
               [...alreadyBilled.values()].reduce((acc, v) => acc + v, 0) + recordedIncrement
-            const displayedCostTotal =
-              externallyLedgeredModelCost > 0 ? costSummary.totalCost : ledgerSum
+            const displayedCostTotal = Number.parseFloat(
+              (ledgerSum + externallyLedgeredModelCost).toFixed(8)
+            )
             await tx
               .update(workflowExecutionLogs)
               .set({ costTotal: displayedCostTotal.toString() })

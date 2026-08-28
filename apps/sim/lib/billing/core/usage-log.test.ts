@@ -86,7 +86,7 @@ describe('recordUsage', () => {
   })
 
   it('commits canonical usage rows with deterministic event keys and billing scope', async () => {
-    await recordUsage({
+    const insertedCost = await recordUsage({
       userId: 'external-actor',
       workspaceId: 'workspace-1',
       billingEntity: { type: 'organization', id: 'workspace-org' },
@@ -124,7 +124,32 @@ describe('recordUsage', () => {
     expect(mockOnConflictDoNothing.mock.calls[0][0]).toMatchObject({
       target: usageLog.eventKey,
     })
+    expect(insertedCost).toBeCloseTo(0.3, 8)
     expect(mockGetHighestPrioritySubscription).not.toHaveBeenCalled()
+  })
+
+  it('returns zero when idempotency skips a duplicate event', async () => {
+    mockReturning.mockResolvedValueOnce([])
+
+    const insertedCost = await recordUsage({
+      userId: 'user-1',
+      billingEntity: { type: 'user', id: 'user-1' },
+      billingPeriod: {
+        start: new Date('2026-05-01T00:00:00.000Z'),
+        end: new Date('2026-06-01T00:00:00.000Z'),
+      },
+      entries: [
+        {
+          category: 'tool',
+          source: 'workflow',
+          description: 'Code sandbox',
+          cost: 0.1,
+          eventKey: 'sandbox-event',
+        },
+      ],
+    })
+
+    expect(insertedCost).toBe(0)
   })
 
   it('uses pre-resolved billing context without loading subscriptions', async () => {

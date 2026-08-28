@@ -686,6 +686,7 @@ async function executeInSandboxWithinBudget(
       throw error
     }
     throwIfAborted(signal)
+    if (execution.timedOut) outcome = 'timeout'
     throwIfSandboxTimedOut(execution)
 
     if (execution.error) {
@@ -822,6 +823,7 @@ async function executeShellInSandboxWithinBudget(
       throw error
     }
     throwIfAborted(signal)
+    if (result.timedOut) outcome = 'timeout'
     throwIfSandboxTimedOut(result)
 
     const stdout = [result.stdout, result.stderr].filter(Boolean).join('\n')

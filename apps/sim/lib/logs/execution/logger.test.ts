@@ -1081,7 +1081,7 @@ describe('recordExecutionUsage boundary-delta reconciliation', () => {
     expect(dbChainMockFns.update).toHaveBeenCalledTimes(1)
   })
 
-  test('leaves Mothership model spend to cumulative update-cost while ledgering ordinary models', async () => {
+  test('preserves workflow infrastructure charges alongside externally ledgered Mothership spend', async () => {
     const setCostTotalMock = vi.fn(() => ({ where: () => Promise.resolve() }))
     dbChainMockFns.update.mockReturnValueOnce({ set: setCostTotalMock })
 
@@ -1111,7 +1111,7 @@ describe('recordExecutionUsage boundary-delta reconciliation', () => {
           },
         },
       }),
-      []
+      [{ category: 'tool', description: 'Code sandbox', cost: '0.2' }]
     )
 
     expect(lastEntries()).toEqual([
@@ -1122,7 +1122,7 @@ describe('recordExecutionUsage boundary-delta reconciliation', () => {
       expect.objectContaining({ category: 'model', description: 'mothership' })
     )
     expect(recorded).toBeCloseTo(1.005, 8)
-    expect(setCostTotalMock).toHaveBeenCalledWith({ costTotal: '1.505' })
+    expect(setCostTotalMock).toHaveBeenCalledWith({ costTotal: '1.705' })
   })
 
   test('resume records only the increment over what is already billed', async () => {

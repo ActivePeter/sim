@@ -381,7 +381,7 @@ export async function getStampedPeriodRangeUsageCostByUser(
  * as the pre-cutover period baseline and for low-frequency billing trackers,
  * but usage writes no longer contend on the user_stats row.
  */
-export async function recordUsage(params: RecordUsageParams): Promise<void> {
+export async function recordUsage(params: RecordUsageParams): Promise<number> {
   // The usage ledger is written regardless of BILLING_ENABLED so it is the
   // single, universal source of truth for cost (including self-hosted, where
   // it powers the logs-page cost display). Billing *enforcement* (Stripe /
@@ -400,7 +400,7 @@ export async function recordUsage(params: RecordUsageParams): Promise<void> {
   const validEntries = entries.filter((e) => e.cost > 0)
 
   if (validEntries.length === 0) {
-    return
+    return 0
   }
 
   if (workspaceId && (!billingEntity || !billingPeriod)) {
@@ -473,6 +473,8 @@ export async function recordUsage(params: RecordUsageParams): Promise<void> {
     entryCount: validEntries.length,
     sources: [...new Set(validEntries.map((e) => e.source))],
   })
+
+  return insertedCost
 }
 
 /**

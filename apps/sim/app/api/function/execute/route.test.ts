@@ -15,6 +15,11 @@ import {
 } from '@sim/testing'
 import { NextRequest } from 'next/server'
 import { afterAll, beforeEach, describe, expect, it, vi } from 'vitest'
+import {
+  BILLING_ATTRIBUTION_HEADER,
+  type BillingAttributionSnapshot,
+  serializeBillingAttributionHeader,
+} from '@/lib/billing/core/billing-attribution'
 import { INTERNAL_EXECUTION_DEADLINE_HEADER } from '@/lib/execution/execution-deadline-header'
 import {
   MOUNTED_WORKSPACE_FILES_PROVENANCE_KEY,
@@ -37,6 +42,22 @@ function grantedAccess(workspaceId: string) {
     workspace: { id: workspaceId },
     permission: 'admin',
   }
+}
+
+function billingAttributionHeaders(workspaceId = 'workspace-1'): Record<string, string> {
+  const attribution: BillingAttributionSnapshot = {
+    actorUserId: 'user-123',
+    workspaceId,
+    organizationId: null,
+    billedAccountUserId: 'user-123',
+    billingEntity: { type: 'user', id: 'user-123' },
+    billingPeriod: {
+      start: '2026-08-01T00:00:00.000Z',
+      end: '2026-09-01T00:00:00.000Z',
+    },
+    payerSubscription: null,
+  }
+  return { [BILLING_ATTRIBUTION_HEADER]: serializeBillingAttributionHeader(attribution) }
 }
 
 const {
@@ -318,26 +339,8 @@ describe('Function Execute API Route', () => {
       expect(mockWriteWorkspaceFileByPath).not.toHaveBeenCalled()
     })
 
-    it('rejects an export whose workspace is derived from a body-supplied workflowId', async () => {
+    it('fails closed before deriving an export workspace from incomplete workflow context', async () => {
       envFlagsMock.isRemoteSandboxEnabled = true
-      mockExecuteInSandbox.mockResolvedValueOnce({
-        result: 'done',
-        stdout: 'ok',
-        sandboxId: 'sandbox-123',
-        exportedFiles: { '/tmp/out.txt': 'owned by attacker' },
-      })
-      workflowsUtilsMock.getWorkflowById.mockResolvedValueOnce({
-        id: 'workflow-victim',
-        workspaceId: 'workspace-victim',
-      })
-      mockResolveWorkspaceAccess.mockResolvedValue({
-        exists: true,
-        hasAccess: false,
-        canWrite: false,
-        canAdmin: false,
-        workspace: { id: 'workspace-victim' },
-        permission: null,
-      })
 
       const req = createMockRequest('POST', {
         code: 'print("done")',
@@ -350,7 +353,12 @@ describe('Function Execute API Route', () => {
 
       const response = await POST(req)
 
-      expect(response.status).toBe(403)
+      expect(response.status).toBe(503)
+      await expect(response.json()).resolves.toMatchObject({
+        retryable: false,
+        code: 'sandbox_usage_attribution_invalid',
+      })
+      expect(mockExecuteInSandbox).not.toHaveBeenCalled()
       expect(mockWriteWorkspaceFileByPath).not.toHaveBeenCalled()
     })
 
@@ -535,6 +543,85 @@ describe('Function Execute API Route', () => {
       })
       expect(mockExecuteInSandbox).not.toHaveBeenCalled()
       expect(mockExecuteInIsolatedVM).not.toHaveBeenCalled()
+    })
+
+    it.each([
+      {
+        label: 'execution ID',
+        body: { workflowId: 'workflow-1', workspaceId: 'workspace-1' },
+      },
+      {
+        label: 'trusted billing attribution',
+        body: {
+          workflowId: 'workflow-1',
+          workspaceId: 'workspace-1',
+          executionId: 'execution-1',
+        },
+      },
+    ])(
+      'fails before remote sandbox creation when workflow usage lacks $label',
+      async ({ body }) => {
+        envFlagsMock.isRemoteSandboxEnabled = true
+
+        const response = await POST(
+          createMockRequest('POST', { code: 'print("ready")', language: 'python', ...body })
+        )
+
+        expect(response.status).toBe(503)
+        await expect(response.json()).resolves.toMatchObject({
+          success: false,
+          retryable: false,
+          code: 'sandbox_usage_attribution_invalid',
+        })
+        expect(mockExecuteInSandbox).not.toHaveBeenCalled()
+      }
+    )
+
+    it('passes complete trusted workflow attribution to remote sandbox billing', async () => {
+      envFlagsMock.isRemoteSandboxEnabled = true
+
+      const response = await POST(
+        createMockRequest(
+          'POST',
+          {
+            code: 'print("ready")',
+            language: 'python',
+            workflowId: 'workflow-1',
+            workspaceId: 'workspace-1',
+            executionId: 'execution-1',
+          },
+          billingAttributionHeaders()
+        )
+      )
+
+      expect(response.status).toBe(200)
+      expect(mockExecuteInSandbox).toHaveBeenCalledWith(
+        expect.objectContaining({
+          usageContext: expect.objectContaining({
+            workspaceId: 'workspace-1',
+            workflowId: 'workflow-1',
+            executionId: 'execution-1',
+            billingAttribution: expect.objectContaining({ actorUserId: 'user-123' }),
+          }),
+        })
+      )
+    })
+
+    it('allows a non-workflow remote call without sandbox usage attribution', async () => {
+      envFlagsMock.isRemoteSandboxEnabled = true
+
+      const response = await POST(
+        createMockRequest('POST', {
+          code: 'print("ready")',
+          language: 'python',
+          workspaceId: 'workspace-1',
+        })
+      )
+
+      expect(response.status).toBe(200)
+      expect(mockExecuteInSandbox).toHaveBeenCalledWith(
+        expect.objectContaining({ usageContext: undefined })
+      )
     })
 
     it('forces import-free JavaScript into the remote runtime when a Sim sandbox is selected', async () => {

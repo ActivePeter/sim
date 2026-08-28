@@ -45,7 +45,9 @@ import {
 } from '@/lib/execution/mounted-file-secret-provenance'
 import {
   isSandboxLaunchIndeterminateError,
+  isSandboxUsageAttributionError,
   isSandboxUsagePersistenceError,
+  SandboxUsageAttributionError,
 } from '@/lib/execution/non-retryable-error'
 import { recordMaterializedAccessKeys } from '@/lib/execution/payloads/access-keys'
 import {
@@ -1965,18 +1967,25 @@ export async function executeFunctionRequest(
 
     let sandboxUsageContext: SandboxUsageContext | undefined
     const getSandboxUsageContext = (): SandboxUsageContext | undefined => {
-      if (usesMothershipSandbox || isCustomTool || !workspaceId || !workflowId || !executionId) {
+      if (usesMothershipSandbox || isCustomTool || !workflowId) {
         return undefined
       }
+      if (!workspaceId || !executionId) {
+        throw new SandboxUsageAttributionError()
+      }
       if (!sandboxUsageContext) {
-        sandboxUsageContext = {
-          workspaceId,
-          workflowId,
-          executionId,
-          billingAttribution: requireBillingAttributionHeader(req.headers, {
-            actorUserId: auth.userId,
+        try {
+          sandboxUsageContext = {
             workspaceId,
-          }),
+            workflowId,
+            executionId,
+            billingAttribution: requireBillingAttributionHeader(req.headers, {
+              actorUserId: auth.userId,
+              workspaceId,
+            }),
+          }
+        } catch (error) {
+          throw new SandboxUsageAttributionError({ cause: error })
         }
       }
       return sandboxUsageContext
@@ -2796,6 +2805,23 @@ export async function executeFunctionRequest(
         ? functionJsonResponse(persistenceResponse, routeContext, { status: 503 })
         : appendPrivateResolvedSecretNames(
             NextResponse.json(persistenceResponse, { status: 503 }),
+            includePrivateResolvedSecretNames ? [] : null,
+            privateResolvedSecretNamesMetadataType
+          )
+    }
+
+    if (isSandboxUsageAttributionError(error)) {
+      const attributionResponse = {
+        success: false,
+        error: getErrorMessage(error),
+        retryable: false,
+        code: 'sandbox_usage_attribution_invalid',
+        output: { result: null, stdout: cleanStdout(stdout), executionTime },
+      }
+      return routeContext
+        ? functionJsonResponse(attributionResponse, routeContext, { status: 503 })
+        : appendPrivateResolvedSecretNames(
+            NextResponse.json(attributionResponse, { status: 503 }),
             includePrivateResolvedSecretNames ? [] : null,
             privateResolvedSecretNamesMetadataType
           )

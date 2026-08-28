@@ -39,6 +39,19 @@ export class SandboxUsagePersistenceError extends NonRetryableExecutionError {
   }
 }
 
+/** A workflow sandbox request lacks the trusted context required for durable billing. */
+export class SandboxUsageAttributionError extends NonRetryableExecutionError {
+  readonly code = 'sandbox_usage_attribution_invalid' as const
+
+  constructor(options?: ErrorOptions) {
+    super(
+      'Sim could not establish trusted billing attribution for this Function sandbox. The sandbox was not created.',
+      options
+    )
+    this.name = 'SandboxUsageAttributionError'
+  }
+}
+
 export function isNonRetryableExecutionError(error: unknown): boolean {
   return Boolean(
     findCause(error, (cause): cause is NonRetryableExecutionError => {
@@ -63,4 +76,10 @@ export function isSandboxUsagePersistenceError(
   error: unknown
 ): error is SandboxUsagePersistenceError {
   return Boolean(findCause(error, (cause) => cause instanceof SandboxUsagePersistenceError))
+}
+
+export function isSandboxUsageAttributionError(
+  error: unknown
+): error is SandboxUsageAttributionError {
+  return Boolean(findCause(error, (cause) => cause instanceof SandboxUsageAttributionError))
 }

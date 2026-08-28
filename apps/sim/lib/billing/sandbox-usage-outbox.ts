@@ -277,7 +277,7 @@ async function finalizeSandboxUsage(
 
   await db.transaction(async (tx) => {
     await tx.execute(sql`select pg_advisory_xact_lock(hashtextextended(${payload.executionId}, 0))`)
-    await recordUsage({
+    const insertedCost = await recordUsage({
       userId: payload.billingAttribution.actorUserId,
       entries: [
         {
@@ -323,7 +323,7 @@ async function finalizeSandboxUsage(
     await tx
       .update(workflowExecutionLogs)
       .set({
-        costTotal: sql`GREATEST(COALESCE(${workflowExecutionLogs.costTotal}, 0), ${ledgerCost})`,
+        costTotal: sql`GREATEST(COALESCE(${workflowExecutionLogs.costTotal}, 0) + ${insertedCost.toString()}::numeric, ${ledgerCost}::numeric)`,
       })
       .where(eq(workflowExecutionLogs.executionId, payload.executionId))
   })

@@ -81,6 +81,20 @@ async function runHandler(value: SandboxUsageOutboxPayloadV1): Promise<void> {
   await sandboxUsageOutboxHandlers[SANDBOX_USAGE_OUTBOX_EVENT_TYPE](value, context)
 }
 
+function costTotalUpdate(index: number): { text: string; params: unknown[] } {
+  const updates = dbChainMockFns.set.mock.calls
+    .map(([value]) => value)
+    .filter(
+      (value): value is { costTotal: { strings: string[]; values: unknown[] } } =>
+        typeof value === 'object' && value !== null && 'costTotal' in value
+    )
+  const update = updates[index].costTotal
+  return {
+    text: update.strings.join(''),
+    params: update.values.filter((value) => typeof value === 'string' || typeof value === 'number'),
+  }
+}
+
 afterAll(resetDbChainMock)
 
 describe('sandbox usage outbox finalizer', () => {
@@ -88,7 +102,7 @@ describe('sandbox usage outbox finalizer', () => {
     vi.clearAllMocks()
     resetDbChainMock()
     queueTableRows(usageLog, [{ cost: '0.02' }])
-    mockRecordUsage.mockResolvedValue(undefined)
+    mockRecordUsage.mockResolvedValue(0.00046)
     mockTerminateById.mockResolvedValue('terminated')
   })
 
@@ -114,6 +128,10 @@ describe('sandbox usage outbox finalizer', () => {
     )
     expect(dbChainMockFns.execute).toHaveBeenCalledOnce()
     expect(dbChainMockFns.update).toHaveBeenCalled()
+    expect(costTotalUpdate(0)).toEqual({
+      text: 'GREATEST(COALESCE(, 0) + ::numeric, ::numeric)',
+      params: ['workflowExecutionLogs.costTotal', '0.00046', '0.02'],
+    })
   })
 
   it('terminates and checkpoints a sandbox whose terminal timestamp is missing', async () => {
@@ -143,11 +161,20 @@ describe('sandbox usage outbox finalizer', () => {
   })
 
   it('uses the same ledger event key when finalization is replayed', async () => {
+    mockRecordUsage.mockResolvedValueOnce(0.00046).mockResolvedValueOnce(0)
+    queueTableRows(usageLog, [{ cost: '0.02' }])
+
     await runHandler(payload())
     await runHandler(payload())
 
     const firstEventKey = mockRecordUsage.mock.calls[0][0].entries[0].eventKey
     const secondEventKey = mockRecordUsage.mock.calls[1][0].entries[0].eventKey
     expect(firstEventKey).toBe(secondEventKey)
+    expect(costTotalUpdate(0).params).toEqual([
+      'workflowExecutionLogs.costTotal',
+      '0.00046',
+      '0.02',
+    ])
+    expect(costTotalUpdate(1).params).toEqual(['workflowExecutionLogs.costTotal', '0', '0.02'])
   })
 })

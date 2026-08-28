@@ -650,8 +650,17 @@ describe.each(PROVIDERS)('sandbox conformance [%s]', (provider) => {
     }
 
     await expect(
-      executeInSandbox({ code: 'sleep()', language: CodeLanguage.Python, timeoutMs: 1000 })
+      executeInSandbox({
+        code: 'sleep()',
+        language: CodeLanguage.Python,
+        timeoutMs: 1000,
+        usageContext,
+      })
     ).rejects.toMatchObject({ name: 'AbortError', message: 'timeout' })
+    expect(mockReleaseAndProcessSandboxUsage).toHaveBeenCalledWith(
+      'sandbox-usage-event',
+      expect.objectContaining({ outcome: 'timeout' })
+    )
   })
 
   it('normalizes JavaScript code budget expiry to a typed timeout abort', async () => {
@@ -994,8 +1003,12 @@ describe.each(PROVIDERS)('sandbox conformance [%s]', (provider) => {
     }
 
     await expect(
-      executeShellInSandbox({ code: 'sleep infinity', timeoutMs: 1000 })
+      executeShellInSandbox({ code: 'sleep infinity', timeoutMs: 1000, usageContext })
     ).rejects.toMatchObject({ name: 'AbortError', message: 'timeout' })
+    expect(mockReleaseAndProcessSandboxUsage).toHaveBeenCalledWith(
+      'sandbox-usage-event',
+      expect.objectContaining({ outcome: 'timeout' })
+    )
   })
 
   it('preserves a user process exit code 124 as an ordinary failure', async () => {
