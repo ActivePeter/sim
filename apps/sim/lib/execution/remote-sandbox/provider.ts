@@ -13,6 +13,10 @@ const PROVIDERS: Record<SandboxProviderId, SandboxProvider> = {
   daytona: daytonaProvider,
 }
 
+export function getSandboxProvider(providerId: SandboxProviderId): SandboxProvider {
+  return PROVIDERS[providerId]
+}
+
 /**
  * Resolves which provider serves this execution from the `SANDBOX_PROVIDER` env
  * var (defaulting to E2B).
@@ -25,5 +29,5 @@ const PROVIDERS: Record<SandboxProviderId, SandboxProvider> = {
  */
 export function resolveProvider(): SandboxProvider {
   const configured = getSelectedSandboxProviderId()
-  return PROVIDERS[configured]
+  return getSandboxProvider(configured)
 }

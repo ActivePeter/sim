@@ -23,7 +23,10 @@ const {
   mockE2BFilesRemove,
   mockE2BFilesWrite,
   mockE2BKill,
+  mockE2BStaticKill,
   mockDaytonaCreate,
+  mockDaytonaGet,
+  MockDaytonaNotFoundError,
   mockInterpreterRunCode,
   mockProcessCodeRun,
   mockExecuteCommand,
@@ -42,6 +45,8 @@ const {
   mockDeleteSession,
   mockRecordSandboxProviderLimit,
   mockRecordSandboxTeardownFailure,
+  mockBeginSandboxUsage,
+  mockReleaseAndProcessSandboxUsage,
 } = vi.hoisted(() => ({
   mockResolveSandbox: vi.fn(),
   mockProvisionRuntime: vi.fn(),
@@ -72,7 +77,10 @@ const {
   mockE2BFilesRemove: vi.fn(),
   mockE2BFilesWrite: vi.fn(),
   mockE2BKill: vi.fn(),
+  mockE2BStaticKill: vi.fn(),
   mockDaytonaCreate: vi.fn(),
+  mockDaytonaGet: vi.fn(),
+  MockDaytonaNotFoundError: class extends Error {},
   mockInterpreterRunCode: vi.fn(),
   mockProcessCodeRun: vi.fn(),
   mockExecuteCommand: vi.fn(),
@@ -91,18 +99,28 @@ const {
   mockDeleteSession: vi.fn(),
   mockRecordSandboxProviderLimit: vi.fn(),
   mockRecordSandboxTeardownFailure: vi.fn(),
+  mockBeginSandboxUsage: vi.fn(),
+  mockReleaseAndProcessSandboxUsage: vi.fn(),
 }))
 
-vi.mock('@e2b/code-interpreter', () => ({ Sandbox: { create: mockE2BCreate } }))
+vi.mock('@e2b/code-interpreter', () => ({
+  Sandbox: { create: mockE2BCreate, kill: mockE2BStaticKill },
+}))
 vi.mock('@daytona/sdk', () => ({
   Daytona: class {
     create = mockDaytonaCreate
+    get = mockDaytonaGet
   },
+  DaytonaNotFoundError: MockDaytonaNotFoundError,
 }))
 vi.mock('@/lib/core/config/env', () => ({ env: mockEnv }))
 vi.mock('@/lib/core/execution-limits/metrics', () => ({
   recordSandboxProviderLimit: mockRecordSandboxProviderLimit,
   recordSandboxTeardownFailure: mockRecordSandboxTeardownFailure,
+}))
+vi.mock('@/lib/billing/sandbox-usage-outbox', () => ({
+  beginSandboxUsage: mockBeginSandboxUsage,
+  releaseAndProcessSandboxUsage: mockReleaseAndProcessSandboxUsage,
 }))
 vi.mock('@/lib/execution/remote-sandbox/resolve', () => ({
   resolveWorkspaceSandbox: mockResolveSandbox,
@@ -130,9 +148,28 @@ import {
   resolvePiSandboxLifetimeMs,
 } from '@/lib/execution/remote-sandbox/pi-lifetime'
 import { resolveProvider } from '@/lib/execution/remote-sandbox/provider'
+import type { SandboxUsageContext } from '@/lib/execution/remote-sandbox/types'
 
 type Provider = 'e2b' | 'daytona'
 const PROVIDERS: Provider[] = ['e2b', 'daytona']
+
+const usageContext: SandboxUsageContext = {
+  workspaceId: 'ws-1',
+  workflowId: 'wf-1',
+  executionId: 'exec-1',
+  billingAttribution: {
+    actorUserId: 'user-1',
+    workspaceId: 'ws-1',
+    organizationId: null,
+    billedAccountUserId: 'user-1',
+    billingEntity: { type: 'user', id: 'user-1' },
+    billingPeriod: {
+      start: '2026-08-01T00:00:00.000Z',
+      end: '2026-09-01T00:00:00.000Z',
+    },
+    payerSubscription: null,
+  },
+}
 
 /** Points the shared layer at one provider via the SANDBOX_PROVIDER env var. */
 function useProvider(provider: Provider) {
@@ -275,6 +312,7 @@ beforeEach(() => {
   })
   mockE2BFilesRemove.mockResolvedValue(undefined)
   mockE2BKill.mockResolvedValue(undefined)
+  mockE2BStaticKill.mockResolvedValue(true)
 
   mockDaytonaCreate.mockResolvedValue({
     id: 'sb_1',
@@ -305,6 +343,9 @@ beforeEach(() => {
   mockCreateSession.mockResolvedValue(undefined)
   mockGetSessionCommandLogs.mockResolvedValue(undefined)
   mockDelete.mockResolvedValue(undefined)
+  mockDaytonaGet.mockResolvedValue({ delete: mockDelete })
+  mockBeginSandboxUsage.mockResolvedValue('sandbox-usage-event')
+  mockReleaseAndProcessSandboxUsage.mockResolvedValue(undefined)
   mockResolveSandbox.mockResolvedValue(null)
   mockProvisionRuntime.mockResolvedValue(undefined)
   mockExecuteSessionCommand.mockResolvedValue({ cmdId: 'cmd_1' })
@@ -330,6 +371,105 @@ describe.each(PROVIDERS)('sandbox conformance [%s]', (provider) => {
     expect(res.result).toEqual({ ok: true })
     expect(res.stdout).toBe('hello')
     expect(res.error).toBeUndefined()
+  })
+
+  it('persists usage before provisioning or user code and releases it once', async () => {
+    stubCodeRun(provider, `${SIM_RESULT_PREFIX}null`)
+    mockResolveSandbox.mockResolvedValue({
+      id: 'sbx-1',
+      name: 'runtime',
+      language: CodeLanguage.Python,
+      dependencies: ['pandas'],
+      strategy: 'runtime',
+      imageRef: 'sim-sbx-abc',
+    })
+
+    await executeInSandbox({
+      code: 'x',
+      language: CodeLanguage.Python,
+      timeoutMs: 1000,
+      usageContext,
+    })
+
+    expect(mockBeginSandboxUsage.mock.invocationCallOrder[0]).toBeLessThan(
+      mockProvisionRuntime.mock.invocationCallOrder[0]
+    )
+    const executionMock = provider === 'e2b' ? mockE2BCommandsRun : mockExecuteSessionCommand
+    expect(mockBeginSandboxUsage.mock.invocationCallOrder[0]).toBeLessThan(
+      executionMock.mock.invocationCallOrder[0]
+    )
+    expect(mockReleaseAndProcessSandboxUsage).toHaveBeenCalledOnce()
+    expect(mockReleaseAndProcessSandboxUsage).toHaveBeenCalledWith(
+      'sandbox-usage-event',
+      expect.objectContaining({ outcome: 'success', cleanupStatus: 'terminated' })
+    )
+  })
+
+  it('kills without running user code when initial usage persistence fails', async () => {
+    mockBeginSandboxUsage.mockRejectedValueOnce(new Error('database unavailable'))
+
+    await expect(
+      executeInSandbox({
+        code: 'x',
+        language: CodeLanguage.Python,
+        timeoutMs: 1000,
+        usageContext,
+      })
+    ).rejects.toMatchObject({
+      name: 'SandboxUsagePersistenceError',
+      retryable: false,
+    })
+
+    expect(provider === 'e2b' ? mockE2BKill : mockDelete).toHaveBeenCalledTimes(1)
+    expect(
+      provider === 'e2b' ? mockE2BCommandsRun : mockExecuteSessionCommand
+    ).not.toHaveBeenCalled()
+    expect(mockReleaseAndProcessSandboxUsage).not.toHaveBeenCalled()
+  })
+
+  it('releases returned user errors as billable usage', async () => {
+    if (provider === 'e2b') {
+      mockE2BCommandsRun.mockResolvedValueOnce({ stdout: '', stderr: 'bad input', exitCode: 1 })
+    } else {
+      mockGetSessionCommandLogs.mockImplementationOnce(
+        async (_sessionId: string, _commandId: string, onStdout: (chunk: string) => void) => {
+          emitDaytonaStreamReady(onStdout)
+          onStdout('bad input')
+        }
+      )
+      mockGetSessionCommand.mockResolvedValueOnce({ exitCode: 1 })
+    }
+
+    const result = await executeInSandbox({
+      code: 'x',
+      language: CodeLanguage.Python,
+      timeoutMs: 1000,
+      usageContext,
+    })
+
+    expect(result.error).toBeDefined()
+    expect(mockReleaseAndProcessSandboxUsage).toHaveBeenCalledWith(
+      'sandbox-usage-event',
+      expect.objectContaining({ outcome: 'user_error', cleanupStatus: 'terminated' })
+    )
+  })
+
+  it('releases teardown failures for delayed reconciliation', async () => {
+    stubCodeRun(provider, `${SIM_RESULT_PREFIX}null`)
+    const teardown = provider === 'e2b' ? mockE2BKill : mockDelete
+    teardown.mockRejectedValue(new Error('provider unavailable'))
+
+    await executeInSandbox({
+      code: 'x',
+      language: CodeLanguage.Python,
+      timeoutMs: 1000,
+      usageContext,
+    })
+
+    expect(mockReleaseAndProcessSandboxUsage).toHaveBeenCalledWith(
+      'sandbox-usage-event',
+      expect.objectContaining({ outcome: 'success', cleanupStatus: 'pending_reconciliation' })
+    )
   })
 
   it('takes the LAST marker so user output cannot shadow the real result', async () => {
@@ -1833,6 +1973,23 @@ describe('custom dependency sets', () => {
 })
 
 describe('provider selection', () => {
+  it('waits for Daytona cleanup to reach the destroyed state', async () => {
+    useProvider('daytona')
+    stubCodeRun('daytona', `${SIM_RESULT_PREFIX}null`)
+
+    await executeInSandbox({ code: 'x', language: CodeLanguage.Python, timeoutMs: 1000 })
+
+    expect(mockDelete).toHaveBeenCalledWith(60, true)
+  })
+
+  it('treats already-missing sandboxes as terminal during provider reconciliation', async () => {
+    mockE2BStaticKill.mockResolvedValueOnce(false)
+    await expect(e2bProvider.terminateById('missing-e2b')).resolves.toBe('not_found')
+
+    mockDaytonaGet.mockRejectedValueOnce(new MockDaytonaNotFoundError('sandbox not found'))
+    await expect(daytonaProvider.terminateById('missing-daytona')).resolves.toBe('not_found')
+  })
+
   it('routes by SANDBOX_PROVIDER, defaulting to E2B when unset', async () => {
     stubCodeRun('e2b', `${SIM_RESULT_PREFIX}null`)
     stubCodeRun('daytona', `${SIM_RESULT_PREFIX}null`)

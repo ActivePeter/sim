@@ -94,6 +94,7 @@ export const E2B_SANDBOX_MATERIALIZER_REVISION = FUNCTION_SANDBOX_MATERIALIZER_R
 
 /** Maximum continuous sandbox lifetime supported by E2B. */
 export const E2B_MAX_SANDBOX_LIFETIME_MS = 24 * 60 * 60 * 1000
+const E2B_DEFAULT_SANDBOX_LIFETIME_MS = 5 * 60 * 1000
 
 const E2B_PROVIDER_LIMIT_ERROR =
   'E2B reached its 24-hour limit for a single sandbox execution. The workflow timeout may be longer, but this Function call must finish within 24 hours.'
@@ -842,6 +843,9 @@ export const e2bProvider: SandboxProvider = {
   id: 'e2b',
   dependencyStrategy: 'prebuilt',
   images: e2bImages,
+  resolveLifetimeMs(requestedLifetimeMs?: number): number {
+    return e2bTimeoutMs(requestedLifetimeMs ?? E2B_DEFAULT_SANDBOX_LIFETIME_MS)
+  },
   async create(kind: SandboxKind, options?: CreateSandboxOptions): Promise<SandboxHandle> {
     const apiKey = env.E2B_API_KEY
     if (!apiKey) {
@@ -859,11 +863,10 @@ export const e2bProvider: SandboxProvider = {
     // and treating that as "unset" would hand an expired run the five-minute
     // default — longer than the lifetime it asked for, which is the opposite of
     // what it requested.
-    const effectiveLifetimeMs =
-      options?.lifetimeMs !== undefined ? e2bTimeoutMs(options.lifetimeMs) : undefined
+    const effectiveLifetimeMs = e2bProvider.resolveLifetimeMs(options?.lifetimeMs)
     const createOptions = {
       apiKey,
-      ...(effectiveLifetimeMs !== undefined ? { timeoutMs: effectiveLifetimeMs } : {}),
+      timeoutMs: effectiveLifetimeMs,
     }
 
     const { Sandbox } = await import('@e2b/code-interpreter')
@@ -877,5 +880,13 @@ export const e2bProvider: SandboxProvider = {
         ? lifetimeStartedAtMs + E2B_MAX_SANDBOX_LIFETIME_MS
         : undefined
     )
+  },
+  async terminateById(sandboxId: string): Promise<'terminated' | 'not_found'> {
+    const apiKey = env.E2B_API_KEY
+    if (!apiKey) {
+      throw new Error('E2B_API_KEY is required when E2B is enabled')
+    }
+    const { Sandbox } = await import('@e2b/code-interpreter')
+    return (await Sandbox.kill(sandboxId, { apiKey })) ? 'terminated' : 'not_found'
   },
 }

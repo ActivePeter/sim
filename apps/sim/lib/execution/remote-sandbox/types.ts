@@ -1,3 +1,4 @@
+import type { BillingAttributionSnapshot } from '@/lib/billing/core/billing-attribution'
 import type { CodePlaceholderRuntimeBinding } from '@/lib/execution/code-placeholders/types'
 import type { CodeLanguage } from '@/lib/execution/languages'
 import type { SandboxBuildError } from '@/lib/execution/remote-sandbox/build-errors'
@@ -11,6 +12,20 @@ import type { SandboxSpec } from '@/lib/execution/remote-sandbox/sandbox-spec'
 export type SandboxKind = 'code' | 'shell' | 'mothership' | 'doc' | 'pi'
 
 export type SandboxProviderId = 'e2b' | 'daytona'
+
+export interface SandboxUsageContext {
+  workspaceId: string
+  workflowId: string
+  executionId: string
+  billingAttribution: BillingAttributionSnapshot
+}
+
+export type SandboxUsageOutcome =
+  | 'success'
+  | 'user_error'
+  | 'timeout'
+  | 'cancelled'
+  | 'infrastructure_error'
 
 /**
  * A sandbox input file. `content` entries are written inline; `url` entries are fetched from inside
@@ -53,6 +68,8 @@ export interface SandboxExecutionRequest {
   sandboxId?: string
   /** Cancels the provider sandbox when the caller's execution budget expires. */
   signal?: AbortSignal
+  /** Trusted, server-derived attribution for remote Function sandbox usage. */
+  usageContext?: SandboxUsageContext
 }
 
 export interface SandboxShellExecutionRequest {
@@ -76,6 +93,8 @@ export interface SandboxShellExecutionRequest {
   sandboxId?: string
   /** Cancels the provider sandbox when the caller's execution budget expires. */
   signal?: AbortSignal
+  /** Trusted, server-derived attribution for remote Function sandbox usage. */
+  usageContext?: SandboxUsageContext
 }
 
 export interface SandboxExecutionResult {
@@ -286,5 +305,9 @@ export interface SandboxProvider {
   readonly dependencyStrategy: SandboxDependencyStrategy
   /** Present exactly when {@link dependencyStrategy} is `prebuilt`. */
   readonly images?: SandboxImageBuilder
+  /** Provider-effective lifetime used for creation and crash-recovery billing bounds. */
+  resolveLifetimeMs(requestedLifetimeMs?: number): number
   create(kind: SandboxKind, options?: CreateSandboxOptions): Promise<SandboxHandle>
+  /** Terminates a sandbox during delayed usage reconciliation. */
+  terminateById(sandboxId: string): Promise<'terminated' | 'not_found'>
 }

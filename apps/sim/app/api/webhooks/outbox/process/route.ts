@@ -8,6 +8,7 @@ import { verifyCronAuth } from '@/lib/auth/internal'
 import { enterpriseOwnerClaimOutboxHandlers } from '@/lib/billing/enterprise-owner-claim'
 import { enterpriseIssuanceOutboxHandlers } from '@/lib/billing/enterprise-provisioning'
 import { membershipBillingOutboxHandlers } from '@/lib/billing/organizations/membership-reconciliation'
+import { sandboxUsageOutboxHandlers } from '@/lib/billing/sandbox-usage-outbox'
 import { billingOutboxHandlers } from '@/lib/billing/webhooks/outbox-handlers'
 import { processOutboxEvents } from '@/lib/core/outbox/service'
 import { generateRequestId } from '@/lib/core/utils/request'
@@ -29,6 +30,7 @@ const handlers = {
   ...adminMemberOperationOutboxHandlers,
   ...billingOutboxHandlers,
   ...membershipBillingOutboxHandlers,
+  ...sandboxUsageOutboxHandlers,
   ...enterpriseIssuanceOutboxHandlers,
   ...enterpriseOwnerClaimOutboxHandlers,
   ...invitationMigrationOutboxHandlers,

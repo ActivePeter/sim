@@ -26,6 +26,19 @@ export class SandboxLaunchIndeterminateError extends NonRetryableExecutionError 
   }
 }
 
+/** A created sandbox could not be durably associated with its billing event. */
+export class SandboxUsagePersistenceError extends NonRetryableExecutionError {
+  readonly code = 'sandbox_usage_persistence_failed' as const
+
+  constructor(provider: string, options?: ErrorOptions) {
+    super(
+      `${provider} created a Function sandbox, but Sim could not persist its usage record. The sandbox was stopped before user code ran.`,
+      options
+    )
+    this.name = 'SandboxUsagePersistenceError'
+  }
+}
+
 export function isNonRetryableExecutionError(error: unknown): boolean {
   return Boolean(
     findCause(error, (cause): cause is NonRetryableExecutionError => {
@@ -44,4 +57,10 @@ export function isSandboxLaunchIndeterminateError(
   error: unknown
 ): error is SandboxLaunchIndeterminateError {
   return Boolean(findCause(error, (cause) => cause instanceof SandboxLaunchIndeterminateError))
+}
+
+export function isSandboxUsagePersistenceError(
+  error: unknown
+): error is SandboxUsagePersistenceError {
+  return Boolean(findCause(error, (cause) => cause instanceof SandboxUsagePersistenceError))
 }

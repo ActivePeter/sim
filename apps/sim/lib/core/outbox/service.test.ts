@@ -31,6 +31,7 @@ import {
   enqueueOutboxEvents,
   outboxEventHasSourceOperationId,
   outboxPayloadHasSourceOperationId,
+  patchAndReleasePendingOutboxEvent,
   processOutboxEvents,
 } from './service'
 
@@ -150,6 +151,32 @@ describe('outbox parent-operation correlation', () => {
     expect(
       outboxPayloadHasSourceOperationId({ sourceOperationIds: ['operation-2'] }, 'operation-1')
     ).toBe(false)
+  })
+})
+
+describe('patchAndReleasePendingOutboxEvent', () => {
+  beforeEach(() => {
+    vi.clearAllMocks()
+    resetDbChainMock()
+  })
+
+  it('atomically merges terminal fields and makes a pending event available', async () => {
+    const releasedAt = new Date('2026-08-27T12:00:00.000Z')
+    dbChainMockFns.returning.mockResolvedValueOnce([{ id: 'evt-1' }])
+
+    const released = await patchAndReleasePendingOutboxEvent(
+      dbChainMock.db,
+      'evt-1',
+      { cleanupStatus: 'terminated', terminatedAt: releasedAt.toISOString() },
+      releasedAt
+    )
+
+    expect(released).toBe(true)
+    expect(dbChainMockFns.set).toHaveBeenCalledWith({
+      payload: expect.anything(),
+      availableAt: releasedAt,
+    })
+    expect(JSON.stringify(dbChainMockFns.where.mock.calls.at(-1)?.[0])).toContain('pending')
   })
 })
 

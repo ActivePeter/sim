@@ -46,6 +46,13 @@ function toSeconds(timeoutMs: number): number {
   return Math.max(1, Math.ceil(timeoutMs / 1000))
 }
 
+function resolveDaytonaLifetimeMs(requestedLifetimeMs?: number): number {
+  return Math.max(
+    60_000,
+    Math.ceil((requestedLifetimeMs ?? DAYTONA_DEFAULT_SANDBOX_TTL_MS) / 60_000) * 60_000
+  )
+}
+
 function isDaytonaExecutionTimeout(error: unknown): boolean {
   if (typeof error !== 'object' || error === null || !('name' in error)) return false
   return error.name === 'DaytonaTimeoutError' || error.name === 'TimeoutError'
@@ -746,7 +753,7 @@ class DaytonaSandboxHandle implements SandboxHandle {
     if (this.killed) return
     if (!this.killPromise) {
       this.killPromise = this.sandbox
-        .delete()
+        .delete(60, true)
         .then(() => {
           this.killed = true
         })
@@ -775,6 +782,7 @@ function shellQuote(value: string): string {
 export const daytonaProvider: SandboxProvider = {
   id: 'daytona',
   dependencyStrategy: 'runtime',
+  resolveLifetimeMs: resolveDaytonaLifetimeMs,
   async create(kind: SandboxKind, options?: CreateSandboxOptions): Promise<SandboxHandle> {
     const apiKey = env.DAYTONA_API_KEY
     if (!apiKey) {
@@ -790,13 +798,26 @@ export const daytonaProvider: SandboxProvider = {
       snapshot,
       language: toDaytonaLanguage(language),
       ephemeral: true,
-      ttlMinutes: Math.max(
-        1,
-        Math.ceil((options?.lifetimeMs ?? DAYTONA_DEFAULT_SANDBOX_TTL_MS) / 60_000)
-      ),
+      ttlMinutes: resolveDaytonaLifetimeMs(options?.lifetimeMs) / 60_000,
     }
     const sandbox = await daytona.create(createOptions)
 
     return new DaytonaSandboxHandle(sandbox, language)
+  },
+  async terminateById(sandboxId: string): Promise<'terminated' | 'not_found'> {
+    const apiKey = env.DAYTONA_API_KEY
+    if (!apiKey) {
+      throw new Error('DAYTONA_API_KEY is required when the Daytona sandbox provider is selected')
+    }
+    const { Daytona, DaytonaNotFoundError } = await import('@daytona/sdk')
+    const daytona = new Daytona({ apiKey })
+    try {
+      const sandbox = await daytona.get(sandboxId)
+      await sandbox.delete(60, true)
+      return 'terminated'
+    } catch (error) {
+      if (error instanceof DaytonaNotFoundError) return 'not_found'
+      throw error
+    }
   },
 }

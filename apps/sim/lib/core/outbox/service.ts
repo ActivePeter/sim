@@ -296,6 +296,27 @@ export async function patchOutboxEventPayload(
 }
 
 /**
+ * Atomically adds final payload fields and makes a delayed pending event
+ * immediately claimable. Processing or terminal events are never rewritten.
+ */
+export async function patchAndReleasePendingOutboxEvent(
+  executor: Pick<typeof db, 'update'>,
+  eventId: string,
+  patch: Record<string, unknown>,
+  releasedAt = new Date()
+): Promise<boolean> {
+  const result = await executor
+    .update(outboxEvent)
+    .set({
+      payload: sql`(coalesce(${outboxEvent.payload}::jsonb, '{}'::jsonb) || ${JSON.stringify(patch)}::jsonb)::json`,
+      availableAt: releasedAt,
+    })
+    .where(and(eq(outboxEvent.id, eventId), eq(outboxEvent.status, 'pending')))
+    .returning({ id: outboxEvent.id })
+  return result.length > 0
+}
+
+/**
  * Adds a durable parent-operation correlation to an outbox event without
  * replacing correlations already attached by another coalesced mutation.
  */

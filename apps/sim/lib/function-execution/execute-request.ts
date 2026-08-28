@@ -5,6 +5,7 @@ import { getErrorMessage } from '@sim/utils/errors'
 import { toRecord } from '@sim/utils/object'
 import { type NextRequest, NextResponse } from 'next/server'
 import type { ParsedFunctionExecuteBody } from '@/lib/api/contracts'
+import { requireBillingAttributionHeader } from '@/lib/billing/core/billing-attribution'
 import {
   FORMAT_TO_CONTENT_TYPE,
   getOutputFileDeclarations,
@@ -42,7 +43,10 @@ import {
   createMountedFileSecretProvenanceScanner,
   type MountedFileSecretProvenanceScanner,
 } from '@/lib/execution/mounted-file-secret-provenance'
-import { isSandboxLaunchIndeterminateError } from '@/lib/execution/non-retryable-error'
+import {
+  isSandboxLaunchIndeterminateError,
+  isSandboxUsagePersistenceError,
+} from '@/lib/execution/non-retryable-error'
 import { recordMaterializedAccessKeys } from '@/lib/execution/payloads/access-keys'
 import {
   isLargeArrayManifest,
@@ -77,6 +81,7 @@ import {
   isSandboxOutputLimitError,
   MAX_SANDBOX_OUTPUT_BYTES,
 } from '@/lib/execution/remote-sandbox/output-limits'
+import type { SandboxUsageContext } from '@/lib/execution/remote-sandbox/types'
 import { isExecutionResourceLimitError } from '@/lib/execution/resource-errors'
 import {
   EXACT_EMPTY_WORKSPACE_FILE_SECRET_PROVENANCE,
@@ -1958,6 +1963,25 @@ export async function executeFunctionRequest(
       _sandboxFiles,
     } = body
 
+    let sandboxUsageContext: SandboxUsageContext | undefined
+    const getSandboxUsageContext = (): SandboxUsageContext | undefined => {
+      if (usesMothershipSandbox || isCustomTool || !workspaceId || !workflowId || !executionId) {
+        return undefined
+      }
+      if (!sandboxUsageContext) {
+        sandboxUsageContext = {
+          workspaceId,
+          workflowId,
+          executionId,
+          billingAttribution: requireBillingAttributionHeader(req.headers, {
+            actorUserId: auth.userId,
+            workspaceId,
+          }),
+        }
+      }
+      return sandboxUsageContext
+    }
+
     // The internal JWT carries no workspace scope, so a body-supplied workspaceId would
     // otherwise be the sole authorization input for sandbox selection and file exports.
     // Denial is returned rather than thrown: this handler's catch-all would turn a thrown
@@ -2194,6 +2218,7 @@ export async function executeFunctionRequest(
           ? { sandboxKind: 'mothership' as const }
           : {}),
         signal: executionSignal,
+        usageContext: getSandboxUsageContext(),
       })
       const executionTime = Date.now() - execStart
 
@@ -2363,6 +2388,7 @@ export async function executeFunctionRequest(
             ? { sandboxKind: 'mothership' as const }
             : {}),
           signal: executionSignal,
+          usageContext: getSandboxUsageContext(),
         })
         const executionTime = Date.now() - execStart
         stdout += e2bStdout
@@ -2454,6 +2480,7 @@ export async function executeFunctionRequest(
           ? { sandboxKind: 'mothership' as const }
           : {}),
         signal: executionSignal,
+        usageContext: getSandboxUsageContext(),
       })
       const executionTime = Date.now() - execStart
       stdout += e2bStdout
@@ -2752,6 +2779,23 @@ export async function executeFunctionRequest(
         ? functionJsonResponse(indeterminateResponse, routeContext, { status: 503 })
         : appendPrivateResolvedSecretNames(
             NextResponse.json(indeterminateResponse, { status: 503 }),
+            includePrivateResolvedSecretNames ? [] : null,
+            privateResolvedSecretNamesMetadataType
+          )
+    }
+
+    if (isSandboxUsagePersistenceError(error)) {
+      const persistenceResponse = {
+        success: false,
+        error: getErrorMessage(error),
+        retryable: false,
+        code: 'sandbox_usage_persistence_failed',
+        output: { result: null, stdout: cleanStdout(stdout), executionTime },
+      }
+      return routeContext
+        ? functionJsonResponse(persistenceResponse, routeContext, { status: 503 })
+        : appendPrivateResolvedSecretNames(
+            NextResponse.json(persistenceResponse, { status: 503 }),
             includePrivateResolvedSecretNames ? [] : null,
             privateResolvedSecretNamesMetadataType
           )
