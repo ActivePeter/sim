@@ -9,9 +9,8 @@ import {
   type Node,
   type NodeChange,
   type NodeTypes,
-  SelectionMode,
 } from 'reactflow'
-import { type CanvasInteractionMode, CanvasSurface } from '@/components/canvas'
+import { type CanvasInteractionMode, WorkflowCanvas } from '@/components/canvas'
 import { CanvasControls } from '@/app/plan-graph-demo/components/canvas-controls'
 import { PlanEdge, type PlanEdgeData } from '@/app/plan-graph-demo/components/plan-edge'
 import { PlanNodeCard, type PlanNodeData } from '@/app/plan-graph-demo/components/plan-node-card'
@@ -23,10 +22,10 @@ import {
   type ResolvedPlanItem,
 } from '@/app/plan-graph-demo/plan-graph-model'
 
-const NODE_TYPES: NodeTypes = { planNode: PlanNodeCard }
-const EDGE_TYPES: EdgeTypes = { planEdge: PlanEdge }
+const ROADMAP_NODE_TYPES: NodeTypes = { roadmapNode: PlanNodeCard }
+const ROADMAP_EDGE_TYPES: EdgeTypes = { roadmapEdge: PlanEdge }
 
-interface PlanCanvasProps {
+interface RoadmapCanvasAdapterProps {
   dependencies: readonly PlanDependency[]
   items: readonly PlanItem[]
   onConnectItems: (sourceId: string, targetId: string) => void
@@ -37,7 +36,8 @@ interface PlanCanvasProps {
   selectedItemId: string
 }
 
-export function PlanCanvas({
+/** Maps the Plan Graph domain to node and edge types consumed by the shared WorkflowCanvas. */
+export function RoadmapCanvasAdapter({
   dependencies,
   items,
   onConnectItems,
@@ -46,13 +46,13 @@ export function PlanCanvas({
   positions,
   resolvedItems,
   selectedItemId,
-}: PlanCanvasProps) {
+}: RoadmapCanvasAdapterProps) {
   const [canvasMode, setCanvasMode] = useState<CanvasInteractionMode>('hand')
   const nodes = useMemo<Node<PlanNodeData>[]>(
     () =>
       resolvedItems.map((item) => ({
         id: item.id,
-        type: 'planNode',
+        type: 'roadmapNode',
         position: positions[item.id] ?? { x: 0, y: 0 },
         data: { item },
         selected: item.id === selectedItemId,
@@ -66,7 +66,7 @@ export function PlanCanvas({
         id: dependency.id,
         source: dependency.source,
         target: dependency.target,
-        type: 'planEdge',
+        type: 'roadmapEdge',
         markerEnd: { type: MarkerType.ArrowClosed },
         animated: items.find((item) => item.id === dependency.source)?.lifecycle === 'active',
         data: {
@@ -105,32 +105,22 @@ export function PlanCanvas({
 
   return (
     <div className='relative h-full min-h-0 w-full'>
-      <CanvasSurface
+      <WorkflowCanvas
         documentKind='roadmap'
+        interactionMode={canvasMode}
+        editable
         nodes={nodes}
         edges={edges}
-        nodeTypes={NODE_TYPES}
-        edgeTypes={EDGE_TYPES}
+        nodeTypes={ROADMAP_NODE_TYPES}
+        edgeTypes={ROADMAP_EDGE_TYPES}
         onNodesChange={handleNodesChange}
         onConnect={handleConnect}
         onNodeClick={(_event, node) => onSelectItem(node.id)}
         fitView
         fitViewOptions={{ padding: 0.18, maxZoom: 1 }}
-        minZoom={0.35}
-        maxZoom={1.35}
-        panOnScroll
-        panOnDrag={canvasMode === 'hand'}
-        selectionOnDrag={canvasMode === 'cursor'}
-        selectionMode={SelectionMode.Partial}
-        selectionKeyCode={canvasMode === 'cursor' ? 'Shift' : null}
-        nodesConnectable
-        elementsSelectable
-        nodesDraggable
-        edgesFocusable={false}
-        className='workflow-container [&_.react-flow__pane:active]:cursor-grabbing [&_.react-flow__pane]:cursor-grab'
       >
         <CanvasControls mode={canvasMode} onModeChange={setCanvasMode} />
-      </CanvasSurface>
+      </WorkflowCanvas>
     </div>
   )
 }

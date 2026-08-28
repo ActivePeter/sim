@@ -27,17 +27,15 @@ import {
 import { useParams, useRouter } from 'next/navigation'
 import {
   applyNodeChanges,
-  ConnectionLineType,
   type Edge,
   type Node,
   type NodeChange,
   type OnConnectStart,
   ReactFlowProvider,
-  SelectionMode,
   useReactFlow,
 } from 'reactflow'
 import { useShallow } from 'zustand/react/shallow'
-import { CanvasEditorFrame, CanvasSurface } from '@/components/canvas'
+import { CanvasEditorFrame, WorkflowCanvas } from '@/components/canvas'
 import { useSession } from '@/lib/auth/auth-client'
 import type { OAuthConnectEventDetail } from '@/lib/copilot/tools/client/base-tool'
 import { consumeOAuthReturnContext, writeOAuthReturnContext } from '@/lib/credentials/client-state'
@@ -76,7 +74,6 @@ import {
   useCurrentWorkflow,
   useDynamicHandleRefresh,
   useNodeUtilities,
-  useShiftSelectionLock,
   useWorkflowExecution,
 } from '@/app/workspace/[workspaceId]/w/[workflowId]/hooks'
 import {
@@ -174,11 +171,6 @@ const SUBFLOW_FOCUS_MIN_WAIT_FRAMES = 4
 const SUBFLOW_FOCUS_MAX_WAIT_FRAMES = 18
 const SUBFLOW_FOCUS_LAYOUT_TOLERANCE_PX = 0.5
 const SUBFLOW_FOCUS_PADDING = 0.08
-const CONNECTION_LINE_STYLE = {
-  stroke: 'var(--connection-line-stroke)',
-  strokeWidth: 2,
-}
-
 /**
  * The in-flight drag line is an edge, so it belongs at the top of the edge band
  * rather than at React Flow's stylesheet default of 1001 — which sits above
@@ -328,8 +320,6 @@ const WorkflowContent = React.memo(
     const initializedViewportWorkflowIdRef = useRef<string | null>(null)
     const userFocusedWorkflowIdRef = useRef<string | null>(null)
     const canvasMode = useCanvasModeStore((state) => state.mode)
-    const isHandMode = embedded ? true : canvasMode === 'hand'
-    const { handleCanvasMouseDown, selectionProps } = useShiftSelectionLock({ isHandMode })
     const [oauthModal, setOauthModal] = useState<{
       provider: OAuthProvider
       serviceId: string
@@ -5119,8 +5109,11 @@ const WorkflowContent = React.memo(
 
           {isWorkflowReady && (
             <>
-              <CanvasSurface
+              <WorkflowCanvas
                 documentKind='workflow'
+                interactionMode={canvasMode}
+                editable={effectivePermissions.canEdit}
+                embedded={embedded}
                 nodes={nodesForRender}
                 edges={edgesForRender}
                 onNodesChange={onNodesChange}
@@ -5132,7 +5125,6 @@ const WorkflowContent = React.memo(
                 onConnectEnd={!embedded && effectivePermissions.canEdit ? onConnectEnd : undefined}
                 nodeTypes={nodeTypes}
                 edgeTypes={edgeTypes}
-                onMouseDown={handleCanvasMouseDown}
                 onDrop={
                   effectivePermissions.canEdit
                     ? onDrop
@@ -5170,12 +5162,9 @@ const WorkflowContent = React.memo(
                 fitViewOptions={embedded ? embeddedFitViewOptions : reactFlowFitViewOptions}
                 minZoom={0.1}
                 maxZoom={1.3}
-                panOnScroll
                 defaultEdgeOptions={defaultEdgeOptions}
                 proOptions={reactFlowProOptions}
-                connectionLineStyle={CONNECTION_LINE_STYLE}
                 connectionLineContainerStyle={CONNECTION_LINE_CONTAINER_STYLE}
-                connectionLineType={ConnectionLineType.SmoothStep}
                 onPaneClick={onPaneClick}
                 onEdgeClick={embedded ? undefined : onEdgeClick}
                 onNodeClick={handleNodeClick}
@@ -5184,20 +5173,7 @@ const WorkflowContent = React.memo(
                 onSelectionContextMenu={handleSelectionContextMenu}
                 onPointerMove={handleCanvasPointerMove}
                 onPointerLeave={handleCanvasPointerLeave}
-                elementsSelectable={!embedded}
-                selectionOnDrag={embedded ? false : selectionProps.selectionOnDrag}
-                selectionMode={SelectionMode.Partial}
-                panOnDrag={embedded ? true : selectionProps.panOnDrag}
-                selectionKeyCode={embedded ? null : selectionProps.selectionKeyCode}
-                multiSelectionKeyCode={embedded ? null : ['Meta', 'Control', 'Shift']}
-                nodesConnectable={!embedded && effectivePermissions.canEdit}
-                connectOnClick={false}
-                nodesDraggable={!embedded && effectivePermissions.canEdit}
-                draggable={false}
-                noWheelClassName='allow-scroll'
-                edgesFocusable={!embedded}
-                edgesUpdatable={!embedded && effectivePermissions.canEdit}
-                className={`workflow-container h-full bg-[var(--bg)] transition-opacity duration-150 ${reactFlowStyles} ${canvasOpacityClass} ${isHandMode ? 'canvas-mode-hand' : 'canvas-mode-cursor'}`}
+                className={`${reactFlowStyles} ${canvasOpacityClass}`}
                 onNodeDrag={effectivePermissions.canEdit ? onNodeDrag : undefined}
                 onNodeDragStop={
                   !embedded && effectivePermissions.canEdit ? onNodeDragStop : undefined
@@ -5212,12 +5188,6 @@ const WorkflowContent = React.memo(
                 }
                 snapToGrid={snapToGrid}
                 snapGrid={snapGrid}
-                elevateEdgesOnSelect={false}
-                onlyRenderVisibleElements={false}
-                deleteKeyCode={null}
-                elevateNodesOnSelect={false}
-                autoPanOnConnect={effectivePermissions.canEdit}
-                autoPanOnNodeDrag={effectivePermissions.canEdit}
               />
 
               <Cursors />

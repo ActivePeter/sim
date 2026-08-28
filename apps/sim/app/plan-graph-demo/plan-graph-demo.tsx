@@ -9,9 +9,9 @@ import {
   ActivityPanel,
   NodeInspector,
   type PlanActivity,
-  PlanCanvas,
   PlanHeader,
   PlanSidebar,
+  RoadmapCanvasAdapter,
 } from '@/app/plan-graph-demo/components'
 import {
   addRoadmapDependency,
@@ -307,7 +307,7 @@ export function RoadmapDemo() {
 
           <div className='min-h-0 flex-1'>
             <ReactFlowProvider>
-              <PlanCanvas
+              <RoadmapCanvasAdapter
                 key={canvasRevision}
                 dependencies={roadmap.dependencies}
                 items={items}
