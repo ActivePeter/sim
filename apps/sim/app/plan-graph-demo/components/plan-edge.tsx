@@ -1,5 +1,5 @@
-import { cn } from '@sim/emcn'
-import { type EdgeProps, getSmoothStepPath } from 'reactflow'
+import { WorkflowEdgeView } from '@sim/workflow-renderer'
+import type { EdgeProps } from 'reactflow'
 import type { PlanDependencyKind } from '@/app/plan-graph-demo/plan-graph-model'
 
 export interface PlanEdgeData {
@@ -7,40 +7,25 @@ export interface PlanEdgeData {
   satisfied: boolean
 }
 
-export function PlanEdge({
-  id,
-  sourceX,
-  sourceY,
-  targetX,
-  targetY,
-  sourcePosition,
-  targetPosition,
-  markerEnd,
-  data,
-}: EdgeProps<PlanEdgeData>) {
-  const [edgePath] = getSmoothStepPath({
-    sourceX,
-    sourceY,
-    sourcePosition,
-    targetX,
-    targetY,
-    targetPosition,
-    borderRadius: 18,
-    offset: 28,
-  })
+/** Projects DAG dependency state onto the same edge renderer used by Workflow. */
+export function PlanEdge(props: EdgeProps<PlanEdgeData>) {
+  const strokeDasharray =
+    props.data?.kind === 'contract'
+      ? '7 5'
+      : props.data?.kind === 'integrate-with'
+        ? '2 5'
+        : undefined
 
   return (
-    <path
-      id={id}
-      d={edgePath}
-      markerEnd={markerEnd}
-      fill='none'
-      className={cn(
-        'react-flow__edge-path !stroke-[1.5px] transition-colors duration-150',
-        data?.satisfied ? '!stroke-[var(--brand-accent)]' : '!stroke-[var(--text-placeholder)]',
-        data?.kind === 'contract' && '[stroke-dasharray:7_5]',
-        data?.kind === 'integrate-with' && '[stroke-dasharray:2_5]'
-      )}
+    <WorkflowEdgeView
+      {...props}
+      style={{ ...props.style, strokeDasharray }}
+      diffStatus={null}
+      runStatus={props.data?.satisfied ? 'success' : undefined}
+      isPreviewRun={false}
+      isWorkflowRunning={props.animated}
+      isTargetActive={props.animated}
+      isConnectedToSelection={Boolean(props.selected)}
     />
   )
 }

@@ -1,15 +1,7 @@
 'use client'
 
 import { useCallback, useMemo, useState } from 'react'
-import {
-  type Connection,
-  type Edge,
-  type EdgeTypes,
-  MarkerType,
-  type Node,
-  type NodeChange,
-  type NodeTypes,
-} from 'reactflow'
+import type { Connection, Edge, EdgeTypes, Node, NodeChange, NodeTypes } from 'reactflow'
 import { type CanvasInteractionMode, WorkflowCanvas } from '@/components/canvas'
 import { CanvasControls } from '@/app/plan-graph-demo/components/canvas-controls'
 import { PlanEdge, type PlanEdgeData } from '@/app/plan-graph-demo/components/plan-edge'
@@ -20,6 +12,7 @@ import {
   type PlanItem,
   type PlanPosition,
   type ResolvedPlanItem,
+  wouldCreateDagCycle,
 } from '@/app/plan-graph-demo/plan-graph-model'
 
 const DAG_NODE_TYPES: NodeTypes = { dagNode: PlanNodeCard }
@@ -28,10 +21,13 @@ const DAG_EDGE_TYPES: EdgeTypes = { dagEdge: PlanEdge }
 interface DagCanvasAdapterProps {
   dependencies: readonly PlanDependency[]
   items: readonly PlanItem[]
+  onAdvanceItem: (itemId: string) => void
   onConnectItems: (sourceId: string, targetId: string) => void
   onPositionsChange: (positions: Record<string, PlanPosition>) => void
+  onRemoveItem: (itemId: string) => void
   onSelectItem: (itemId: string) => void
   positions: Readonly<Record<string, PlanPosition>>
+  repository: string
   resolvedItems: readonly ResolvedPlanItem[]
   selectedItemId: string
 }
@@ -40,10 +36,13 @@ interface DagCanvasAdapterProps {
 export function DagCanvasAdapter({
   dependencies,
   items,
+  onAdvanceItem,
   onConnectItems,
   onPositionsChange,
+  onRemoveItem,
   onSelectItem,
   positions,
+  repository,
   resolvedItems,
   selectedItemId,
 }: DagCanvasAdapterProps) {
@@ -54,10 +53,33 @@ export function DagCanvasAdapter({
         id: item.id,
         type: 'dagNode',
         position: positions[item.id] ?? { x: 0, y: 0 },
-        data: { item },
+        data: {
+          canRemove: items.length > 1,
+          issueUrl: `https://github.com/${repository}/issues/${item.issue.number}`,
+          item,
+          onAdvance: () => onAdvanceItem(item.id),
+          onRemove: () => onRemoveItem(item.id),
+          onSelect: () => onSelectItem(item.id),
+          pullRequestUrl:
+            item.primaryPr.number === null
+              ? undefined
+              : `https://github.com/${repository}/pull/${item.primaryPr.number}`,
+          wouldCreateConnectionCycle: (source, target) =>
+            wouldCreateDagCycle(dependencies, source, target),
+        },
         selected: item.id === selectedItemId,
       })),
-    [positions, resolvedItems, selectedItemId]
+    [
+      dependencies,
+      items.length,
+      onAdvanceItem,
+      onRemoveItem,
+      onSelectItem,
+      positions,
+      repository,
+      resolvedItems,
+      selectedItemId,
+    ]
   )
 
   const edges = useMemo<Edge<PlanEdgeData>[]>(
@@ -67,7 +89,6 @@ export function DagCanvasAdapter({
         source: dependency.source,
         target: dependency.target,
         type: 'dagEdge',
-        markerEnd: { type: MarkerType.ArrowClosed },
         animated: items.find((item) => item.id === dependency.source)?.lifecycle === 'active',
         data: {
           kind: dependency.kind,

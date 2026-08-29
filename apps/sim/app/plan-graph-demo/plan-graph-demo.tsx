@@ -318,12 +318,15 @@ export function DagDemo({ dagId }: DagDemoProps = {}) {
                 key={canvasRevision}
                 dependencies={dag.dependencies}
                 items={items}
+                onAdvanceItem={advanceItem}
                 onConnectItems={handleConnectItems}
                 onPositionsChange={handlePositionsChange}
+                onRemoveItem={handleRemoveItem}
                 resolvedItems={resolvedItems}
                 selectedItemId={selectedItemId}
                 onSelectItem={setSelectedItemId}
                 positions={dag.positions}
+                repository={dag.repository}
               />
             </ReactFlowProvider>
           </div>

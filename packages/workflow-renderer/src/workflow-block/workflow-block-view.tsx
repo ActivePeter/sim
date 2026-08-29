@@ -418,6 +418,12 @@ export interface WorkflowBlockViewProps {
   hasContentBelowHeader: boolean
   conditionRows: { id: string; title: string; value: string }[]
   routerRows: { id: string; value: string }[]
+  /**
+   * Whether this node exposes Workflow's error-output footer and port.
+   * Defaults to the ordinary executable-block behavior; graph documents can disable it while
+   * retaining the same card, selection, and connection rendering.
+   */
+  showsErrorOutput?: boolean
   /** Router 'Context' summary-row value (router_v2 only). */
   routerContextValue?: string
   /** Connection-cycle guard; reads fresh edge state on every call. */
@@ -528,6 +534,7 @@ export function WorkflowBlockView({
   hasContentBelowHeader,
   conditionRows,
   routerRows,
+  showsErrorOutput,
   routerContextValue,
   wouldCreateConnectionCycle,
   sunsetStatus,
@@ -688,7 +695,7 @@ export function WorkflowBlockView({
   })
   /* Blocks that can emit an error always carry the row; `response` terminates
      the flow and has no error branch. */
-  const showErrorRow = shouldShowDefaultHandles && type !== 'response'
+  const showErrorRow = showsErrorOutput ?? (shouldShowDefaultHandles && type !== 'response')
   /*
    * The error output is a real, draggable source whenever the toggle is on (a
    * connection forces the toggle on, so connected cards always have it). It
