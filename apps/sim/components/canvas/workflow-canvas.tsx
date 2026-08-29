@@ -75,7 +75,7 @@ export interface WorkflowCanvasProps extends Omit<CanvasSurfaceProps, 'documentK
  * The shared Sim Workflow canvas.
  *
  * Domain adapters provide nodes, edges, renderers, and mutations. This component owns the
- * ReactFlow interaction contract so Workflow and Roadmap documents cannot drift into separate
+ * ReactFlow interaction contract so Workflow and DAG documents cannot drift into separate
  * canvas implementations.
  */
 export function WorkflowCanvas({

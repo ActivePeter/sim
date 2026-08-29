@@ -7,30 +7,29 @@ import { ReactFlowProvider } from 'reactflow'
 import { CanvasEditorFrame } from '@/components/canvas'
 import {
   ActivityPanel,
+  DagCanvasAdapter,
   NodeInspector,
   type PlanActivity,
   PlanHeader,
-  PlanSidebar,
-  RoadmapCanvasAdapter,
 } from '@/app/plan-graph-demo/components'
 import {
-  addRoadmapDependency,
-  addRoadmapItem,
+  addDagDependency,
+  addDagItem,
   advancePlanItem,
-  createDemoRoadmap,
+  createDemoDag,
+  type DagItemUpdate,
   DEMO_AGENTS,
   getMergeBlockingItemIds,
+  getNextDagItemId,
   getNextReadyItem,
-  getNextRoadmapItemId,
   getPlanCounts,
   type PlanDependencyKind,
-  type RoadmapItemUpdate,
-  removeRoadmapDependency,
-  removeRoadmapItem,
+  removeDagDependency,
+  removeDagItem,
   resolvePlanItems,
   resolvePlanLifecycle,
-  updateRoadmapDependencyKind,
-  updateRoadmapItem,
+  updateDagDependencyKind,
+  updateDagItem,
 } from '@/app/plan-graph-demo/plan-graph-model'
 
 const INITIAL_ACTIVITIES: readonly PlanActivity[] = [
@@ -57,16 +56,20 @@ const INITIAL_ACTIVITIES: readonly PlanActivity[] = [
   },
 ]
 
-export function RoadmapDemo() {
-  const [roadmap, setRoadmap] = useState(createDemoRoadmap)
+interface DagDemoProps {
+  dagId?: string
+}
+
+export function DagDemo({ dagId }: DagDemoProps = {}) {
+  const [dag, setDag] = useState(() => createDemoDag(dagId))
   const [selectedItemId, setSelectedItemId] = useState('PG-02')
   const [activities, setActivities] = useState<PlanActivity[]>([...INITIAL_ACTIVITIES])
   const [canvasRevision, setCanvasRevision] = useState(0)
 
-  const items = roadmap.items
+  const items = dag.items
   const resolvedItems = useMemo(
-    () => resolvePlanItems(items, roadmap.dependencies),
-    [items, roadmap.dependencies]
+    () => resolvePlanItems(items, dag.dependencies),
+    [items, dag.dependencies]
   )
   const counts = useMemo(() => getPlanCounts(resolvedItems), [resolvedItems])
   const selectedItem = resolvedItems.find((item) => item.id === selectedItemId) ?? resolvedItems[0]
@@ -79,14 +82,14 @@ export function RoadmapDemo() {
   const availableAgent = DEMO_AGENTS.find((agent) => !activeAgents.has(agent))
 
   const handleAddItem = useCallback(() => {
-    const itemId = getNextRoadmapItemId(items)
-    setRoadmap((current) => addRoadmapItem(current, itemId))
+    const itemId = getNextDagItemId(items)
+    setDag((current) => addDagItem(current, itemId))
     setSelectedItemId(itemId)
     setActivities((current) =>
       [
         {
           id: generateShortId(),
-          title: `${itemId} added to the roadmap`,
+          title: `${itemId} added to the DAG`,
           detail:
             'Edit its bindings in the inspector, then drag a connector to define a dependency.',
           kind: 'plan' as const,
@@ -97,15 +100,15 @@ export function RoadmapDemo() {
     )
   }, [items])
 
-  const handleUpdateItem = useCallback((itemId: string, update: RoadmapItemUpdate) => {
-    setRoadmap((current) => updateRoadmapItem(current, itemId, update))
+  const handleUpdateItem = useCallback((itemId: string, update: DagItemUpdate) => {
+    setDag((current) => updateDagItem(current, itemId, update))
   }, [])
 
   const handleRemoveItem = useCallback(
     (itemId: string) => {
       if (items.length <= 1) return
       const nextSelectedItemId = items.find((item) => item.id !== itemId)?.id
-      setRoadmap((current) => removeRoadmapItem(current, itemId))
+      setDag((current) => removeDagItem(current, itemId))
       if (selectedItemId === itemId && nextSelectedItemId) {
         setSelectedItemId(nextSelectedItemId)
       }
@@ -133,9 +136,9 @@ export function RoadmapDemo() {
         target: targetId,
         kind: 'requires' as const,
       }
-      const nextRoadmap = addRoadmapDependency(roadmap, dependency)
-      const accepted = nextRoadmap !== roadmap
-      if (accepted) setRoadmap(nextRoadmap)
+      const nextDag = addDagDependency(dag, dependency)
+      const accepted = nextDag !== dag
+      if (accepted) setDag(nextDag)
       setActivities((current) =>
         [
           {
@@ -143,7 +146,7 @@ export function RoadmapDemo() {
             title: accepted ? `${sourceId} → ${targetId} connected` : 'Dependency rejected',
             detail: accepted
               ? 'A requires edge was added. Select the target node to change its policy.'
-              : 'Roadmaps reject duplicate, self-referential, and cyclic dependencies.',
+              : 'DAGs reject duplicate, self-referential, and cyclic dependencies.',
             kind: 'plan' as const,
             time: 'Now',
           },
@@ -151,22 +154,22 @@ export function RoadmapDemo() {
         ].slice(0, 8)
       )
     },
-    [roadmap]
+    [dag]
   )
 
   const handleUpdateDependencyKind = useCallback(
     (dependencyId: string, kind: PlanDependencyKind) => {
-      setRoadmap((current) => updateRoadmapDependencyKind(current, dependencyId, kind))
+      setDag((current) => updateDagDependencyKind(current, dependencyId, kind))
     },
     []
   )
 
   const handleRemoveDependency = useCallback((dependencyId: string) => {
-    setRoadmap((current) => removeRoadmapDependency(current, dependencyId))
+    setDag((current) => removeDagDependency(current, dependencyId))
   }, [])
 
-  const handlePositionsChange = useCallback((positions: typeof roadmap.positions) => {
-    setRoadmap((current) => ({ ...current, positions }))
+  const handlePositionsChange = useCallback((positions: typeof dag.positions) => {
+    setDag((current) => ({ ...current, positions }))
   }, [])
 
   const advanceItem = useCallback(
@@ -174,18 +177,22 @@ export function RoadmapDemo() {
       const currentItem = items.find((item) => item.id === itemId)
       if (!currentItem) return
 
-      const lifecycle = resolvePlanLifecycle(currentItem, items, roadmap.dependencies)
+      const lifecycle = resolvePlanLifecycle(currentItem, items, dag.dependencies)
       const assignedAgent = currentItem.agent ?? availableAgent
+      const pullRequestLabel =
+        currentItem.primaryPr.number === null
+          ? 'Planned pull request'
+          : `PR #${currentItem.primaryPr.number}`
       if (lifecycle === 'ready' && !assignedAgent) return
       if (
         lifecycle === 'review' &&
-        getMergeBlockingItemIds(itemId, items, roadmap.dependencies).length > 0
+        getMergeBlockingItemIds(itemId, items, dag.dependencies).length > 0
       ) {
         return
       }
 
       const readyBefore = new Set(
-        resolvePlanItems(items, roadmap.dependencies)
+        resolvePlanItems(items, dag.dependencies)
           .filter((item) => item.resolvedLifecycle === 'ready')
           .map((item) => item.id)
       )
@@ -193,9 +200,9 @@ export function RoadmapDemo() {
         items,
         itemId,
         assignedAgent ?? DEMO_AGENTS[0],
-        roadmap.dependencies
+        dag.dependencies
       )
-      const newlyReady = resolvePlanItems(nextItems, roadmap.dependencies)
+      const newlyReady = resolvePlanItems(nextItems, dag.dependencies)
         .filter((item) => item.resolvedLifecycle === 'ready' && !readyBefore.has(item.id))
         .map((item) => item.id)
 
@@ -212,7 +219,7 @@ export function RoadmapDemo() {
       } else if (lifecycle === 'active') {
         activity = {
           id: generateShortId(),
-          title: `PR #${currentItem.primaryPr.number} entered review`,
+          title: `${pullRequestLabel} entered review`,
           detail: 'Focused checks passed, the writer lease was released, and review is approved.',
           kind: 'review',
           time: 'Now',
@@ -220,7 +227,7 @@ export function RoadmapDemo() {
       } else {
         activity = {
           id: generateShortId(),
-          title: `PR #${currentItem.primaryPr.number} merged`,
+          title: `${pullRequestLabel} merged`,
           detail:
             newlyReady.length > 0
               ? `Dependency gates reopened. Newly ready: ${newlyReady.join(', ')}.`
@@ -230,48 +237,48 @@ export function RoadmapDemo() {
         }
       }
 
-      setRoadmap((current) => ({ ...current, items: nextItems }))
+      setDag((current) => ({ ...current, items: nextItems }))
       setActivities((current) => [activity, ...current].slice(0, 8))
     },
-    [availableAgent, items, roadmap.dependencies]
+    [availableAgent, items, dag.dependencies]
   )
 
   const handleClaimNext = useCallback(() => {
-    const nextItem = getNextReadyItem(items, roadmap.dependencies)
+    const nextItem = getNextReadyItem(items, dag.dependencies)
     if (!nextItem || !availableAgent) return
     setSelectedItemId(nextItem.id)
     advanceItem(nextItem.id)
-  }, [advanceItem, availableAgent, items, roadmap.dependencies])
+  }, [advanceItem, availableAgent, items, dag.dependencies])
 
   const handleReset = useCallback(() => {
-    setRoadmap(createDemoRoadmap())
+    setDag(createDemoDag(dagId))
     setSelectedItemId('PG-02')
     setActivities([...INITIAL_ACTIVITIES])
     setCanvasRevision((current) => current + 1)
-  }, [])
+  }, [dagId])
 
   if (!selectedItem) return null
 
   return (
-    <div className='flex h-screen min-h-[680px] w-full flex-col overflow-hidden bg-[var(--bg)]'>
+    <div className='flex h-full min-h-0 w-full flex-col overflow-hidden bg-[var(--bg)]'>
       <PlanHeader
         availableAgent={availableAgent}
         counts={counts}
-        name={roadmap.name}
+        name={dag.name}
         onAddNode={handleAddItem}
         onClaimNext={handleClaimNext}
         onReset={handleReset}
-        revision={roadmap.revision}
+        repository={dag.repository}
+        revision={dag.revision}
       />
 
       <CanvasEditorFrame
         className='min-h-0 flex-1'
-        leadingPanel={<PlanSidebar counts={counts} items={resolvedItems} />}
         bottomPanel={<ActivityPanel activities={activities} />}
         sidePanel={
           <NodeInspector
             availableAgent={availableAgent}
-            dependencies={roadmap.dependencies}
+            dependencies={dag.dependencies}
             item={selectedItem}
             items={resolvedItems}
             onAdvance={() => advanceItem(selectedItem.id)}
@@ -286,7 +293,7 @@ export function RoadmapDemo() {
         <section className='flex min-h-0 min-w-0 flex-1 flex-col'>
           <div className='flex h-10 shrink-0 items-center justify-between gap-3 border-[var(--border)] border-b bg-[var(--surface-1)] px-3'>
             <div className='flex items-center gap-3 text-[var(--text-muted)] text-xs'>
-              <span className='hidden sm:inline'>Roadmap graph</span>
+              <span className='hidden sm:inline'>PR dependency DAG</span>
               <span className='flex items-center gap-1.5'>
                 <span className='h-px w-5 bg-[var(--text-placeholder)]' />
                 requires
@@ -307,16 +314,16 @@ export function RoadmapDemo() {
 
           <div className='min-h-0 flex-1'>
             <ReactFlowProvider>
-              <RoadmapCanvasAdapter
+              <DagCanvasAdapter
                 key={canvasRevision}
-                dependencies={roadmap.dependencies}
+                dependencies={dag.dependencies}
                 items={items}
                 onConnectItems={handleConnectItems}
                 onPositionsChange={handlePositionsChange}
                 resolvedItems={resolvedItems}
                 selectedItemId={selectedItemId}
                 onSelectItem={setSelectedItemId}
-                positions={roadmap.positions}
+                positions={dag.positions}
               />
             </ReactFlowProvider>
           </div>

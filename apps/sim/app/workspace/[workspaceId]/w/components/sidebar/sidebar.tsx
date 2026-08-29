@@ -54,6 +54,7 @@ import {
   CollapsedFolderItems,
   CollapsedSidebarMenu,
   CollapsedWorkflowFlyoutItem,
+  DagList,
   FilesRailFlyout,
   HelpModal,
   NavItemContextMenu,
@@ -410,6 +411,7 @@ export const Sidebar = memo(function Sidebar({
   const params = useParams()
   const workspaceId = params.workspaceId as string
   const workflowId = params.workflowId as string | undefined
+  const dagId = params.dagId as string | undefined
   const router = useRouter()
   const pathname = usePathname()
 
@@ -1807,6 +1809,18 @@ export const Sidebar = memo(function Sidebar({
                           )}
                         </div>
                       )}
+                    </SidebarSection>
+
+                    <SidebarSection
+                      title='DAGs'
+                      railCollapsed={isCollapsed}
+                      className={cn(SIDEBAR_SECTION_GAP_CLASS, 'dags-section flex-shrink-0')}
+                    >
+                      <DagList
+                        workspaceId={workspaceId}
+                        currentDagId={dagId}
+                        isCollapsed={isCollapsed}
+                      />
                     </SidebarSection>
                   </div>
                 </div>

@@ -14,12 +14,12 @@ import {
   Workflow,
 } from '@sim/emcn/icons'
 import {
+  type DagItemUpdate,
   getMergeBlockingItemIds,
   type PlanDependency,
   type PlanDependencyKind,
   type PlanLifecycle,
   type ResolvedPlanItem,
-  type RoadmapItemUpdate,
 } from '@/app/plan-graph-demo/plan-graph-model'
 
 const DEPENDENCY_KINDS: readonly PlanDependencyKind[] = ['requires', 'contract', 'integrate-with']
@@ -49,7 +49,7 @@ interface NodeInspectorProps {
   onRemoveDependency: (dependencyId: string) => void
   onRemoveItem: () => void
   onUpdateDependencyKind: (dependencyId: string, kind: PlanDependencyKind) => void
-  onUpdateItem: (update: RoadmapItemUpdate) => void
+  onUpdateItem: (update: DagItemUpdate) => void
 }
 
 interface DetailRowProps {
@@ -259,9 +259,14 @@ export function NodeInspector({
                 id={`${item.id}-pr`}
                 type='number'
                 min={1}
+                placeholder='Not opened'
                 inputClassName='font-mono'
-                defaultValue={item.primaryPr.number}
+                defaultValue={item.primaryPr.number ?? ''}
                 onBlur={(event) => {
+                  if (!event.currentTarget.value.trim()) {
+                    onUpdateItem({ primaryPrNumber: null })
+                    return
+                  }
                   const primaryPrNumber = event.currentTarget.valueAsNumber
                   if (Number.isInteger(primaryPrNumber) && primaryPrNumber > 0) {
                     onUpdateItem({ primaryPrNumber })

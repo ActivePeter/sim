@@ -1,10 +1,11 @@
 import type { CanvasDocumentKind } from '@/lib/canvas/types'
+import { DEFAULT_DEMO_DAG_ID, getDemoDag } from '@/lib/dags/demo-catalog'
 
 export type StoredPlanLifecycle = 'planned' | 'active' | 'review' | 'done'
 export type PlanLifecycle = StoredPlanLifecycle | 'ready' | 'blocked'
 export type PlanNodeKind = 'contract' | 'implementation' | 'integration'
 export type PlanDependencyKind = 'contract' | 'requires' | 'integrate-with'
-export type PullRequestState = 'Pending' | 'Draft' | 'Open' | 'Merged'
+export type PullRequestState = 'Unopened' | 'Draft' | 'Open' | 'Merged'
 export type CheckState = 'Pending' | 'Running' | 'Passed'
 export type ReviewState = 'Pending' | 'Approved'
 
@@ -14,7 +15,7 @@ export interface PlanIssueBinding {
 }
 
 export interface PlanPullRequestBinding {
-  number: number
+  number: number | null
   state: PullRequestState
   checks: CheckState
   review: ReviewState
@@ -72,20 +73,21 @@ export interface PlanPosition {
   y: number
 }
 
-export interface RoadmapDocument {
+export interface DagDocument {
   dependencies: PlanDependency[]
   id: string
   items: PlanItem[]
-  kind: Extract<CanvasDocumentKind, 'roadmap'>
+  kind: Extract<CanvasDocumentKind, 'dag'>
   name: string
   positions: Record<string, PlanPosition>
+  repository: string
   revision: number
 }
 
-export interface RoadmapItemUpdate {
+export interface DagItemUpdate {
   humanOwner?: string
   issueNumber?: number
-  primaryPrNumber?: number
+  primaryPrNumber?: number | null
   summary?: string
   title?: string
 }
@@ -154,8 +156,8 @@ const INITIAL_PLAN_ITEMS: readonly PlanItem[] = [
     expectedPaths: ['lib/session-queue', 'stores/session-runs'],
     issue: { number: 4, state: 'Open' },
     primaryPr: {
-      number: 24,
-      state: 'Pending',
+      number: null,
+      state: 'Unopened',
       checks: 'Pending',
       review: 'Pending',
     },
@@ -173,8 +175,8 @@ const INITIAL_PLAN_ITEMS: readonly PlanItem[] = [
     expectedPaths: ['lib/change-sets', 'components/diff-review'],
     issue: { number: 5, state: 'Open' },
     primaryPr: {
-      number: 25,
-      state: 'Pending',
+      number: null,
+      state: 'Unopened',
       checks: 'Pending',
       review: 'Pending',
     },
@@ -192,8 +194,8 @@ const INITIAL_PLAN_ITEMS: readonly PlanItem[] = [
     expectedPaths: ['components/document-actions', 'lib/session-entry'],
     issue: { number: 6, state: 'Open' },
     primaryPr: {
-      number: 27,
-      state: 'Pending',
+      number: null,
+      state: 'Unopened',
       checks: 'Pending',
       review: 'Pending',
     },
@@ -211,8 +213,8 @@ const INITIAL_PLAN_ITEMS: readonly PlanItem[] = [
     expectedPaths: ['app/plan-graph', 'components/session-panel'],
     issue: { number: 7, state: 'Open' },
     primaryPr: {
-      number: 28,
-      state: 'Pending',
+      number: null,
+      state: 'Unopened',
       checks: 'Pending',
       review: 'Pending',
     },
@@ -228,11 +230,13 @@ export const PLAN_DEPENDENCIES: readonly PlanDependency[] = [
   { id: 'edge-04-06', source: 'PG-04', target: 'PG-06', kind: 'integrate-with' },
 ]
 
-export function createDemoRoadmap(): RoadmapDocument {
+export function createDemoDag(dagId: string = DEFAULT_DEMO_DAG_ID): DagDocument {
+  const catalogItem = getDemoDag(dagId)
   return {
-    id: 'roadmap-agent-sessions',
-    kind: 'roadmap',
-    name: 'Agent Roadmap',
+    id: dagId,
+    kind: 'dag',
+    name: catalogItem?.name ?? 'Untitled PR DAG',
+    repository: catalogItem?.repository ?? 'Unknown repository',
     revision: 7,
     items: createDemoPlanItems(),
     dependencies: PLAN_DEPENDENCIES.map((dependency) => ({ ...dependency })),
@@ -260,7 +264,7 @@ export function createDemoPlanItems(): PlanItem[] {
   }))
 }
 
-export function getNextRoadmapItemId(items: readonly PlanItem[]): string {
+export function getNextDagItemId(items: readonly PlanItem[]): string {
   const nextNumber =
     items.reduce((highest, item) => {
       const match = /^PG-(\d+)$/.exec(item.id)
@@ -270,16 +274,15 @@ export function getNextRoadmapItemId(items: readonly PlanItem[]): string {
   return `PG-${String(nextNumber).padStart(2, '0')}`
 }
 
-export function addRoadmapItem(document: RoadmapDocument, itemId: string): RoadmapDocument {
+export function addDagItem(document: DagDocument, itemId: string): DagDocument {
   if (document.items.some((item) => item.id === itemId)) return document
 
   const wave = Math.max(0, ...document.items.map((item) => item.wave))
   const itemsInWave = document.items.filter((item) => item.wave === wave).length
   const issueNumber = Math.max(0, ...document.items.map((item) => item.issue.number)) + 1
-  const primaryPrNumber = Math.max(0, ...document.items.map((item) => item.primaryPr.number)) + 1
   const item: PlanItem = {
     id: itemId,
-    title: 'Untitled roadmap item',
+    title: 'Untitled DAG item',
     summary: 'Describe the outcome this node must deliver before its dependents can proceed.',
     kind: 'implementation',
     wave,
@@ -289,8 +292,8 @@ export function addRoadmapItem(document: RoadmapDocument, itemId: string): Roadm
     expectedPaths: [],
     issue: { number: issueNumber, state: 'Open' },
     primaryPr: {
-      number: primaryPrNumber,
-      state: 'Pending',
+      number: null,
+      state: 'Unopened',
       checks: 'Pending',
       review: 'Pending',
     },
@@ -307,11 +310,11 @@ export function addRoadmapItem(document: RoadmapDocument, itemId: string): Roadm
   }
 }
 
-export function updateRoadmapItem(
-  document: RoadmapDocument,
+export function updateDagItem(
+  document: DagDocument,
   itemId: string,
-  update: RoadmapItemUpdate
-): RoadmapDocument {
+  update: DagItemUpdate
+): DagDocument {
   const currentItem = document.items.find((item) => item.id === itemId)
   if (!currentItem) return document
 
@@ -327,7 +330,20 @@ export function updateRoadmapItem(
     primaryPr:
       update.primaryPrNumber === undefined
         ? currentItem.primaryPr
-        : { ...currentItem.primaryPr, number: update.primaryPrNumber },
+        : update.primaryPrNumber === null
+          ? {
+              ...currentItem.primaryPr,
+              number: null,
+              state: 'Unopened',
+              checks: 'Pending',
+              review: 'Pending',
+            }
+          : {
+              ...currentItem.primaryPr,
+              number: update.primaryPrNumber,
+              state:
+                currentItem.primaryPr.state === 'Unopened' ? 'Draft' : currentItem.primaryPr.state,
+            },
   }
 
   if (
@@ -335,7 +351,10 @@ export function updateRoadmapItem(
     nextItem.summary === currentItem.summary &&
     nextItem.humanOwner === currentItem.humanOwner &&
     nextItem.issue.number === currentItem.issue.number &&
-    nextItem.primaryPr.number === currentItem.primaryPr.number
+    nextItem.primaryPr.number === currentItem.primaryPr.number &&
+    nextItem.primaryPr.state === currentItem.primaryPr.state &&
+    nextItem.primaryPr.checks === currentItem.primaryPr.checks &&
+    nextItem.primaryPr.review === currentItem.primaryPr.review
   ) {
     return document
   }
@@ -347,7 +366,7 @@ export function updateRoadmapItem(
   }
 }
 
-export function removeRoadmapItem(document: RoadmapDocument, itemId: string): RoadmapDocument {
+export function removeDagItem(document: DagDocument, itemId: string): DagDocument {
   if (!document.items.some((item) => item.id === itemId)) return document
 
   const positions = { ...document.positions }
@@ -364,7 +383,7 @@ export function removeRoadmapItem(document: RoadmapDocument, itemId: string): Ro
   }
 }
 
-export function wouldCreateRoadmapCycle(
+export function wouldCreateDagCycle(
   dependencies: readonly PlanDependency[],
   source: string,
   target: string
@@ -391,10 +410,7 @@ export function wouldCreateRoadmapCycle(
   return false
 }
 
-export function addRoadmapDependency(
-  document: RoadmapDocument,
-  dependency: PlanDependency
-): RoadmapDocument {
+export function addDagDependency(document: DagDocument, dependency: PlanDependency): DagDocument {
   const itemIds = new Set(document.items.map((item) => item.id))
   const duplicate = document.dependencies.some(
     (candidate) => candidate.source === dependency.source && candidate.target === dependency.target
@@ -403,7 +419,7 @@ export function addRoadmapDependency(
     !itemIds.has(dependency.source) ||
     !itemIds.has(dependency.target) ||
     duplicate ||
-    wouldCreateRoadmapCycle(document.dependencies, dependency.source, dependency.target)
+    wouldCreateDagCycle(document.dependencies, dependency.source, dependency.target)
   ) {
     return document
   }
@@ -415,11 +431,11 @@ export function addRoadmapDependency(
   }
 }
 
-export function updateRoadmapDependencyKind(
-  document: RoadmapDocument,
+export function updateDagDependencyKind(
+  document: DagDocument,
   dependencyId: string,
   kind: PlanDependencyKind
-): RoadmapDocument {
+): DagDocument {
   const dependency = document.dependencies.find((candidate) => candidate.id === dependencyId)
   if (!dependency || dependency.kind === kind) return document
 
@@ -432,10 +448,7 @@ export function updateRoadmapDependencyKind(
   }
 }
 
-export function removeRoadmapDependency(
-  document: RoadmapDocument,
-  dependencyId: string
-): RoadmapDocument {
+export function removeDagDependency(document: DagDocument, dependencyId: string): DagDocument {
   if (!document.dependencies.some((dependency) => dependency.id === dependencyId)) {
     return document
   }
@@ -540,6 +553,9 @@ export function advancePlanItem(
     return [...items]
   }
 
+  const nextPrimaryPrNumber =
+    Math.max(0, ...items.map((candidate) => candidate.primaryPr.number ?? 0)) + 1
+
   return items.map((candidate) => {
     if (candidate.id !== itemId) return candidate
 
@@ -550,6 +566,7 @@ export function advancePlanItem(
         agent,
         primaryPr: {
           ...candidate.primaryPr,
+          number: candidate.primaryPr.number ?? nextPrimaryPrNumber,
           state: 'Draft',
           checks: 'Running',
           review: 'Pending',

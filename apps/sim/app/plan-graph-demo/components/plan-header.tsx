@@ -1,5 +1,5 @@
 import { Badge, Chip, ChipLink } from '@sim/emcn'
-import { Play, Plus, RefreshCw, SquareArrowUpRight, Workflow } from '@sim/emcn/icons'
+import { Play, Plus, RefreshCw, Split, SquareArrowUpRight } from '@sim/emcn/icons'
 import type { PlanCounts } from '@/app/plan-graph-demo/plan-graph-model'
 
 interface PlanHeaderProps {
@@ -9,6 +9,7 @@ interface PlanHeaderProps {
   onAddNode: () => void
   onClaimNext: () => void
   onReset: () => void
+  repository: string
   revision: number
 }
 
@@ -19,23 +20,24 @@ export function PlanHeader({
   onAddNode,
   onClaimNext,
   onReset,
+  repository,
   revision,
 }: PlanHeaderProps) {
   return (
     <header className='flex h-[58px] shrink-0 items-center justify-between gap-4 border-[var(--border)] border-b bg-[var(--surface-1)] px-4'>
       <div className='flex min-w-0 items-center gap-3'>
         <div className='flex size-8 shrink-0 items-center justify-center rounded-lg bg-[var(--text-primary)] text-[var(--text-inverse)]'>
-          <Workflow className='size-4' />
+          <Split className='size-4' />
         </div>
         <div className='min-w-0'>
           <div className='flex items-center gap-2'>
             <h1 className='truncate text-[var(--text-primary)] text-sm'>{name}</h1>
             <Badge variant='purple' size='sm'>
-              Roadmap
+              DAG
             </Badge>
           </div>
           <p className='truncate text-[var(--text-muted)] text-xs'>
-            ActivePeter/sim · plan graph · revision {revision}
+            {repository} · PR dependency DAG · revision {revision}
           </p>
         </div>
       </div>

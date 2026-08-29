@@ -1,75 +1,84 @@
 import { describe, expect, it } from 'vitest'
 import {
-  addRoadmapDependency,
-  addRoadmapItem,
+  addDagDependency,
+  addDagItem,
   advancePlanItem,
+  createDemoDag,
   createDemoPlanItems,
-  createDemoRoadmap,
   getBlockingItemIds,
   getMergeBlockingItemIds,
+  getNextDagItemId,
   getNextReadyItem,
-  getNextRoadmapItemId,
   type PlanDependency,
   type PlanItem,
-  removeRoadmapDependency,
-  removeRoadmapItem,
+  removeDagDependency,
+  removeDagItem,
   resolvePlanItems,
-  updateRoadmapDependencyKind,
-  updateRoadmapItem,
+  updateDagDependencyKind,
+  updateDagItem,
 } from '@/app/plan-graph-demo/plan-graph-model'
 
 describe('plan graph demo model', () => {
-  it('models the demo as an isolated roadmap document', () => {
-    const roadmap = createDemoRoadmap()
-    const secondRoadmap = createDemoRoadmap()
+  it('models the demo as an isolated DAG document', () => {
+    const dag = createDemoDag()
+    const secondDag = createDemoDag()
 
-    expect(roadmap).toMatchObject({
-      id: 'roadmap-agent-sessions',
-      kind: 'roadmap',
-      name: 'Agent Roadmap',
+    expect(dag).toMatchObject({
+      id: 'agent-session-prs',
+      kind: 'dag',
+      name: 'Agent session PR rollout',
       revision: 7,
     })
-    expect(roadmap.items).not.toBe(secondRoadmap.items)
-    expect(roadmap.dependencies).not.toBe(secondRoadmap.dependencies)
-    expect(roadmap.positions).not.toBe(secondRoadmap.positions)
+    expect(dag.items).not.toBe(secondDag.items)
+    expect(dag.dependencies).not.toBe(secondDag.dependencies)
+    expect(dag.positions).not.toBe(secondDag.positions)
   })
 
-  it('adds and edits a roadmap node with artifact bindings', () => {
-    const roadmap = createDemoRoadmap()
-    const itemId = getNextRoadmapItemId(roadmap.items)
-    const withItem = addRoadmapItem(roadmap, itemId)
-    const updated = updateRoadmapItem(withItem, itemId, {
-      title: 'Editable roadmap node',
+  it('adds and edits a DAG node with artifact bindings', () => {
+    const dag = createDemoDag()
+    const itemId = getNextDagItemId(dag.items)
+    const withItem = addDagItem(dag, itemId)
+    const updated = updateDagItem(withItem, itemId, {
+      title: 'Editable DAG node',
       issueNumber: 42,
       primaryPrNumber: 84,
     })
+    const cleared = updateDagItem(updated, itemId, { primaryPrNumber: null })
 
     expect(itemId).toBe('PG-07')
+    expect(withItem.items.find((item) => item.id === itemId)?.primaryPr).toMatchObject({
+      number: null,
+      state: 'Unopened',
+    })
     expect(updated.items.find((item) => item.id === itemId)).toMatchObject({
-      title: 'Editable roadmap node',
+      title: 'Editable DAG node',
       issue: { number: 42 },
-      primaryPr: { number: 84 },
+      primaryPr: { number: 84, state: 'Draft' },
     })
     expect(updated.positions[itemId]).toBeDefined()
+    expect(cleared.items.find((item) => item.id === itemId)?.primaryPr).toMatchObject({
+      number: null,
+      state: 'Unopened',
+    })
   })
 
   it('adds editable dependencies while preserving the DAG invariant', () => {
-    const roadmap = createDemoRoadmap()
+    const dag = createDemoDag()
     const dependency: PlanDependency = {
       id: 'edge-new',
       source: 'PG-05',
       target: 'PG-04',
       kind: 'requires',
     }
-    const withDependency = addRoadmapDependency(roadmap, dependency)
-    const changedKind = updateRoadmapDependencyKind(withDependency, dependency.id, 'integrate-with')
-    const cyclic = addRoadmapDependency(changedKind, {
+    const withDependency = addDagDependency(dag, dependency)
+    const changedKind = updateDagDependencyKind(withDependency, dependency.id, 'integrate-with')
+    const cyclic = addDagDependency(changedKind, {
       id: 'edge-cycle',
       source: 'PG-05',
       target: 'PG-01',
       kind: 'requires',
     })
-    const removed = removeRoadmapDependency(changedKind, dependency.id)
+    const removed = removeDagDependency(changedKind, dependency.id)
 
     expect(changedKind.dependencies.find((candidate) => candidate.id === dependency.id)?.kind).toBe(
       'integrate-with'
@@ -78,9 +87,9 @@ describe('plan graph demo model', () => {
     expect(removed.dependencies.some((candidate) => candidate.id === dependency.id)).toBe(false)
   })
 
-  it('removes a roadmap node together with its position and dependencies', () => {
-    const roadmap = createDemoRoadmap()
-    const next = removeRoadmapItem(roadmap, 'PG-02')
+  it('removes a DAG node together with its position and dependencies', () => {
+    const dag = createDemoDag()
+    const next = removeDagItem(dag, 'PG-02')
 
     expect(next.items.some((item) => item.id === 'PG-02')).toBe(false)
     expect(next.positions['PG-02']).toBeUndefined()
@@ -148,13 +157,17 @@ describe('plan graph demo model', () => {
     expect(getBlockingItemIds('PG-01', items, dependencies)).toEqual(['PG-02'])
   })
 
-  it('advances against the roadmap dependency set supplied by a caller', () => {
+  it('advances against the DAG dependency set supplied by a caller', () => {
     const items = createDemoPlanItems()
     const next = advancePlanItem(items, 'PG-03', 'Codex 02', [])
 
     expect(next.find((item) => item.id === 'PG-03')).toMatchObject({
       lifecycle: 'active',
       agent: 'Codex 02',
+      primaryPr: {
+        number: 23,
+        state: 'Draft',
+      },
     })
   })
 

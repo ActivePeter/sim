@@ -103,7 +103,7 @@ export function PlanNodeCard({ data, selected }: NodeProps<PlanNodeData>) {
           </span>
           <span className='flex items-center gap-1'>
             <Workflow className='size-3' />
-            {item.primaryPr.state === 'Pending' ? 'PR pending' : `PR #${item.primaryPr.number}`}
+            {item.primaryPr.number === null ? 'PR not opened' : `PR #${item.primaryPr.number}`}
           </span>
         </div>
 

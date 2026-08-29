@@ -22,10 +22,10 @@ import {
   type ResolvedPlanItem,
 } from '@/app/plan-graph-demo/plan-graph-model'
 
-const ROADMAP_NODE_TYPES: NodeTypes = { roadmapNode: PlanNodeCard }
-const ROADMAP_EDGE_TYPES: EdgeTypes = { roadmapEdge: PlanEdge }
+const DAG_NODE_TYPES: NodeTypes = { dagNode: PlanNodeCard }
+const DAG_EDGE_TYPES: EdgeTypes = { dagEdge: PlanEdge }
 
-interface RoadmapCanvasAdapterProps {
+interface DagCanvasAdapterProps {
   dependencies: readonly PlanDependency[]
   items: readonly PlanItem[]
   onConnectItems: (sourceId: string, targetId: string) => void
@@ -37,7 +37,7 @@ interface RoadmapCanvasAdapterProps {
 }
 
 /** Maps the Plan Graph domain to node and edge types consumed by the shared WorkflowCanvas. */
-export function RoadmapCanvasAdapter({
+export function DagCanvasAdapter({
   dependencies,
   items,
   onConnectItems,
@@ -46,13 +46,13 @@ export function RoadmapCanvasAdapter({
   positions,
   resolvedItems,
   selectedItemId,
-}: RoadmapCanvasAdapterProps) {
+}: DagCanvasAdapterProps) {
   const [canvasMode, setCanvasMode] = useState<CanvasInteractionMode>('hand')
   const nodes = useMemo<Node<PlanNodeData>[]>(
     () =>
       resolvedItems.map((item) => ({
         id: item.id,
-        type: 'roadmapNode',
+        type: 'dagNode',
         position: positions[item.id] ?? { x: 0, y: 0 },
         data: { item },
         selected: item.id === selectedItemId,
@@ -66,7 +66,7 @@ export function RoadmapCanvasAdapter({
         id: dependency.id,
         source: dependency.source,
         target: dependency.target,
-        type: 'roadmapEdge',
+        type: 'dagEdge',
         markerEnd: { type: MarkerType.ArrowClosed },
         animated: items.find((item) => item.id === dependency.source)?.lifecycle === 'active',
         data: {
@@ -106,13 +106,13 @@ export function RoadmapCanvasAdapter({
   return (
     <div className='relative h-full min-h-0 w-full'>
       <WorkflowCanvas
-        documentKind='roadmap'
+        documentKind='dag'
         interactionMode={canvasMode}
         editable
         nodes={nodes}
         edges={edges}
-        nodeTypes={ROADMAP_NODE_TYPES}
-        edgeTypes={ROADMAP_EDGE_TYPES}
+        nodeTypes={DAG_NODE_TYPES}
+        edgeTypes={DAG_EDGE_TYPES}
         onNodesChange={handleNodesChange}
         onConnect={handleConnect}
         onNodeClick={(_event, node) => onSelectItem(node.id)}

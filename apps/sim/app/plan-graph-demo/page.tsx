@@ -1,12 +1,19 @@
 import type { Metadata } from 'next'
-import { RoadmapDemo } from '@/app/plan-graph-demo/plan-graph-demo'
+import { redirect } from 'next/navigation'
+import { DEFAULT_DEMO_DAG_ID } from '@/lib/dags/demo-catalog'
+import { DagDemo } from '@/app/plan-graph-demo/plan-graph-demo'
 
 export const metadata: Metadata = {
-  title: 'Agent Roadmap Demo | Sim',
+  title: 'Agent DAG Demo | Sim',
   description:
-    'A roadmap canvas for human-authored PR dependencies executed by multiple coding agents.',
+    'A DAG canvas for human-authored PR dependencies executed by multiple coding agents.',
 }
 
-export default function RoadmapDemoPage() {
-  return <RoadmapDemo />
+export default function DagDemoPage() {
+  const workspaceId = process.env.PLAN_GRAPH_DEMO_WORKSPACE_ID
+  if (workspaceId) {
+    redirect(`/workspace/${workspaceId}/d/${DEFAULT_DEMO_DAG_ID}`)
+  }
+
+  return <DagDemo />
 }
