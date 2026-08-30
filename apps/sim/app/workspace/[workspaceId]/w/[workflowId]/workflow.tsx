@@ -12,7 +12,6 @@ import {
   CONNECTION_PICKER_Z,
   CONTAINER_CHILD_Z_BASE,
   CONTAINER_DIMENSIONS,
-  EDGE_Z_MAX,
   getBlockZIndex,
   getEdgeZIndex,
   getEdgeZIndexForTarget,
@@ -22,20 +21,28 @@ import {
 import {
   normalizeWorkflowEdgeSourceHandle,
   normalizeWorkflowEdgeTargetHandle,
-  WORKFLOW_TARGET_HANDLE_ID,
+  WORKFLOW_SOURCE_HANDLE_ID,
 } from '@sim/workflow-types/workflow'
 import { useParams, useRouter } from 'next/navigation'
 import {
   applyNodeChanges,
+  type Connection,
   type Edge,
   type Node,
   type NodeChange,
-  type OnConnectStart,
   ReactFlowProvider,
   useReactFlow,
 } from 'reactflow'
 import { useShallow } from 'zustand/react/shallow'
-import { CanvasEditorFrame, WorkflowCanvas } from '@/components/canvas'
+import {
+  CanvasEditorFrame,
+  useWorkflowConnectionGesture,
+  useWorkflowNodeDrag,
+  WORKFLOW_CONNECTION_CONTAINER_CLASSNAME,
+  WORKFLOW_CONNECTION_LINE_CONTAINER_STYLE,
+  WorkflowCanvas,
+  type WorkflowConnectionPaneDrop,
+} from '@/components/canvas'
 import { useSession } from '@/lib/auth/auth-client'
 import type { OAuthConnectEventDetail } from '@/lib/copilot/tools/client/base-tool'
 import { consumeOAuthReturnContext, writeOAuthReturnContext } from '@/lib/credentials/client-state'
@@ -171,13 +178,6 @@ const SUBFLOW_FOCUS_MIN_WAIT_FRAMES = 4
 const SUBFLOW_FOCUS_MAX_WAIT_FRAMES = 18
 const SUBFLOW_FOCUS_LAYOUT_TOLERANCE_PX = 0.5
 const SUBFLOW_FOCUS_PADDING = 0.08
-/**
- * The in-flight drag line is an edge, so it belongs at the top of the edge band
- * rather than at React Flow's stylesheet default of 1001 — which sits above
- * every card and even above a selected container child.
- */
-const CONNECTION_LINE_CONTAINER_STYLE = { zIndex: EDGE_Z_MAX }
-
 const getRegularBlockWidth = (type: string) =>
   type === 'note' || type === 'noteBlock'
     ? BLOCK_DIMENSIONS.NOTE_WIDTH
@@ -607,18 +607,6 @@ const WorkflowContent = React.memo(
           hasActiveDiff: state.hasActiveDiff,
         }))
       )
-
-    /** Stores source node/handle info when a connection drag starts for drop-on-block detection. */
-    const connectionSourceRef = useRef<{
-      nodeId: string | null
-      handleId: string | null
-    } | null>(null)
-
-    /** Tracks whether onConnect successfully handled the connection (ReactFlow pattern). */
-    const connectionCompletedRef = useRef(false)
-
-    /** Set when Escape aborts an in-flight connection drag so no edge or selector results. */
-    const connectionCancelledRef = useRef(false)
 
     /** Stores start positions for multi-node drag undo/redo recording. */
     const multiNodeDragStartRef = useRef<Map<string, { x: number; y: number; parentId?: string }>>(
@@ -3376,274 +3364,151 @@ const WorkflowContent = React.memo(
       [collaborativeBatchRemoveEdges, edges, blocks]
     )
 
-    /**
-     * Finds the node under the cursor using DOM hit-testing for pixel-perfect
-     * detection that matches exactly what the user sees on screen.
-     * Uses the same approach as ReactFlow's internal handle detection.
-     */
-    const findNodeAtScreenPosition = useCallback(
-      (clientX: number, clientY: number) => {
-        const elements = document.elementsFromPoint(clientX, clientY)
-        const nodes = getNodes()
-
-        for (const el of elements) {
-          const nodeEl = el.closest('.react-flow__node') as HTMLElement | null
-          if (!nodeEl) continue
-
-          const nodeId = nodeEl.getAttribute('data-id')
-          if (!nodeId) continue
-
-          const node = nodes.find((n) => n.id === nodeId)
-          if (node && node.type !== 'subflowNode') return node
-        }
-
-        return undefined
-      },
-      [getNodes]
-    )
-
-    /**
-     * Aborts an in-flight connection drag on Escape.
-     *
-     * React Flow only tears a handle drag down on pointer release, so a synthetic
-     * mouseup is dispatched to run its own cleanup: it stops auto-panning, clears
-     * the connection line and handle highlights, and detaches its document
-     * listeners. `connectionCancelledRef` turns the resulting `onConnect` and
-     * `onConnectEnd` into no-ops so the drag leaves behind neither an edge nor the
-     * block selector, and the real mouseup that follows is inert.
-     *
-     * Listens in the capture phase and stops propagation so Escape mid-drag only
-     * cancels the edge and never reaches an unrelated Escape handler.
-     */
-    const handleConnectionEscape = useCallback((event: KeyboardEvent) => {
-      if (event.key !== 'Escape' || !connectionSourceRef.current) return
-      event.preventDefault()
-      event.stopPropagation()
-      connectionCancelledRef.current = true
-      document.dispatchEvent(new MouseEvent('mouseup', { bubbles: true }))
-    }, [])
-
-    useEffect(
-      () => () => window.removeEventListener('keydown', handleConnectionEscape, true),
-      [handleConnectionEscape]
-    )
-
-    /**
-     * Captures the source handle when a connection drag starts.
-     * Resets connectionCompletedRef to track if onConnect handles this connection.
-     */
-    const onConnectStart = useCallback<OnConnectStart>(
-      (_event, params) => {
-        useSearchModalStore.getState().close()
-        closeConnectionBlockSelector()
-        canvasContainerRef.current?.setAttribute(
-          'data-connection-line',
-          params.handleId === 'error' ? 'error' : 'default'
-        )
-        canvasContainerRef.current?.setAttribute('data-connection-active', 'true')
-        connectionSourceRef.current = {
-          nodeId: params?.nodeId,
-          handleId: params?.handleId,
-        }
-        connectionCompletedRef.current = false
-        connectionCancelledRef.current = false
-        window.addEventListener('keydown', handleConnectionEscape, true)
-      },
-      [closeConnectionBlockSelector, handleConnectionEscape]
-    )
-
     /** Handles new edge connections with container boundary validation. */
-    const onConnect = useCallback(
-      (connection: any) => {
-        if (connectionCancelledRef.current) return
-        if (connection.source && connection.target) {
-          const normalizedConnection = {
-            ...connection,
-            sourceHandle: normalizeCursorSourceHandleId(
-              connection.sourceHandle,
-              blocks[connection.source]?.type
-            ),
-            targetHandle: connection.targetHandle,
-          }
-          // Check if connecting nodes across container boundaries
-          const sourceNode = getNodes().find((n) => n.id === connection.source)
-          const targetNode = getNodes().find((n) => n.id === connection.target)
+    const commitConnection = useCallback(
+      (connection: Connection): boolean => {
+        const { source, target } = connection
+        if (!source || !target) return false
 
-          if (!sourceNode || !targetNode) return
+        const normalizedConnection: Connection & { source: string; target: string } = {
+          ...connection,
+          source,
+          target,
+          sourceHandle:
+            normalizeCursorSourceHandleId(connection.sourceHandle, blocks[source]?.type) ?? null,
+        }
+        const sourceNode = getNodes().find((node) => node.id === source)
+        const targetNode = getNodes().find((node) => node.id === target)
+        if (!sourceNode || !targetNode) return false
 
-          // Prevent connections to protected blocks (outbound from locked blocks is allowed)
-          if (isEdgeProtected(normalizedConnection, blocks)) {
-            toast({
-              message: 'Cannot connect to locked blocks or blocks inside locked containers',
-            })
-            return
-          }
+        if (isEdgeProtected({ source, target }, blocks)) {
+          toast({
+            message: 'Cannot connect to locked blocks or blocks inside locked containers',
+          })
+          return false
+        }
 
-          // Get parent information (handle container start node case)
-          const sourceParentId =
-            blocks[sourceNode.id]?.data?.parentId ||
-            (normalizedConnection.sourceHandle === 'loop-start-source' ||
-            normalizedConnection.sourceHandle === 'parallel-start-source'
-              ? normalizedConnection.source
-              : undefined)
-          const targetParentId = blocks[targetNode.id]?.data?.parentId
+        const sourceParentId =
+          blocks[sourceNode.id]?.data?.parentId ||
+          (normalizedConnection.sourceHandle === 'loop-start-source' ||
+          normalizedConnection.sourceHandle === 'parallel-start-source'
+            ? normalizedConnection.source
+            : undefined)
+        const targetParentId = blocks[targetNode.id]?.data?.parentId
+        const edgeId = generateId()
 
-          // Generate a unique edge ID
-          const edgeId = generateId()
-
-          // Special case for container start source: Always allow connections to nodes within the same container
-          if (
-            (normalizedConnection.sourceHandle === 'loop-start-source' ||
-              normalizedConnection.sourceHandle === 'parallel-start-source') &&
-            blocks[targetNode.id]?.data?.parentId === sourceNode.id
-          ) {
-            // This is a connection from container start to a node inside the container - always allow
-
-            addEdge({
-              ...normalizedConnection,
-              id: edgeId,
-              type: 'workflowEdge',
-              // Add metadata about the container context
-              data: {
-                parentId: sourceNode.id,
-                isInsideContainer: true,
-              },
-            })
-            connectionCompletedRef.current = true
-            return
-          }
-
-          // Prevent connections across container boundaries
-          if (
-            (sourceParentId && !targetParentId) ||
-            (!sourceParentId && targetParentId) ||
-            (sourceParentId && targetParentId && sourceParentId !== targetParentId)
-          ) {
-            return
-          }
-
-          // Track if this connection is inside a container
-          const isInsideContainer = Boolean(sourceParentId) || Boolean(targetParentId)
-          const parentId = sourceParentId || targetParentId
-
-          // Add appropriate metadata for container context
+        if (
+          (normalizedConnection.sourceHandle === 'loop-start-source' ||
+            normalizedConnection.sourceHandle === 'parallel-start-source') &&
+          blocks[targetNode.id]?.data?.parentId === sourceNode.id
+        ) {
           addEdge({
             ...normalizedConnection,
             id: edgeId,
             type: 'workflowEdge',
-            data: isInsideContainer
-              ? {
-                  parentId,
-                  isInsideContainer,
-                }
-              : undefined,
+            data: {
+              parentId: sourceNode.id,
+              isInsideContainer: true,
+            },
           })
-          connectionCompletedRef.current = true
+          return true
         }
+
+        if (
+          (sourceParentId && !targetParentId) ||
+          (!sourceParentId && targetParentId) ||
+          (sourceParentId && targetParentId && sourceParentId !== targetParentId)
+        ) {
+          return false
+        }
+
+        const isInsideContainer = Boolean(sourceParentId) || Boolean(targetParentId)
+        const parentId = sourceParentId || targetParentId
+        addEdge({
+          ...normalizedConnection,
+          id: edgeId,
+          type: 'workflowEdge',
+          data: isInsideContainer ? { parentId, isInsideContainer } : undefined,
+        })
+        return true
       },
       [addEdge, getNodes, blocks]
     )
 
-    /**
-     * Handles connection drag end. Detects if the edge was dropped over a block
-     * and automatically creates a connection to that block's target handle.
-     *
-     * Uses connectionCompletedRef to check if onConnect already handled this connection
-     * (ReactFlow pattern for distinguishing handle-to-handle vs handle-to-body drops).
-     */
-    const onConnectEnd = useCallback(
-      (event: MouseEvent | TouchEvent) => {
-        window.removeEventListener('keydown', handleConnectionEscape, true)
-        canvasContainerRef.current?.setAttribute('data-connection-line', 'default')
-        canvasContainerRef.current?.setAttribute('data-connection-active', 'false')
-
-        const source = connectionSourceRef.current
-        if (!source?.nodeId || connectionCancelledRef.current) {
-          connectionSourceRef.current = null
-          return
+    const handleConnectionPaneDrop = useCallback(
+      ({ clientX, clientY, source }: WorkflowConnectionPaneDrop) => {
+        const canvasBounds = canvasContainerRef.current?.getBoundingClientRect()
+        const zoom = reactFlowInstance.getViewport().zoom
+        const margin = 12
+        const selectorWidth = CONNECTION_BLOCK_SELECTOR_DIMENSIONS.width * zoom
+        const selectorHalfHeight = (CONNECTION_BLOCK_SELECTOR_DIMENSIONS.height * zoom) / 2
+        const minScreenX = (canvasBounds?.left ?? 0) + margin
+        const maxScreenX = (canvasBounds?.right ?? clientX) - selectorWidth - margin
+        const minScreenY = (canvasBounds?.top ?? 0) + selectorHalfHeight + margin
+        const maxScreenY = (canvasBounds?.bottom ?? clientY) - selectorHalfHeight - margin
+        const position = screenToFlowPosition({
+          x:
+            maxScreenX >= minScreenX
+              ? Math.min(Math.max(clientX, minScreenX), maxScreenX)
+              : clientX,
+          y:
+            maxScreenY >= minScreenY
+              ? Math.min(Math.max(clientY, minScreenY), maxScreenY)
+              : clientY,
+        })
+        hasPointerDownSinceSelectorOpenedRef.current = false
+        const nextPendingConnect: PendingConnect = {
+          source: {
+            nodeId: source.nodeId,
+            handleId: source.handleId ?? WORKFLOW_SOURCE_HANDLE_ID,
+          },
+          position,
         }
-
-        // If onConnect already handled this connection, skip (handle-to-handle case)
-        if (connectionCompletedRef.current) {
-          connectionSourceRef.current = null
-          return
-        }
-
-        // Find node under cursor using DOM hit-testing
-        const clientPos = 'changedTouches' in event ? event.changedTouches[0] : event
-        const targetNode = findNodeAtScreenPosition(clientPos.clientX, clientPos.clientY)
-        const sourceHandle =
-          normalizeCursorSourceHandleId(source.handleId, blocks[source.nodeId]?.type) ?? 'source'
-
-        // Create connection if valid target found (handle-to-body case)
-        if (targetNode && targetNode.id !== source.nodeId) {
-          /*
-           * Always source→target, and always onto the block's one input. Which
-           * half of the card the drop landed on is not encoded in the handle
-           * id: a second id for the same port would split edge identity, so
-           * two drops on the same pair would persist as two overlapping edges
-           * and neither the executor nor the copilot edit pipeline would
-           * recognize the variant. Inputs never originate a drag either — the
-           * `target` handle sets `isConnectableStart={false}`, so React Flow
-           * only ever reports an output handle here.
-           */
-          onConnect({
-            source: source.nodeId,
-            sourceHandle,
-            target: targetNode.id,
-            targetHandle: WORKFLOW_TARGET_HANDLE_ID,
-          })
-        } else if (!targetNode) {
-          const canvasBounds = canvasContainerRef.current?.getBoundingClientRect()
-          const zoom = reactFlowInstance.getViewport().zoom
-          const margin = 12
-          const selectorWidth = CONNECTION_BLOCK_SELECTOR_DIMENSIONS.width * zoom
-          const selectorHalfHeight = (CONNECTION_BLOCK_SELECTOR_DIMENSIONS.height * zoom) / 2
-          const minScreenX = (canvasBounds?.left ?? 0) + margin
-          const maxScreenX = (canvasBounds?.right ?? clientPos.clientX) - selectorWidth - margin
-          const minScreenY = (canvasBounds?.top ?? 0) + selectorHalfHeight + margin
-          const maxScreenY =
-            (canvasBounds?.bottom ?? clientPos.clientY) - selectorHalfHeight - margin
-          const position = screenToFlowPosition({
-            x:
-              maxScreenX >= minScreenX
-                ? Math.min(Math.max(clientPos.clientX, minScreenX), maxScreenX)
-                : clientPos.clientX,
-            y:
-              maxScreenY >= minScreenY
-                ? Math.min(Math.max(clientPos.clientY, minScreenY), maxScreenY)
-                : clientPos.clientY,
-          })
-          hasPointerDownSinceSelectorOpenedRef.current = false
-          const nextPendingConnect: PendingConnect = {
-            source: { nodeId: source.nodeId, handleId: sourceHandle },
-            position,
-          }
-          setPendingConnect(nextPendingConnect)
-          requestAnimationFrame(() => {
-            const { zoom: currentZoom } = reactFlowInstance.getViewport()
-            void reactFlowInstance.setCenter(
-              nextPendingConnect.position.x + CONNECTION_BLOCK_SELECTOR_DIMENSIONS.width / 2,
-              nextPendingConnect.position.y,
-              {
-                zoom: currentZoom,
-                duration: CONNECTION_BLOCK_SELECTOR_FOCUS_DURATION_MS,
-              }
-            )
-          })
-        }
-
-        connectionSourceRef.current = null
+        setPendingConnect(nextPendingConnect)
+        requestAnimationFrame(() => {
+          const { zoom: currentZoom } = reactFlowInstance.getViewport()
+          void reactFlowInstance.setCenter(
+            nextPendingConnect.position.x + CONNECTION_BLOCK_SELECTOR_DIMENSIONS.width / 2,
+            nextPendingConnect.position.y,
+            {
+              zoom: currentZoom,
+              duration: CONNECTION_BLOCK_SELECTOR_FOCUS_DURATION_MS,
+            }
+          )
+        })
       },
-      [
-        findNodeAtScreenPosition,
-        onConnect,
-        blocks,
-        reactFlowInstance,
-        screenToFlowPosition,
-        handleConnectionEscape,
-      ]
+      [reactFlowInstance, screenToFlowPosition]
     )
+
+    const handleConnectionStart = useCallback(() => {
+      useSearchModalStore.getState().close()
+      closeConnectionBlockSelector()
+    }, [closeConnectionBlockSelector])
+
+    const getConnectionLineState = useCallback(
+      (source: { handleId: string | null }) => (source.handleId === 'error' ? 'error' : 'default'),
+      []
+    )
+
+    const isConnectionBodyTarget = useCallback((node: Node) => node.type !== 'subflowNode', [])
+
+    const normalizeConnectionSourceHandle = useCallback(
+      (source: { handleId: string | null; nodeId: string }) =>
+        normalizeCursorSourceHandleId(source.handleId, blocks[source.nodeId]?.type) ??
+        WORKFLOW_SOURCE_HANDLE_ID,
+      [blocks]
+    )
+
+    const { onConnect, onConnectEnd, onConnectStart } = useWorkflowConnectionGesture({
+      canvasContainerRef,
+      commitConnection,
+      getConnectionLineState,
+      getNodes,
+      isNodeBodyTarget: isConnectionBodyTarget,
+      normalizeSourceHandle: normalizeConnectionSourceHandle,
+      onConnectionStart: handleConnectionStart,
+      onPaneDrop: handleConnectionPaneDrop,
+    })
 
     /** Handles node drag to detect container intersections and update highlighting. */
     const onNodeDrag = useCallback(
@@ -3804,8 +3669,8 @@ const WorkflowContent = React.memo(
     )
 
     /** Captures initial parent ID and position when drag starts. */
-    const onNodeDragStart = useCallback(
-      (_event: React.MouseEvent, node: any) => {
+    const handleNodeDragStart = useCallback(
+      (_event: React.MouseEvent, node: Node) => {
         if (node.id === CONNECTION_BLOCK_SELECTOR_NODE_ID) return
 
         // Note: Protected blocks are already non-draggable via the `draggable` node property
@@ -3847,33 +3712,13 @@ const WorkflowContent = React.memo(
             parentId: currentParentId ?? undefined,
           })
         }
-
-        // When shift+clicking an already-selected node, ReactFlow toggles (deselects)
-        // it via onNodesChange before drag starts. Re-select the dragged node so all
-        // previously selected nodes move together as a group — but only if the
-        // deselection wasn't from a parent-child conflict (e.g. dragging a child
-        // when its parent subflow is selected).
-        const draggedNodeInSelected = allNodes.find((n) => n.id === node.id)
-        if (draggedNodeInSelected && !draggedNodeInSelected.selected && selectedNodes.length > 0) {
-          const draggedParentId = blocks[node.id]?.data?.parentId
-          const parentIsSelected =
-            draggedParentId && selectedNodes.some((n) => n.id === draggedParentId)
-          const contextMismatch =
-            getNodeSelectionContextId(draggedNodeInSelected, blocks) !==
-            getNodeSelectionContextId(selectedNodes[0], blocks)
-          if (!parentIsSelected && !contextMismatch) {
-            setDisplayNodes((currentNodes) =>
-              currentNodes.map((n) => (n.id === node.id ? { ...n, selected: true } : n))
-            )
-          }
-        }
       },
       [blocks, setDragStartPosition, getNodes, setPotentialParentId]
     )
 
     /** Handles node drag stop to establish parent-child relationships. */
-    const onNodeDragStop = useCallback(
-      (_event: React.MouseEvent, node: any) => {
+    const handleNodeDragStop = useCallback(
+      (_event: React.MouseEvent, node: Node) => {
         if (node.id === CONNECTION_BLOCK_SELECTOR_NODE_ID) return
 
         clearDragHighlights()
@@ -4112,7 +3957,7 @@ const WorkflowContent = React.memo(
     )
 
     /** Captures initial positions when selection drag starts (for marquee-selected nodes). */
-    const onSelectionDragStart = useCallback(
+    const handleSelectionDragStart = useCallback(
       (_event: React.MouseEvent, nodes: Node[]) => {
         if (nodes.length > 0) {
           const firstNodeParentId = blocks[nodes[0].id]?.data?.parentId || null
@@ -4267,8 +4112,8 @@ const WorkflowContent = React.memo(
       ]
     )
 
-    const onSelectionDragStop = useCallback(
-      (_event: React.MouseEvent, nodes: any[]) => {
+    const handleSelectionDragStop = useCallback(
+      (_event: React.MouseEvent, nodes: Node[]) => {
         clearDragHighlights()
         if (nodes.length === 0) return
 
@@ -4295,6 +4140,28 @@ const WorkflowContent = React.memo(
         executeBatchParentUpdate,
       ]
     )
+
+    const getDragNodeParentId = useCallback(
+      (node: Node) => blocks[node.id]?.data?.parentId,
+      [blocks]
+    )
+
+    const getDragNodeSelectionContextId = useCallback(
+      (node: Node) => getNodeSelectionContextId(node, blocks),
+      [blocks]
+    )
+
+    const { onNodeDragStart, onNodeDragStop, onSelectionDragStart, onSelectionDragStop } =
+      useWorkflowNodeDrag({
+        getNodeParentId: getDragNodeParentId,
+        getNodeSelectionContextId: getDragNodeSelectionContextId,
+        getNodes,
+        onNodeDragStart: handleNodeDragStart,
+        onNodeDragStop: handleNodeDragStop,
+        onSelectionDragStart: handleSelectionDragStart,
+        onSelectionDragStop: handleSelectionDragStop,
+        setNodes: setDisplayNodes,
+      })
 
     const onPaneClick = useCallback(() => {
       setSelectedEdges(new Map())
@@ -5090,7 +4957,7 @@ const WorkflowContent = React.memo(
           /* The in-flight line reads `--text-secondary`, not the `--workflow-edge`
              grey a resting edge uses: it has to stay legible over a subflow body
              as well as the canvas, and that grey is ~1.1:1 against one. */
-          className='relative flex-1 overflow-hidden [--connection-line-stroke:var(--text-secondary)] data-[connection-line=error]:[--connection-line-stroke:var(--text-error)] data-[connection-active=true]:[&_.react-flow__handle.source]:pointer-events-none'
+          className={`relative flex-1 overflow-hidden ${WORKFLOW_CONNECTION_CONTAINER_CLASSNAME}`}
         >
           {!isWorkflowReady && (
             <div className='absolute inset-0 z-[5] flex items-center justify-center bg-[var(--bg)]'>
@@ -5164,7 +5031,7 @@ const WorkflowContent = React.memo(
                 maxZoom={1.3}
                 defaultEdgeOptions={defaultEdgeOptions}
                 proOptions={reactFlowProOptions}
-                connectionLineContainerStyle={CONNECTION_LINE_CONTAINER_STYLE}
+                connectionLineContainerStyle={WORKFLOW_CONNECTION_LINE_CONTAINER_STYLE}
                 onPaneClick={onPaneClick}
                 onEdgeClick={embedded ? undefined : onEdgeClick}
                 onNodeClick={handleNodeClick}

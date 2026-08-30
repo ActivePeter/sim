@@ -1,9 +1,13 @@
 import { BLOCK_DIMENSIONS, CONTAINER_DIMENSIONS, getNoteBlockHeight } from '@sim/workflow-renderer'
-import { isEqual } from 'es-toolkit'
 import type { Edge, Node } from 'reactflow'
 import { TriggerUtils } from '@/lib/workflows/triggers/triggers'
 import { clampPositionToContainer } from '@/app/workspace/[workspaceId]/w/[workflowId]/utils/node-position-utils'
 import type { BlockState } from '@/stores/workflows/workflow/types'
+
+export {
+  reconcileCanvasEdges,
+  reconcileCanvasNodes,
+} from '@/components/canvas/workflow-graph-reconciliation'
 
 export const SUBFLOW_DROP_TARGET_CLASS = 'subflow-node-drop-target'
 
@@ -17,64 +21,6 @@ export function getArrowNavigationDirection(event: ArrowNavigationEvent): -1 | 1
   if (event.key === 'ArrowRight' || event.key === 'ArrowDown') return 1
   if (event.key === 'ArrowLeft' || event.key === 'ArrowUp') return -1
   return null
-}
-
-/**
- * A derivation that changed nothing must produce no new reference at any level,
- * so React Flow can skip the subtree. Reuse is decided by identity after
- * projection, which also catches a pure reorder: a reused item landing at a
- * different index breaks the positional sweep.
- */
-function reconcileById<T extends { id: string }>(
-  current: T[],
-  derived: T[],
-  project: (derivedItem: T, currentItem: T | undefined) => T,
-  isReusable: (currentItem: T, nextItem: T) => boolean
-): T[] {
-  const currentById = new Map<string, T>()
-  for (const item of current) currentById.set(item.id, item)
-
-  const next = derived.map((derivedItem) => {
-    const currentItem = currentById.get(derivedItem.id)
-    const nextItem = project(derivedItem, currentItem)
-    return currentItem && isReusable(currentItem, nextItem) ? currentItem : nextItem
-  })
-
-  const unchanged =
-    next.length === current.length && next.every((item, index) => item === current[index])
-  return unchanged ? current : next
-}
-
-/**
- * Subset comparison, deliberately asymmetric: React Flow writes `width`,
- * `height`, `positionAbsolute` and `dragging` onto the node objects it owns, so
- * a symmetric `isEqual` against a freshly derived node would never match and no
- * node would ever be reused. Only the keys the derivation itself produces are
- * compared.
- */
-function containsDerivedValues<T extends object>(current: T, derived: T): boolean {
-  for (const key of Object.keys(derived) as (keyof T)[]) {
-    if (!isEqual(current[key], derived[key])) return false
-  }
-  return true
-}
-
-/** Reuses unchanged React Flow node objects while carrying local selection forward. */
-export function reconcileCanvasNodes(currentNodes: Node[], derivedNodes: Node[]): Node[] {
-  return reconcileById(
-    currentNodes,
-    derivedNodes,
-    (derivedNode, currentNode) => ({ ...derivedNode, selected: currentNode?.selected ?? false }),
-    containsDerivedValues
-  )
-}
-
-/**
- * Reuses unchanged React Flow edge objects after graph-level derivation reruns.
- * Edges carry no React Flow-written fields, so a plain `isEqual` is symmetric-safe.
- */
-export function reconcileCanvasEdges(currentEdges: Edge[], derivedEdges: Edge[]): Edge[] {
-  return reconcileById(currentEdges, derivedEdges, (derivedEdge) => derivedEdge, isEqual)
 }
 
 /**

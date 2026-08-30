@@ -109,9 +109,9 @@ export function DagDemo({ dagId }: DagDemoProps = {}) {
       if (items.length <= 1) return
       const nextSelectedItemId = items.find((item) => item.id !== itemId)?.id
       setDag((current) => removeDagItem(current, itemId))
-      if (selectedItemId === itemId && nextSelectedItemId) {
-        setSelectedItemId(nextSelectedItemId)
-      }
+      setSelectedItemId((current) =>
+        current === itemId && nextSelectedItemId ? nextSelectedItemId : current
+      )
       setActivities((current) =>
         [
           {
@@ -125,7 +125,7 @@ export function DagDemo({ dagId }: DagDemoProps = {}) {
         ].slice(0, 8)
       )
     },
-    [items, selectedItemId]
+    [items]
   )
 
   const handleConnectItems = useCallback(
@@ -296,15 +296,7 @@ export function DagDemo({ dagId }: DagDemoProps = {}) {
               <span className='hidden sm:inline'>PR dependency DAG</span>
               <span className='flex items-center gap-1.5'>
                 <span className='h-px w-5 bg-[var(--text-placeholder)]' />
-                requires
-              </span>
-              <span className='flex items-center gap-1.5'>
-                <span className='h-px w-5 border-[var(--brand-accent)] border-t border-dashed' />
-                contract
-              </span>
-              <span className='hidden items-center gap-1.5 md:flex'>
-                <span className='h-px w-5 border-[var(--text-placeholder)] border-t border-dotted' />
-                integrate-with
+                prerequisite → dependent
               </span>
             </div>
             <Badge variant='gray-secondary' size='sm'>
@@ -321,6 +313,7 @@ export function DagDemo({ dagId }: DagDemoProps = {}) {
                 onAdvanceItem={advanceItem}
                 onConnectItems={handleConnectItems}
                 onPositionsChange={handlePositionsChange}
+                onRemoveDependency={handleRemoveDependency}
                 onRemoveItem={handleRemoveItem}
                 resolvedItems={resolvedItems}
                 selectedItemId={selectedItemId}
