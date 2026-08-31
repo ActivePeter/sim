@@ -73,6 +73,13 @@ cleanup_test() {
 }
 trap cleanup_test EXIT
 
+mkdir -p "$temporary_root/source/apps/sim"
+build_invocation="$({
+	bun() { printf '%s|%s\n' "${DOCKER_BUILD:-}" "$*"; }
+	build_candidate_source "$temporary_root/source"
+})"
+assert_equal 'true|run --cwd apps/sim build -- --webpack' "$build_invocation"
+
 set +e
 (
 	set -e

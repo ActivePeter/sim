@@ -221,6 +221,15 @@ require_clean_source() {
 	[[ -z "$(git -C "$SOURCE_ROOT" status --porcelain=v1 --untracked-files=normal)" ]] || fail 'source has uncommitted files; validate and commit before deployment'
 }
 
+build_candidate_source() {
+	local source_stage="$1"
+	(
+		cd -- "$source_stage"
+		export DOCKER_BUILD=true
+		bun run --cwd apps/sim build -- --webpack
+	)
+}
+
 build_release() {
 	local result_variable="$1"
 	local commit
@@ -241,11 +250,7 @@ build_release() {
 	git -C "$SOURCE_ROOT" archive --format=tar HEAD | tar -xf - -C "$source_stage"
 	ln -s -- "$SOURCE_ROOT/node_modules" "$source_stage/node_modules"
 	log "Building Sim $SERVICE_NAME candidate from $commit while the selected service stays online."
-	(
-		cd -- "$source_stage"
-		export DOCKER_BUILD=true
-		bun run --cwd apps/sim build
-	) 2>&1 | tee -a "$DEPLOY_LOG"
+	build_candidate_source "$source_stage" 2>&1 | tee -a "$DEPLOY_LOG"
 	standalone_root="$source_stage/apps/sim/.next/standalone"
 	[[ -f "$standalone_root/apps/sim/server.js" ]] || fail "standalone build did not produce apps/sim/server.js"
 	rsync --archive --copy-links "$standalone_root/" "$runtime_root/"
