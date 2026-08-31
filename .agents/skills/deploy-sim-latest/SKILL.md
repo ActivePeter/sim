@@ -27,7 +27,14 @@ For crash recovery only, restart the already-selected release without rebuilding
 bash scripts/deploy-sim-dev.sh latest --restart-selected
 ```
 
-Recovery must reuse the selected release; never rebuild automatically. If the command fails, report
+If a complete candidate was built but the deployment stopped before selecting it, recover that
+unselected candidate explicitly without rebuilding:
+
+```bash
+bash scripts/deploy-sim-dev.sh latest --recover-candidate
+```
+
+Recovery must reuse an existing complete release; never rebuild automatically. If the command fails, report
 the error and relevant service-log tail. Do not kill an unknown process merely because it owns port
 3300, do not bypass the shared script with an ad-hoc `next dev`, and do not refresh the snapshot
 service as part of a latest deployment.

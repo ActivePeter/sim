@@ -52,6 +52,8 @@ Usage: deploy-sim-dev.sh <latest|snapshot> [options]
                             Build the current clean commit and select it as the snapshot.
   <service> --restart-selected
                             Restart the selected release without rebuilding (recovery only).
+  <service> --recover-candidate
+                            Publish the newest complete but unselected release (recovery only).
   <service> --status        Print the selected release and service status.
 EOF
 }
@@ -233,6 +235,15 @@ release_matches_source_commit() {
 	[[ "$SERVICE" == "$SERVICE_NAME" && "$PORT" == "$SERVICE_PORT" && "$COMMIT" == "$expected_commit" && "$SOURCE" == "$SOURCE_ROOT" && "$PUBLIC_URL" == "$SERVICE_URL" ]]
 }
 
+release_matches_service() {
+	local release="$1"
+	local BUILT_AT= COMMIT= PORT= PUBLIC_URL= SERVICE= SOURCE=
+	validate_release "$release" || return 1
+	# shellcheck disable=SC1090
+	source "$release/manifest.env"
+	[[ "$SERVICE" == "$SERVICE_NAME" && "$PORT" == "$SERVICE_PORT" && -n "$COMMIT" && "$SOURCE" == "$SOURCE_ROOT" && "$PUBLIC_URL" == "$SERVICE_URL" ]]
+}
+
 find_reusable_release() {
 	local expected_commit="$1"
 	local current
@@ -243,6 +254,22 @@ find_reusable_release() {
 	while IFS= read -r release; do
 		[[ "$release" != "$ACTIVE_RELEASE" && "$release" != "$current" && "$release" != "$previous" ]] || continue
 		if release_matches_source_commit "$release" "$expected_commit"; then
+			printf '%s\n' "$release"
+			return 0
+		fi
+	done < <(find "$SERVICE_RELEASES_ROOT" -mindepth 1 -maxdepth 1 -type d -printf '%T@ %p\n' 2>/dev/null | sort -rn | cut -d' ' -f2-)
+	return 1
+}
+
+find_recovery_release() {
+	local current
+	local previous
+	local release
+	current="$(resolve_release_link "$SERVICE_CURRENT_LINK" || true)"
+	previous="$(resolve_release_link "$SERVICE_PREVIOUS_LINK" || true)"
+	while IFS= read -r release; do
+		[[ "$release" != "$ACTIVE_RELEASE" && "$release" != "$current" && "$release" != "$previous" ]] || continue
+		if release_matches_service "$release"; then
 			printf '%s\n' "$release"
 			return 0
 		fi
@@ -480,6 +507,13 @@ run_deployment_action() {
 	local action="$1"
 	local candidate
 	case "$action" in
+	recover)
+		prepare_active_release
+		candidate="$(find_recovery_release || true)"
+		[[ -n "$candidate" ]] || fail "no complete, unselected $SERVICE_NAME candidate is available"
+		log "Recovering Sim $SERVICE_NAME candidate $candidate."
+		activate_release "$candidate" "$ACTIVE_RELEASE"
+		;;
 	restart)
 		prepare_snapshot_restart candidate
 		activate_release "$candidate" "$ACTIVE_RELEASE"
@@ -526,6 +560,7 @@ require_commands() {
 
 main() {
 	local action
+	local recover_candidate=false
 	local restart_selected=false
 	local service="${1:-}"
 	local show_status=false
@@ -538,6 +573,7 @@ main() {
 	shift
 	while (( $# > 0 )); do
 		case "$1" in
+		--recover-candidate) recover_candidate=true ;;
 		--update-snapshot) update_snapshot=true ;;
 		--restart-selected) restart_selected=true ;;
 		--status) show_status=true ;;
@@ -559,7 +595,12 @@ main() {
 	fi
 	[[ "$DEPLOY_TIMEOUT_SECONDS" =~ ^[1-9][0-9]*$ ]] || fail 'SIM_DEV_DEPLOY_TIMEOUT_SECONDS must be a positive integer'
 	[[ "$RELEASE_RETENTION" =~ ^[1-9][0-9]*$ ]] || fail 'SIM_DEV_RELEASE_RETENTION must be a positive integer'
-	action="$(resolve_deploy_action "$service" "$update_snapshot" "$restart_selected")"
+	if [[ "$recover_candidate" == true ]]; then
+		[[ "$update_snapshot" == false && "$restart_selected" == false ]] || fail '--recover-candidate cannot be combined with another deployment action'
+		action=recover
+	else
+		action="$(resolve_deploy_action "$service" "$update_snapshot" "$restart_selected")"
+	fi
 	acquire_deployment_lock || return $?
 	trap cleanup_staging EXIT
 	require_runtime_environment

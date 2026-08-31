@@ -107,6 +107,10 @@ chmod 0755 "$reusable_release/bin/node"
 	printf 'BUILT_AT=%q\n' '2026-08-31T00:00:00Z'
 } >"$reusable_release/manifest.env"
 assert_equal "$reusable_release" "$(find_reusable_release test-commit)"
+assert_equal "$reusable_release" "$(find_recovery_release)"
+if find_reusable_release different-commit >/dev/null 2>&1; then
+	fail_test 'normal update reused a candidate from a different commit'
+fi
 configure_service latest
 
 set +e
