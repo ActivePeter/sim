@@ -89,16 +89,34 @@ build_invocation="$({
 	bun() { printf '%s|%s\n' "${DOCKER_BUILD:-}" "$*"; }
 	build_candidate_source "$temporary_root/source"
 })"
-assert_equal 'true|run --cwd apps/sim build:deployment' "$build_invocation"
+assert_equal 'true|run --cwd apps/sim build' "$build_invocation"
 
 mkdir -p "$temporary_root/dependencies/source/package"
 printf 'fixture\n' >"$temporary_root/dependencies/source/package/index.js"
-snapshot_dependency_tree \
+materialize_dependency_cache \
+	cached_modules \
 	"$temporary_root/dependencies/source" \
+	"$temporary_root/dependencies/cache" \
+	fixture-key
+assert_equal \
+	"$temporary_root/dependencies/cache/fixture-key/node_modules" \
+	"$cached_modules"
+[[ "$(stat -c '%i' "$temporary_root/dependencies/source/package/index.js")" != \
+	"$(stat -c '%i' "$cached_modules/package/index.js")" ]] || fail_test 'dependency cache shares source inodes'
+printf 'changed\n' >"$temporary_root/dependencies/source/package/index.js"
+materialize_dependency_cache \
+	reused_modules \
+	"$temporary_root/dependencies/source" \
+	"$temporary_root/dependencies/cache" \
+	fixture-key
+assert_equal "$cached_modules" "$reused_modules"
+grep -Fqx fixture "$reused_modules/package/index.js" || fail_test 'completed dependency cache was rebuilt'
+snapshot_dependency_tree \
+	"$cached_modules" \
 	"$temporary_root/dependencies/snapshot"
 [[ ! -L "$temporary_root/dependencies/snapshot" ]] || fail_test 'dependency snapshot is a symlink'
 assert_equal \
-	"$(stat -c '%i' "$temporary_root/dependencies/source/package/index.js")" \
+	"$(stat -c '%i' "$cached_modules/package/index.js")" \
 	"$(stat -c '%i' "$temporary_root/dependencies/snapshot/package/index.js")"
 
 mkdir -p "$temporary_root/state-link/release/apps/sim" "$temporary_root/state-link/uploads"

@@ -18,7 +18,6 @@
     "load:workflow:waves": "BASE_URL=${BASE_URL:-http://localhost:3000} WAVE_ONE_DURATION=${WAVE_ONE_DURATION:-10} WAVE_ONE_RATE=${WAVE_ONE_RATE:-6} QUIET_DURATION=${QUIET_DURATION:-5} WAVE_TWO_DURATION=${WAVE_TWO_DURATION:-15} WAVE_TWO_RATE=${WAVE_TWO_RATE:-8} WAVE_THREE_DURATION=${WAVE_THREE_DURATION:-20} WAVE_THREE_RATE=${WAVE_THREE_RATE:-10} bunx artillery run scripts/load/workflow-waves.yml",
     "load:workflow:isolation": "BASE_URL=${BASE_URL:-http://localhost:3000} ISOLATION_DURATION=${ISOLATION_DURATION:-30} TOTAL_RATE=${TOTAL_RATE:-9} WORKSPACE_A_WEIGHT=${WORKSPACE_A_WEIGHT:-8} WORKSPACE_B_WEIGHT=${WORKSPACE_B_WEIGHT:-1} bunx artillery run scripts/load/workflow-isolation.yml",
     "build": "bun run build:sandbox-bundles && NODE_OPTIONS='--max-old-space-size=8192' next build",
-    "build:deployment": "bun run build:sandbox-bundles && NODE_OPTIONS='--max-old-space-size=32768' next build --webpack",
     "build:sandbox-bundles": "bun run ./lib/execution/sandbox/bundles/build.ts",
     "start": "next start",
     "prepare": "cd ../.. && bun husky",

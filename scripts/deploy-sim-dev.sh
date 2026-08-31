@@ -5,7 +5,8 @@ set -euo pipefail
 readonly SCRIPT_PATH="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd -P)/$(basename -- "${BASH_SOURCE[0]}")"
 readonly SOURCE_ROOT="${SIM_SOURCE_ROOT:-$(git -C "$(dirname -- "$SCRIPT_PATH")/.." rev-parse --show-toplevel)}"
 readonly DEPLOY_ROOT="${SIM_DEV_DEPLOY_ROOT:-${XDG_STATE_HOME:-$HOME/.local/state}/sim-dev-services}"
-readonly BUILD_ROOT="${SIM_DEV_BUILD_ROOT:-$(dirname -- "$SOURCE_ROOT")/.sim-dev-builds-$(basename -- "$SOURCE_ROOT")}"
+readonly BUILD_ROOT="${SIM_DEV_BUILD_ROOT:-$DEPLOY_ROOT/builds}"
+readonly DEPENDENCY_CACHE_ROOT="${SIM_DEV_DEPENDENCY_CACHE_ROOT:-$DEPLOY_ROOT/dependencies}"
 readonly SERVICE_ENV_FILE="${SIM_DEV_ENV_FILE:-$DEPLOY_ROOT/runtime.env}"
 readonly DEPLOY_LOCK="$DEPLOY_ROOT/deploy.lock"
 readonly DEPLOY_LOG="$DEPLOY_ROOT/deploy.log"
@@ -13,6 +14,7 @@ readonly MUTABLE_ROOT="$DEPLOY_ROOT/state"
 readonly SHARED_UPLOADS_ROOT="$MUTABLE_ROOT/uploads"
 readonly UPLOADS_INITIALIZED_MARKER="$MUTABLE_ROOT/uploads.initialized"
 readonly DEPLOY_TIMEOUT_SECONDS="${SIM_DEV_DEPLOY_TIMEOUT_SECONDS:-180}"
+readonly DEPENDENCY_CACHE_RETENTION="${SIM_DEV_DEPENDENCY_CACHE_RETENTION:-2}"
 readonly RELEASE_RETENTION="${SIM_DEV_RELEASE_RETENTION:-3}"
 readonly PUBLIC_HOST="${SIM_PUBLIC_HOST:-127.0.0.1}"
 readonly LATEST_PORT="${SIM_LATEST_PORT:-3300}"
@@ -29,6 +31,8 @@ SERVICE_LOG=
 SERVICE_URL=
 STAGING_ROOT=
 BUILD_STAGING_ROOT=
+DEPENDENCY_STAGING_ROOT=
+ACTIVE_DEPENDENCY_CACHE=
 ACTIVE_RELEASE=
 DEPLOY_LOCK_FD=
 
@@ -374,16 +378,70 @@ build_candidate_source() {
 	(
 		cd -- "$source_stage"
 		export DOCKER_BUILD=true
-		bun run --cwd apps/sim build:deployment
+		bun run --cwd apps/sim build
 	)
+}
+
+dependency_cache_is_valid() {
+	local cache_root="$1"
+	local cache_key="$2"
+	[[ -d "$cache_root/node_modules" && ! -L "$cache_root/node_modules" && -f "$cache_root/.complete" ]] || return 1
+	grep -Fqx "$cache_key" "$cache_root/.complete"
+}
+
+materialize_dependency_cache() {
+	local result_variable="$1"
+	local source_modules="$2"
+	local cache_parent="$3"
+	local cache_key="$4"
+	local cache_root="$cache_parent/$cache_key"
+	local staging_root="$cache_parent/.staging-$cache_key-$RANDOM"
+	[[ -d "$source_modules" && ! -L "$source_modules" ]] || fail "dependency source is not a directory: $source_modules"
+	mkdir -p -- "$cache_parent"
+	if dependency_cache_is_valid "$cache_root" "$cache_key"; then
+		printf -v "$result_variable" '%s' "$cache_root/node_modules"
+		return 0
+	fi
+	[[ ! -e "$cache_root" && ! -L "$cache_root" ]] || rm -rf -- "$cache_root"
+	DEPENDENCY_STAGING_ROOT="$staging_root"
+	mkdir -p -- "$staging_root"
+	cp -a -- "$source_modules" "$staging_root/node_modules"
+	printf '%s\n' "$cache_key" >"$staging_root/.complete"
+	dependency_cache_is_valid "$staging_root" "$cache_key" || fail "dependency cache is incomplete: $staging_root"
+	mv -- "$staging_root" "$cache_root"
+	DEPENDENCY_STAGING_ROOT=
+	printf -v "$result_variable" '%s' "$cache_root/node_modules"
+}
+
+prepare_dependency_cache() {
+	local result_variable="$1"
+	local cache_key
+	local dependency_modules
+	local lock_blob
+	local source_stamp
+	lock_blob="$(git -C "$SOURCE_ROOT" rev-parse 'HEAD:bun.lock')"
+	source_stamp="$(stat -Lc '%d:%i:%Y' "$SOURCE_ROOT/node_modules")"
+	cache_key="$(printf '%s\n' "$lock_blob" "$source_stamp" "$(bun --version)" "$(node --version)" | git hash-object --stdin)"
+	if ! dependency_cache_is_valid "$DEPENDENCY_CACHE_ROOT/$cache_key" "$cache_key"; then
+		log "Caching Sim dependencies for isolated local builds ($cache_key)."
+	fi
+	materialize_dependency_cache dependency_modules "$SOURCE_ROOT/node_modules" "$DEPENDENCY_CACHE_ROOT" "$cache_key"
+	ACTIVE_DEPENDENCY_CACHE="$(dirname -- "$dependency_modules")"
+	printf -v "$result_variable" '%s' "$dependency_modules"
 }
 
 snapshot_dependency_tree() {
 	local source_modules="$1"
 	local target_modules="$2"
+	local target_parent
 	[[ -d "$source_modules" && ! -L "$source_modules" ]] || fail "dependency source is not a directory: $source_modules"
 	[[ ! -e "$target_modules" && ! -L "$target_modules" ]] || fail "dependency target already exists: $target_modules"
-	cp -al -- "$source_modules" "$target_modules"
+	target_parent="$(dirname -- "$target_modules")"
+	if [[ "$(stat -Lc '%d' "$source_modules")" == "$(stat -Lc '%d' "$target_parent")" ]]; then
+		cp -al -- "$source_modules" "$target_modules"
+	else
+		cp -a -- "$source_modules" "$target_modules"
+	fi
 	[[ -d "$target_modules" && ! -L "$target_modules" ]] || fail "dependency snapshot is invalid: $target_modules"
 }
 
@@ -393,6 +451,7 @@ build_release() {
 	local release_id
 	local release_root
 	local reusable_release
+	local dependency_modules
 	local runtime_root
 	local source_stage
 	local standalone_root
@@ -413,7 +472,8 @@ build_release() {
 	release_root="$SERVICE_RELEASES_ROOT/$release_id"
 	mkdir -p -- "$source_stage" "$runtime_root/bin" "$SERVICE_RELEASES_ROOT" "$(dirname -- "$DEPLOY_LOG")"
 	git -C "$SOURCE_ROOT" archive --format=tar HEAD | tar -xf - -C "$source_stage"
-	snapshot_dependency_tree "$SOURCE_ROOT/node_modules" "$source_stage/node_modules"
+	prepare_dependency_cache dependency_modules
+	snapshot_dependency_tree "$dependency_modules" "$source_stage/node_modules"
 	log "Building Sim $SERVICE_NAME candidate from $commit while the selected service stays online."
 	build_candidate_source "$source_stage" 2>&1 | tee -a "$DEPLOY_LOG"
 	standalone_root="$source_stage/apps/sim/.next/standalone"
@@ -635,6 +695,21 @@ cleanup_releases() {
 	done
 }
 
+cleanup_dependency_caches() {
+	local cache
+	local index=0
+	local -a caches=()
+	[[ -d "$DEPENDENCY_CACHE_ROOT" ]] || return 0
+	mapfile -t caches < <(find "$DEPENDENCY_CACHE_ROOT" -mindepth 1 -maxdepth 1 -type d ! -name '.staging-*' -printf '%T@ %p\n' 2>/dev/null | sort -rn | cut -d' ' -f2-)
+	for cache in "${caches[@]}"; do
+		((index += 1))
+		if (( index <= DEPENDENCY_CACHE_RETENTION )) || [[ "$cache" == "$ACTIVE_DEPENDENCY_CACHE" ]]; then
+			continue
+		fi
+		rm -rf -- "$cache"
+	done
+}
+
 run_deployment_action() {
 	local action="$1"
 	local candidate
@@ -676,6 +751,7 @@ run_deployment_action() {
 	*) fail "unsupported deployment action: $action" ;;
 	esac
 	cleanup_releases
+	cleanup_dependency_caches
 }
 
 print_status() {
@@ -698,6 +774,9 @@ cleanup_staging() {
 	esac
 	case "$BUILD_STAGING_ROOT" in
 	"$BUILD_ROOT"/.staging-*) rm -rf -- "$BUILD_STAGING_ROOT" ;;
+	esac
+	case "$DEPENDENCY_STAGING_ROOT" in
+	"$DEPENDENCY_CACHE_ROOT"/.staging-*) rm -rf -- "$DEPENDENCY_STAGING_ROOT" ;;
 	esac
 }
 
