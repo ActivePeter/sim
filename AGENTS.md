@@ -20,6 +20,22 @@ You are a professional software engineer. All code must follow best practices: a
   - `backoffWithJitter(attempt, retryAfterMs, options?)` / `parseRetryAfter(header)` from `@sim/utils/retry` — shared retry pacing; never reimplement exponential backoff inline
 - **Package Manager**: Use `bun` and `bunx`, not `npm` and `npx`
 
+## Plan Graph Self-Hosting
+
+- Use the `plan-node` skill when work is assigned from a development DAG. Claim the node before editing and work only from its bound branch and worktree.
+- The Plan Graph owns dependency order, node identity, writer leases, attempts, and fencing tokens. GitHub owns Issue, PR, review, check, and merge facts; update those facts through reconciliation rather than manual lifecycle changes.
+- One active node has one primary writer. Reviewer/helper agents may run in parallel, but they must not push the writer branch or reuse its worktree.
+- Treat declared interfaces and expected paths as coordination boundaries. Read prerequisite PRs before changing a shared contract, and do not duplicate stores, schemas, state machines, or abstractions owned by another node.
+- Never reset, move, delete, or force-update another attempt's branch or worktree. An expired lease is recovered through a new attempt and a higher fencing token.
+- Bind the primary PR back to its node after publishing. A dependent node unlocks only from reconciled prerequisite state, not from an agent's completion claim.
+
+## Hosted Sim Trial Services
+
+- `scripts/deploy-sim-dev.sh` is the only service-control entry point for the hosted Sim trial services. Both services listen on `0.0.0.0`; configure `SIM_PUBLIC_HOST` to publish an IP-based browser origin.
+- The `latest` service defaults to port `3300`. After validated source-code changes are committed, invoke the `deploy-sim-latest` skill once so the user can test the newest immutable build. Skip read-only and documentation-only work unless deployment is requested.
+- The `snapshot` service defaults to port `3301`. The `deploy-sim-snapshot` skill restarts its selected immutable release without moving it; refresh it only on an explicit request.
+- Both services share one deployment lock. Never bypass the owned script, stop an unrecognized port owner, expose runtime secrets, or build into an active release.
+
 ## Architecture
 
 ### Core Principles

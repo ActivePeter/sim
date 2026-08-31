@@ -3364,7 +3364,6 @@ const WorkflowContent = React.memo(
       [collaborativeBatchRemoveEdges, edges, blocks]
     )
 
-    /** Handles new edge connections with container boundary validation. */
     const commitConnection = useCallback(
       (connection: Connection): boolean => {
         const { source, target } = connection

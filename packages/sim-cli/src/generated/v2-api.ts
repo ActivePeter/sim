@@ -34,6 +34,7 @@ type AbortFileUploadResponseRef0 = {
   uploadedByEmail: string
   uploadedAt: string
   updatedAt: string
+  contentUpdatedAt: string
   deletedAt: string | null
 }
 
@@ -1077,6 +1078,7 @@ type CompleteFileUploadResponseRef0 = {
   uploadedByEmail: string
   uploadedAt: string
   updatedAt: string
+  contentUpdatedAt: string
   deletedAt: string | null
 }
 
@@ -1312,6 +1314,7 @@ type CreateFileResponseRef0 = {
   uploadedByEmail: string
   uploadedAt: string
   updatedAt: string
+  contentUpdatedAt: string
   deletedAt: string | null
 }
 
@@ -1365,6 +1368,7 @@ type CreateFileUploadResponseRef0 = {
   uploadedByEmail: string
   uploadedAt: string
   updatedAt: string
+  contentUpdatedAt: string
   deletedAt: string | null
 }
 
@@ -3725,6 +3729,7 @@ type GetFileResponseRef1 = {
   uploadedByEmail: string
   uploadedAt: string
   updatedAt: string
+  contentUpdatedAt: string
   deletedAt: string | null
   share: GetFileResponseRef0 | null
 }
@@ -3782,6 +3787,7 @@ type GetFileUploadResponseRef0 = {
   uploadedByEmail: string
   uploadedAt: string
   updatedAt: string
+  contentUpdatedAt: string
   deletedAt: string | null
 }
 
@@ -5383,6 +5389,7 @@ type ListFilesResponseRef0 = {
   uploadedByEmail: string
   uploadedAt: string
   updatedAt: string
+  contentUpdatedAt: string
   deletedAt: string | null
 }
 
@@ -6850,6 +6857,7 @@ type RenameFileResponseRef0 = {
   uploadedByEmail: string
   uploadedAt: string
   updatedAt: string
+  contentUpdatedAt: string
   deletedAt: string | null
 }
 
@@ -7120,6 +7128,7 @@ type RestoreFileResponseRef0 = {
   uploadedByEmail: string
   uploadedAt: string
   updatedAt: string
+  contentUpdatedAt: string
   deletedAt: string | null
 }
 
@@ -7906,6 +7915,7 @@ export type UpdateFileContentBody = {
   workspaceId: string
   content: string
   encoding?: 'utf-8' | 'base64'
+  expectedContentUpdatedAt?: string
 }
 
 type UpdateFileContentResponseRef0 = {
@@ -7919,6 +7929,7 @@ type UpdateFileContentResponseRef0 = {
   uploadedByEmail: string
   uploadedAt: string
   updatedAt: string
+  contentUpdatedAt: string
   deletedAt: string | null
 }
 
@@ -13602,6 +13613,11 @@ export const V2_OPERATIONS = {
         values: ['utf-8', 'base64'] as const,
         default: 'utf-8',
         describe: 'Encoding of the content field.',
+      },
+      expectedContentUpdatedAt: {
+        kind: 'string',
+        describe:
+          'Content version returned by the latest file read. The update returns 409 instead of overwriting when the file changed in between.',
       },
     },
   },

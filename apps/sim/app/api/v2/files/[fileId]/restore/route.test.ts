@@ -104,6 +104,7 @@ describe('POST /api/v2/files/[fileId]/restore', () => {
         uploadedByEmail: 'ada@example.com',
         uploadedAt: '2026-08-04T00:00:00.000Z',
         updatedAt: '2026-08-07T00:00:00.000Z',
+        contentUpdatedAt: '2026-08-07T00:00:00.000Z',
         deletedAt: null,
       },
     })

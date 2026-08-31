@@ -1,28 +1,39 @@
 import { Badge, Chip, ChipLink } from '@sim/emcn'
-import { Play, Plus, RefreshCw, Split, SquareArrowUpRight } from '@sim/emcn/icons'
+import { Plus, RefreshCw, Split, SquareArrowUpRight, Workflow } from '@sim/emcn/icons'
 import type { PlanCounts } from '@/app/plan-graph-demo/plan-graph-model'
 
 interface PlanHeaderProps {
-  availableAgent?: string
   counts: PlanCounts
+  fileId?: string
+  isSaving: boolean
+  isSyncing: boolean
+  lastGithubSyncAt?: string
   name: string
+  nextReadyItemId?: string
   onAddNode: () => void
-  onClaimNext: () => void
+  onInspectNext: () => void
   onReset: () => void
+  onSyncGithub: () => void
   repository: string
   revision: number
 }
 
 export function PlanHeader({
-  availableAgent,
   counts,
+  fileId,
+  isSaving,
+  isSyncing,
+  lastGithubSyncAt,
   name,
+  nextReadyItemId,
   onAddNode,
-  onClaimNext,
+  onInspectNext,
   onReset,
+  onSyncGithub,
   repository,
   revision,
 }: PlanHeaderProps) {
+  const persistenceLabel = isSaving ? 'Saving…' : fileId ? 'Saved' : 'Local preview'
   return (
     <header className='flex h-[58px] shrink-0 items-center justify-between gap-4 border-[var(--border)] border-b bg-[var(--surface-1)] px-4'>
       <div className='flex min-w-0 items-center gap-3'>
@@ -35,14 +46,18 @@ export function PlanHeader({
             <Badge variant='purple' size='sm'>
               DAG
             </Badge>
+            <Badge variant={isSaving ? 'amber' : 'outline'} size='sm' dot>
+              {persistenceLabel}
+            </Badge>
           </div>
           <p className='truncate text-[var(--text-muted)] text-xs'>
-            {repository} · PR dependency DAG · revision {revision}
+            {repository} · revision {revision}
+            {lastGithubSyncAt ? ` · GitHub ${new Date(lastGithubSyncAt).toLocaleTimeString()}` : ''}
           </p>
         </div>
       </div>
 
-      <div className='hidden items-center gap-2 lg:flex'>
+      <div className='hidden items-center gap-2 xl:flex'>
         <Badge variant='blue-secondary' size='sm' dot>
           {counts.ready} ready
         </Badge>
@@ -60,23 +75,26 @@ export function PlanHeader({
           target='_blank'
           rel='noreferrer'
           leftIcon={SquareArrowUpRight}
-          className='hidden sm:inline-flex'
+          className='hidden 2xl:inline-flex'
         >
           Epic #1
         </ChipLink>
-        <Chip leftIcon={Plus} onClick={onAddNode}>
+        <Chip leftIcon={RefreshCw} disabled={isSyncing || isSaving} onClick={onSyncGithub}>
+          {isSyncing ? 'Syncing…' : 'Sync GitHub'}
+        </Chip>
+        <Chip leftIcon={Plus} disabled={isSaving} onClick={onAddNode}>
           Add node
         </Chip>
-        <Chip leftIcon={RefreshCw} onClick={onReset}>
+        <Chip leftIcon={RefreshCw} disabled={isSaving} onClick={onReset}>
           Reset
         </Chip>
         <Chip
           variant='primary'
-          leftIcon={Play}
-          disabled={counts.ready === 0 || !availableAgent}
-          onClick={onClaimNext}
+          leftIcon={Workflow}
+          disabled={!nextReadyItemId || isSaving}
+          onClick={onInspectNext}
         >
-          {availableAgent ? `Claim next · ${availableAgent}` : 'No idle agent'}
+          {nextReadyItemId ? `Inspect next · ${nextReadyItemId}` : 'No ready node'}
         </Chip>
       </div>
     </header>

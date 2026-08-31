@@ -6,8 +6,6 @@ import type { WorkspaceFileRecord } from '@/lib/uploads/contexts/workspace'
 import { getUserEmailsByIds, requireResolvedUserEmail } from '@/lib/users/queries'
 import { parseWorkspaceFileFolderDisplayPath } from '@/lib/workspace-files/folder-display-path'
 
-/** Shared serialization for the v2 files surface. */
-
 /**
  * Public file projection. `workspaceId` (already known to the caller, who
  * supplied it) and the internal storage/versioning columns are not exposed.
@@ -37,6 +35,7 @@ function serializeV2File(
     uploadedByEmail,
     uploadedAt: record.uploadedAt.toISOString(),
     updatedAt: record.updatedAt.toISOString(),
+    contentUpdatedAt: (record.contentUpdatedAt ?? record.updatedAt).toISOString(),
     deletedAt: record.deletedAt?.toISOString() ?? null,
   }
 }

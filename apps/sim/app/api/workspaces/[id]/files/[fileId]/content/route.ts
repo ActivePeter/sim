@@ -34,6 +34,9 @@ export const PUT = defineInternalJsonRoute({
     assertedWorkspaceId: params.id,
     content: body.content,
     encoding: body.encoding === 'base64' ? ('base64' as const) : ('utf-8' as const),
+    ...(body.expectedContentUpdatedAt
+      ? { expectedUpdatedAt: new Date(body.expectedContentUpdatedAt) }
+      : {}),
   }),
   useCase: updateWorkspaceFileContent,
   present: internalFilePresenters.successFile,

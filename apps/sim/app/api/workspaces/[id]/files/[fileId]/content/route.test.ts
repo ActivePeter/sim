@@ -44,6 +44,7 @@ const RECORD = {
   folderId: null,
   uploadedAt: new Date('2026-08-04T00:00:00.000Z'),
   updatedAt: new Date('2026-08-04T00:00:00.000Z'),
+  contentUpdatedAt: new Date('2026-08-04T00:00:00.000Z'),
 }
 
 const routeContext = { params: Promise.resolve({ id: WORKSPACE_ID, fileId: FILE_ID }) }
@@ -130,6 +131,26 @@ describe('PUT /api/workspaces/[id]/files/[fileId]/content', () => {
         assertedWorkspaceId: WORKSPACE_ID,
         content: '',
         encoding: 'base64',
+      },
+      request,
+    })
+  })
+
+  it('passes the content version guard to the shared use case', async () => {
+    const expectedContentUpdatedAt = '2026-08-04T00:00:00.000Z'
+    const request = createRequest({ content: 'next', expectedContentUpdatedAt })
+
+    const response = await PUT(request, routeContext)
+
+    expect(response.status).toBe(200)
+    expect(mocks.updateContent).toHaveBeenCalledWith({
+      principal: PRINCIPAL,
+      input: {
+        fileId: FILE_ID,
+        assertedWorkspaceId: WORKSPACE_ID,
+        content: 'next',
+        encoding: 'utf-8',
+        expectedUpdatedAt: new Date(expectedContentUpdatedAt),
       },
       request,
     })

@@ -1109,6 +1109,7 @@ sim files set-content <fileId> [options]
 | --- | --- | --- |
 | `--content <value>` | Yes | Complete replacement content for the file. The 70,000,000-character bound guards the JSON envelope; the decoded bytes must be at most 50 MiB, and a longer base64 payload is rejected with `413`. |
 | `--encoding <value>` | No | Content encoding. Accepted values: `utf-8`, `base64`. |
+| `--expected-content-updated-at <value>` | No | Content version returned by the latest file read. The update returns 409 instead of overwriting when the file changed in between. |
 
 </CommandTable>
 

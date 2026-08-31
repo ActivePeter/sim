@@ -1,5 +1,5 @@
 import { Button, cn, Tooltip } from '@sim/emcn'
-import { PlayOutline, Task, Trash, Workflow } from '@sim/emcn/icons'
+import { Task, Trash, Workflow } from '@sim/emcn/icons'
 import {
   SubBlockRowView,
   WORKFLOW_ACTION_BUTTON_CLASSNAME,
@@ -14,9 +14,8 @@ import type { PlanLifecycle, ResolvedPlanItem } from '@/app/plan-graph-demo/plan
 
 export interface PlanNodeData {
   canRemove: boolean
-  issueUrl: string
+  issueUrl?: string
   item: ResolvedPlanItem
-  onAdvance: () => void
   onRemove: () => void
   onSelect: () => void
   pullRequestUrl?: string
@@ -52,8 +51,6 @@ function getStatusDetail(item: ResolvedPlanItem): string {
 }
 
 function DagNodeActionBar({ data }: { data: PlanNodeData }) {
-  const canAdvance = ['ready', 'active', 'review'].includes(data.item.resolvedLifecycle)
-
   return (
     <WorkflowActionBarView variant='swell'>
       <Tooltip.Root preferAbove>
@@ -61,44 +58,26 @@ function DagNodeActionBar({ data }: { data: PlanNodeData }) {
           <span className='inline-flex'>
             <Button
               variant='ghost'
-              aria-label='Advance PR node'
-              className={cn(
-                ACTION_BUTTON_STYLES,
-                WORKFLOW_FIRST_SWELL_ACTION_BUTTON_CLASSNAME,
-                '[&>svg]:translate-x-[8px]'
-              )}
-              disabled={!canAdvance}
+              aria-label={
+                data.item.issue.number === null
+                  ? 'Issue not linked'
+                  : `Open issue ${data.item.issue.number}`
+              }
+              className={cn(ACTION_BUTTON_STYLES, WORKFLOW_FIRST_SWELL_ACTION_BUTTON_CLASSNAME)}
+              disabled={!data.issueUrl}
               onPointerDown={(event) => event.stopPropagation()}
               onClick={(event) => {
                 event.stopPropagation()
-                data.onAdvance()
-              }}
-            >
-              <PlayOutline className='size-[14px]' />
-            </Button>
-          </span>
-        </Tooltip.Trigger>
-        <Tooltip.Content side='top'>Advance node</Tooltip.Content>
-      </Tooltip.Root>
-
-      <Tooltip.Root preferAbove>
-        <Tooltip.Trigger asChild>
-          <span className='inline-flex'>
-            <Button
-              variant='ghost'
-              aria-label={`Open issue ${data.item.issue.number}`}
-              className={ACTION_BUTTON_STYLES}
-              onPointerDown={(event) => event.stopPropagation()}
-              onClick={(event) => {
-                event.stopPropagation()
-                window.open(data.issueUrl, '_blank', 'noopener,noreferrer')
+                if (data.issueUrl) window.open(data.issueUrl, '_blank', 'noopener,noreferrer')
               }}
             >
               <Task className='size-[14px]' />
             </Button>
           </span>
         </Tooltip.Trigger>
-        <Tooltip.Content side='top'>Open issue</Tooltip.Content>
+        <Tooltip.Content side='top'>
+          {data.issueUrl ? 'Open issue' : 'Issue not linked'}
+        </Tooltip.Content>
       </Tooltip.Root>
 
       <Tooltip.Root preferAbove>
@@ -183,7 +162,10 @@ export function PlanNodeCard({ data, selected }: NodeProps<PlanNodeData>) {
       typeLabel='PR'
       rows={
         <>
-          <SubBlockRowView title='Issue' displayValue={`#${item.issue.number}`} />
+          <SubBlockRowView
+            title='Issue'
+            displayValue={item.issue.number === null ? 'Not linked' : `#${item.issue.number}`}
+          />
           <SubBlockRowView
             title='Pull request'
             displayValue={

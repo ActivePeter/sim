@@ -1,10 +1,13 @@
 'use client'
 
 import { useCallback, useMemo, useState } from 'react'
-import { Badge } from '@sim/emcn'
+import { Badge, ChipConfirmModal } from '@sim/emcn'
+import { Trash } from '@sim/emcn/icons'
+import { getErrorMessage } from '@sim/utils/errors'
 import { generateShortId } from '@sim/utils/id'
 import { ReactFlowProvider } from 'reactflow'
 import { CanvasEditorFrame } from '@/components/canvas'
+import { DEFAULT_DEMO_DAG_ID } from '@/lib/dags/demo-catalog'
 import {
   ActivityPanel,
   DagCanvasAdapter,
@@ -12,14 +15,13 @@ import {
   type PlanActivity,
   PlanHeader,
 } from '@/app/plan-graph-demo/components'
+import { useGitHubReconciliation } from '@/app/plan-graph-demo/hooks/use-github-reconciliation'
+import { usePersistedDag } from '@/app/plan-graph-demo/hooks/use-persisted-dag'
 import {
   addDagDependency,
   addDagItem,
-  advancePlanItem,
-  createDemoDag,
+  applyGitHubBindingUpdates,
   type DagItemUpdate,
-  DEMO_AGENTS,
-  getMergeBlockingItemIds,
   getNextDagItemId,
   getNextReadyItem,
   getPlanCounts,
@@ -27,266 +29,243 @@ import {
   removeDagDependency,
   removeDagItem,
   resolvePlanItems,
-  resolvePlanLifecycle,
   updateDagDependencyKind,
   updateDagItem,
 } from '@/app/plan-graph-demo/plan-graph-model'
 
 const INITIAL_ACTIVITIES: readonly PlanActivity[] = [
   {
-    id: 'activity-ready',
-    title: 'PG-02 is ready to claim',
-    detail: 'Session identity contract is merged and graph revision 7 passed validation.',
+    id: 'activity-self-hosting',
+    title: 'Sim self-hosting roadmap initialized',
+    detail: 'The graph is backed by a durable workspace file with optimistic concurrency.',
     kind: 'plan',
     time: 'Now',
   },
   {
-    id: 'activity-merged',
-    title: 'PR #18 merged',
-    detail: 'PG-01 accepted the stable identity and ownership contract at 7b31d6f.',
-    kind: 'merge',
-    time: '4m',
-  },
-  {
-    id: 'activity-revision',
-    title: 'Graph revision 7 published',
-    detail: 'Peter added the fan-out from durable store to Queue and Change Set.',
-    kind: 'plan',
-    time: '8m',
+    id: 'activity-ready',
+    title: 'PG-01 is ready to claim',
+    detail: 'This MVP branch and its first real pull request are the first execution attempt.',
+    kind: 'agent',
+    time: 'Now',
   },
 ]
 
 interface DagDemoProps {
   dagId?: string
+  workspaceId?: string
 }
 
-export function DagDemo({ dagId }: DagDemoProps = {}) {
-  const [dag, setDag] = useState(() => createDemoDag(dagId))
-  const [selectedItemId, setSelectedItemId] = useState('PG-02')
+interface PendingDeletion {
+  id: string
+  kind: 'dependency' | 'item'
+}
+
+export function DagDemo({ dagId = DEFAULT_DEMO_DAG_ID, workspaceId }: DagDemoProps = {}) {
+  const { dag, error, fileId, isLoading, isSaving, reset, updateDag } = usePersistedDag(
+    workspaceId,
+    dagId
+  )
+  const githubSync = useGitHubReconciliation()
+  const [selectedItemId, setSelectedItemId] = useState('PG-01')
   const [activities, setActivities] = useState<PlanActivity[]>([...INITIAL_ACTIVITIES])
   const [canvasRevision, setCanvasRevision] = useState(0)
+  const [pendingDeletion, setPendingDeletion] = useState<PendingDeletion>()
 
-  const items = dag.items
   const resolvedItems = useMemo(
-    () => resolvePlanItems(items, dag.dependencies),
-    [items, dag.dependencies]
+    () => (dag ? resolvePlanItems(dag.items, dag.dependencies) : []),
+    [dag]
   )
-  const counts = useMemo(() => getPlanCounts(resolvedItems), [resolvedItems])
+  const counts = getPlanCounts(resolvedItems)
   const selectedItem = resolvedItems.find((item) => item.id === selectedItemId) ?? resolvedItems[0]
-  const activeAgents = new Set(
-    items
-      .filter((item) => item.lifecycle === 'active')
-      .map((item) => item.agent)
-      .filter((agent): agent is string => Boolean(agent))
-  )
-  const availableAgent = DEMO_AGENTS.find((agent) => !activeAgents.has(agent))
+  const nextReadyItem = dag ? getNextReadyItem(dag.items, dag.dependencies) : undefined
 
-  const handleAddItem = useCallback(() => {
-    const itemId = getNextDagItemId(items)
-    setDag((current) => addDagItem(current, itemId))
-    setSelectedItemId(itemId)
-    setActivities((current) =>
-      [
-        {
-          id: generateShortId(),
-          title: `${itemId} added to the DAG`,
-          detail:
-            'Edit its bindings in the inspector, then drag a connector to define a dependency.',
-          kind: 'plan' as const,
-          time: 'Now',
-        },
-        ...current,
-      ].slice(0, 8)
-    )
-  }, [items])
-
-  const handleUpdateItem = useCallback((itemId: string, update: DagItemUpdate) => {
-    setDag((current) => updateDagItem(current, itemId, update))
+  const prependActivity = useCallback((activity: PlanActivity) => {
+    setActivities((current) => [activity, ...current].slice(0, 8))
   }, [])
 
-  const handleRemoveItem = useCallback(
-    (itemId: string) => {
-      if (items.length <= 1) return
-      const nextSelectedItemId = items.find((item) => item.id !== itemId)?.id
-      setDag((current) => removeDagItem(current, itemId))
-      setSelectedItemId((current) =>
-        current === itemId && nextSelectedItemId ? nextSelectedItemId : current
-      )
-      setActivities((current) =>
-        [
-          {
-            id: generateShortId(),
-            title: `${itemId} removed`,
-            detail: 'Its position and connected dependency edges were removed atomically.',
-            kind: 'plan' as const,
-            time: 'Now',
-          },
-          ...current,
-        ].slice(0, 8)
-      )
-    },
-    [items]
-  )
+  function handleAddItem() {
+    if (!dag) return
+    const itemId = getNextDagItemId(dag.items)
+    if (!updateDag((current) => addDagItem(current, itemId))) return
+    setSelectedItemId(itemId)
+    prependActivity({
+      id: generateShortId(),
+      title: `${itemId} added to the durable DAG`,
+      detail: 'Edit its bindings, then drag a connector to define a dependency.',
+      kind: 'plan',
+      time: 'Now',
+    })
+  }
+
+  function handleUpdateItem(itemId: string, update: DagItemUpdate) {
+    updateDag((current) => updateDagItem(current, itemId, update))
+  }
+
+  function removeItem(itemId: string) {
+    if (!dag || dag.items.length <= 1) return
+    const nextSelectedItemId = dag.items.find((item) => item.id !== itemId)?.id
+    if (!updateDag((current) => removeDagItem(current, itemId))) return
+    setSelectedItemId((current) =>
+      current === itemId && nextSelectedItemId ? nextSelectedItemId : current
+    )
+    prependActivity({
+      id: generateShortId(),
+      title: `${itemId} removed`,
+      detail: 'Its position and dependency edges were removed in the same revision.',
+      kind: 'plan',
+      time: 'Now',
+    })
+  }
+
+  const handleRemoveItem = useCallback((itemId: string) => {
+    setPendingDeletion({ id: itemId, kind: 'item' })
+  }, [])
 
   const handleConnectItems = useCallback(
     (sourceId: string, targetId: string) => {
+      if (!dag) return
       const dependency = {
         id: `edge-${generateShortId()}`,
         source: sourceId,
         target: targetId,
         kind: 'requires' as const,
       }
-      const nextDag = addDagDependency(dag, dependency)
-      const accepted = nextDag !== dag
-      if (accepted) setDag(nextDag)
-      setActivities((current) =>
-        [
-          {
-            id: generateShortId(),
-            title: accepted ? `${sourceId} → ${targetId} connected` : 'Dependency rejected',
-            detail: accepted
-              ? 'A requires edge was added. Select the target node to change its policy.'
-              : 'DAGs reject duplicate, self-referential, and cyclic dependencies.',
-            kind: 'plan' as const,
-            time: 'Now',
-          },
-          ...current,
-        ].slice(0, 8)
-      )
+      const next = addDagDependency(dag, dependency)
+      const accepted = next !== dag
+      if (accepted) updateDag(() => next)
+      prependActivity({
+        id: generateShortId(),
+        title: accepted ? `${sourceId} → ${targetId} connected` : 'Dependency rejected',
+        detail: accepted
+          ? 'A requires edge was persisted.'
+          : 'DAGs reject duplicate, self-referential, and cyclic dependencies.',
+        kind: 'plan',
+        time: 'Now',
+      })
     },
-    [dag]
+    [dag, prependActivity, updateDag]
   )
 
-  const handleUpdateDependencyKind = useCallback(
-    (dependencyId: string, kind: PlanDependencyKind) => {
-      setDag((current) => updateDagDependencyKind(current, dependencyId, kind))
-    },
-    []
-  )
+  function handleUpdateDependencyKind(dependencyId: string, kind: PlanDependencyKind) {
+    updateDag((current) => updateDagDependencyKind(current, dependencyId, kind))
+  }
 
   const handleRemoveDependency = useCallback((dependencyId: string) => {
-    setDag((current) => removeDagDependency(current, dependencyId))
+    setPendingDeletion({ id: dependencyId, kind: 'dependency' })
   }, [])
 
-  const handlePositionsChange = useCallback((positions: typeof dag.positions) => {
-    setDag((current) => ({ ...current, positions }))
-  }, [])
+  function removeDependency(dependencyId: string) {
+    const dependency = dag?.dependencies.find((candidate) => candidate.id === dependencyId)
+    if (!dependency || !updateDag((current) => removeDagDependency(current, dependencyId))) return
+    prependActivity({
+      id: generateShortId(),
+      title: `${dependency.source} → ${dependency.target} removed`,
+      detail: 'The dependency edge was removed from the durable graph.',
+      kind: 'plan',
+      time: 'Now',
+    })
+  }
 
-  const advanceItem = useCallback(
-    (itemId: string) => {
-      const currentItem = items.find((item) => item.id === itemId)
-      if (!currentItem) return
+  function confirmDeletion() {
+    if (!pendingDeletion) return
+    if (pendingDeletion.kind === 'item') removeItem(pendingDeletion.id)
+    else removeDependency(pendingDeletion.id)
+    setPendingDeletion(undefined)
+  }
 
-      const lifecycle = resolvePlanLifecycle(currentItem, items, dag.dependencies)
-      const assignedAgent = currentItem.agent ?? availableAgent
-      const pullRequestLabel =
-        currentItem.primaryPr.number === null
-          ? 'Planned pull request'
-          : `PR #${currentItem.primaryPr.number}`
-      if (lifecycle === 'ready' && !assignedAgent) return
-      if (
-        lifecycle === 'review' &&
-        getMergeBlockingItemIds(itemId, items, dag.dependencies).length > 0
-      ) {
-        return
-      }
-
-      const readyBefore = new Set(
-        resolvePlanItems(items, dag.dependencies)
-          .filter((item) => item.resolvedLifecycle === 'ready')
-          .map((item) => item.id)
-      )
-      const nextItems = advancePlanItem(
-        items,
-        itemId,
-        assignedAgent ?? DEMO_AGENTS[0],
-        dag.dependencies
-      )
-      const newlyReady = resolvePlanItems(nextItems, dag.dependencies)
-        .filter((item) => item.resolvedLifecycle === 'ready' && !readyBefore.has(item.id))
-        .map((item) => item.id)
-
-      let activity: PlanActivity
-      if (lifecycle === 'ready') {
-        activity = {
-          id: generateShortId(),
-          title: `${itemId} claimed by ${assignedAgent}`,
-          detail:
-            'A fenced writer lease, Agent Session, branch, and isolated worktree were created.',
-          kind: 'agent',
-          time: 'Now',
-        }
-      } else if (lifecycle === 'active') {
-        activity = {
-          id: generateShortId(),
-          title: `${pullRequestLabel} entered review`,
-          detail: 'Focused checks passed, the writer lease was released, and review is approved.',
-          kind: 'review',
-          time: 'Now',
-        }
-      } else {
-        activity = {
-          id: generateShortId(),
-          title: `${pullRequestLabel} merged`,
-          detail:
-            newlyReady.length > 0
-              ? `Dependency gates reopened. Newly ready: ${newlyReady.join(', ')}.`
-              : 'The node is complete and its merged SHA is now authoritative.',
-          kind: 'merge',
-          time: 'Now',
-        }
-      }
-
-      setDag((current) => ({ ...current, items: nextItems }))
-      setActivities((current) => [activity, ...current].slice(0, 8))
+  const handlePositionsChange = useCallback(
+    (positions: NonNullable<typeof dag>['positions']) => {
+      updateDag((current) => {
+        if (JSON.stringify(current.positions) === JSON.stringify(positions)) return current
+        return { ...current, revision: current.revision + 1, positions }
+      })
     },
-    [availableAgent, items, dag.dependencies]
+    [updateDag]
   )
 
-  const handleClaimNext = useCallback(() => {
-    const nextItem = getNextReadyItem(items, dag.dependencies)
-    if (!nextItem || !availableAgent) return
-    setSelectedItemId(nextItem.id)
-    advanceItem(nextItem.id)
-  }, [advanceItem, availableAgent, items, dag.dependencies])
+  function handleInspectNext() {
+    if (nextReadyItem) setSelectedItemId(nextReadyItem.id)
+  }
 
-  const handleReset = useCallback(() => {
-    setDag(createDemoDag(dagId))
-    setSelectedItemId('PG-02')
+  async function handleGithubSync() {
+    if (!dag) return
+    try {
+      const result = await githubSync.mutateAsync({ document: dag })
+      const changed = updateDag((current) =>
+        applyGitHubBindingUpdates(current, result.updates, result.syncedAt)
+      )
+      prependActivity({
+        id: generateShortId(),
+        title: 'GitHub artifacts reconciled',
+        detail: changed
+          ? 'Issue, PR, checks, review, and merge projections were persisted.'
+          : 'All artifact bindings already matched GitHub.',
+        kind: 'review',
+        time: 'Now',
+      })
+    } catch (cause) {
+      prependActivity({
+        id: generateShortId(),
+        title: 'GitHub sync failed',
+        detail: getErrorMessage(cause, 'Unknown GitHub reconciliation error'),
+        kind: 'review',
+        time: 'Now',
+      })
+    }
+  }
+
+  function handleReset() {
+    reset()
+    setSelectedItemId('PG-01')
     setActivities([...INITIAL_ACTIVITIES])
     setCanvasRevision((current) => current + 1)
-  }, [dagId])
+  }
 
-  if (!selectedItem) return null
+  if (isLoading || !dag || !selectedItem) {
+    return (
+      <div className='flex h-full items-center justify-center bg-[var(--bg)] text-[var(--text-muted)] text-sm'>
+        {error ?? 'Loading durable Plan Graph…'}
+      </div>
+    )
+  }
 
   return (
     <div className='flex h-full min-h-0 w-full flex-col overflow-hidden bg-[var(--bg)]'>
       <PlanHeader
-        availableAgent={availableAgent}
         counts={counts}
+        fileId={fileId}
+        isSaving={isSaving}
+        isSyncing={githubSync.isPending}
+        lastGithubSyncAt={dag.lastGithubSyncAt}
         name={dag.name}
+        nextReadyItemId={nextReadyItem?.id}
         onAddNode={handleAddItem}
-        onClaimNext={handleClaimNext}
+        onInspectNext={handleInspectNext}
         onReset={handleReset}
+        onSyncGithub={() => void handleGithubSync()}
         repository={dag.repository}
         revision={dag.revision}
       />
 
+      {error && (
+        <div className='border-[var(--border)] border-b bg-[var(--surface-2)] px-4 py-2 text-[var(--text-warning)] text-xs'>
+          {error}
+        </div>
+      )}
+
       <CanvasEditorFrame
         className='min-h-0 flex-1'
-        bottomPanel={<ActivityPanel activities={activities} />}
+        bottomPanel={<ActivityPanel activities={activities} persistent={Boolean(fileId)} />}
         sidePanel={
           <NodeInspector
-            availableAgent={availableAgent}
             dependencies={dag.dependencies}
             item={selectedItem}
             items={resolvedItems}
-            onAdvance={() => advanceItem(selectedItem.id)}
             onRemoveDependency={handleRemoveDependency}
             onRemoveItem={() => handleRemoveItem(selectedItem.id)}
             onUpdateDependencyKind={handleUpdateDependencyKind}
             onUpdateItem={(update) => handleUpdateItem(selectedItem.id, update)}
-            canRemoveItem={items.length > 1}
+            canRemoveItem={dag.items.length > 1}
           />
         }
       >
@@ -300,7 +279,7 @@ export function DagDemo({ dagId }: DagDemoProps = {}) {
               </span>
             </div>
             <Badge variant='gray-secondary' size='sm'>
-              Drag nodes · connect right handle to left handle · edit in inspector
+              Drag nodes · connect handles · select a node to inspect
             </Badge>
           </div>
 
@@ -309,8 +288,7 @@ export function DagDemo({ dagId }: DagDemoProps = {}) {
               <DagCanvasAdapter
                 key={canvasRevision}
                 dependencies={dag.dependencies}
-                items={items}
-                onAdvanceItem={advanceItem}
+                items={dag.items}
                 onConnectItems={handleConnectItems}
                 onPositionsChange={handlePositionsChange}
                 onRemoveDependency={handleRemoveDependency}
@@ -325,6 +303,32 @@ export function DagDemo({ dagId }: DagDemoProps = {}) {
           </div>
         </section>
       </CanvasEditorFrame>
+
+      <ChipConfirmModal
+        open={Boolean(pendingDeletion)}
+        onOpenChange={(open) => {
+          if (!open) setPendingDeletion(undefined)
+        }}
+        icon={Trash}
+        title={pendingDeletion?.kind === 'dependency' ? 'Remove dependency' : 'Delete DAG node'}
+        text={
+          pendingDeletion?.kind === 'dependency'
+            ? 'Remove this dependency edge from the durable plan?'
+            : [
+                'Delete ',
+                { text: pendingDeletion?.id ?? 'this node', bold: true },
+                '? ',
+                {
+                  text: 'Its position and every connected dependency will be removed.',
+                  error: true,
+                },
+              ]
+        }
+        confirm={{
+          label: pendingDeletion?.kind === 'dependency' ? 'Remove' : 'Delete',
+          onClick: confirmDeletion,
+        }}
+      />
     </div>
   )
 }

@@ -1,6 +1,5 @@
 'use client'
 
-import { useMemo } from 'react'
 import { cn } from '@sim/emcn'
 import { Split } from '@sim/emcn/icons'
 import { DEMO_DAGS } from '@/lib/dags/demo-catalog'
@@ -18,20 +17,15 @@ interface DagListProps {
   workspaceId: string
 }
 
-/** Workspace navigation list for PR dependency DAG documents. */
 export function DagList({ currentDagId, isCollapsed, workspaceId }: DagListProps) {
   const hover = useHoverMenu()
-  const flyoutEntries = useMemo(
-    () =>
-      DEMO_DAGS.map((dag) => ({
-        kind: 'item' as const,
-        id: dag.id,
-        name: dag.name,
-        pinned: false,
-        href: `/workspace/${workspaceId}/d/${dag.id}`,
-      })),
-    [workspaceId]
-  )
+  const flyoutEntries = DEMO_DAGS.map((dag) => ({
+    kind: 'item' as const,
+    id: dag.id,
+    name: dag.name,
+    pinned: false,
+    href: `/workspace/${workspaceId}/d/${dag.id}`,
+  }))
 
   if (isCollapsed) {
     return (

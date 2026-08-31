@@ -10,8 +10,8 @@ export const DEFAULT_DEMO_DAG_ID = 'agent-session-prs'
 export const DEMO_DAGS: readonly DagCatalogItem[] = [
   {
     id: DEFAULT_DEMO_DAG_ID,
-    name: 'Agent session PR rollout',
-    description: 'Planned and active pull requests for the Agent Session delivery DAG.',
+    name: 'Sim self-hosting roadmap',
+    description: 'Sim uses this durable DAG to plan and deliver its own Plan Graph development.',
     repository: 'ActivePeter/sim',
   },
 ]

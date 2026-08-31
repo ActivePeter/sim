@@ -66,6 +66,7 @@ const record = {
   folderId: null,
   uploadedAt: new Date('2024-01-01T00:00:00Z'),
   updatedAt: new Date('2024-01-03T00:00:00Z'),
+  contentUpdatedAt: new Date('2024-01-03T00:00:00Z'),
 }
 
 const callPut = (body: unknown, contentLength?: number) =>
@@ -151,6 +152,7 @@ describe('PUT /api/v2/files/[fileId]/content', () => {
         uploadedByEmail: 'ada@example.com',
         uploadedAt: '2024-01-01T00:00:00.000Z',
         updatedAt: '2024-01-03T00:00:00.000Z',
+        contentUpdatedAt: '2024-01-03T00:00:00.000Z',
         deletedAt: null,
       },
     })
@@ -168,6 +170,34 @@ describe('PUT /api/v2/files/[fileId]/content', () => {
       'v2:files.update_content:api-key:key-1',
       expect.anything()
     )
+  })
+
+  it('passes the content version guard to the shared use case', async () => {
+    const expectedContentUpdatedAt = '2024-01-03T00:00:00.000Z'
+    const request = new NextRequest(`http://localhost:3000/api/v2/files/${FILE_ID}/content`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        workspaceId: WORKSPACE_ID,
+        content: 'next',
+        expectedContentUpdatedAt,
+      }),
+    })
+
+    const response = await PUT(request, { params: Promise.resolve({ fileId: FILE_ID }) })
+
+    expect(response.status).toBe(200)
+    expect(mocks.updateContent).toHaveBeenCalledWith({
+      principal: auth.principal,
+      input: {
+        fileId: FILE_ID,
+        assertedWorkspaceId: WORKSPACE_ID,
+        content: 'next',
+        encoding: 'utf-8',
+        expectedUpdatedAt: new Date(expectedContentUpdatedAt),
+      },
+      request,
+    })
   })
 
   it('maps typed quota failures to 413', async () => {

@@ -49,7 +49,6 @@ const DAG_FIT_VIEW_OPTIONS = { ...reactFlowFitViewOptions, padding: 0.18 } as co
 interface DagCanvasAdapterProps {
   dependencies: readonly PlanDependency[]
   items: readonly PlanItem[]
-  onAdvanceItem: (itemId: string) => void
   onConnectItems: (sourceId: string, targetId: string) => void
   onPositionsChange: (positions: Record<string, PlanPosition>) => void
   onRemoveDependency: (dependencyId: string) => void
@@ -65,7 +64,6 @@ interface DagCanvasAdapterProps {
 export function DagCanvasAdapter({
   dependencies,
   items,
-  onAdvanceItem,
   onConnectItems,
   onPositionsChange,
   onRemoveDependency,
@@ -102,9 +100,11 @@ export function DagCanvasAdapter({
         zIndex: BLOCK_Z_BASE,
         data: {
           canRemove: items.length > 1,
-          issueUrl: `https://github.com/${repository}/issues/${item.issue.number}`,
+          issueUrl:
+            item.issue.number === null
+              ? undefined
+              : `https://github.com/${repository}/issues/${item.issue.number}`,
           item,
-          onAdvance: () => onAdvanceItem(item.id),
           onRemove: () => onRemoveItem(item.id),
           onSelect: () => onSelectItem(item.id),
           pullRequestUrl:
@@ -116,16 +116,7 @@ export function DagCanvasAdapter({
         },
         selected: false,
       })),
-    [
-      dependencies,
-      items.length,
-      onAdvanceItem,
-      onRemoveItem,
-      onSelectItem,
-      positions,
-      repository,
-      resolvedItems,
-    ]
+    [dependencies, items.length, onRemoveItem, onSelectItem, positions, repository, resolvedItems]
   )
 
   const [displayNodes, setDisplayNodes] = useState<Node<PlanNodeData>[]>(derivedNodes)

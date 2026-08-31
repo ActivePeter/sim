@@ -1,0 +1,4 @@
+interface:
+  display_name: "Deploy Sim Snapshot"
+  short_description: "Pin or restart a reproducible Sim trial service"
+  default_prompt: "Use $deploy-sim-snapshot to pin or restart a reproducible Sim demo release."

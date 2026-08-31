@@ -40,12 +40,10 @@ const STATUS_BADGES = {
 >
 
 interface NodeInspectorProps {
-  availableAgent?: string
   canRemoveItem: boolean
   dependencies: readonly PlanDependency[]
   item: ResolvedPlanItem
   items: readonly ResolvedPlanItem[]
-  onAdvance: () => void
   onRemoveDependency: (dependencyId: string) => void
   onRemoveItem: () => void
   onUpdateDependencyKind: (dependencyId: string, kind: PlanDependencyKind) => void
@@ -90,18 +88,10 @@ function GateRow({ label, passed }: GateRowProps) {
   )
 }
 
-function getActionLabel(
-  lifecycle: PlanLifecycle,
-  availableAgent: string | undefined,
-  mergeBlocked: boolean
-): string {
-  if (lifecycle === 'ready') {
-    return availableAgent ? `Claim with ${availableAgent}` : 'No idle agent'
-  }
-  if (lifecycle === 'active') return 'Request review'
-  if (lifecycle === 'review') {
-    return mergeBlocked ? 'Waiting for integration gate' : 'Merge pull request'
-  }
+function getActionLabel(lifecycle: PlanLifecycle, mergeBlocked: boolean): string {
+  if (lifecycle === 'ready') return 'Ready for agent claim'
+  if (lifecycle === 'active') return 'Claim is active'
+  if (lifecycle === 'review') return mergeBlocked ? 'Integration gate blocked' : 'Waiting on GitHub'
   if (lifecycle === 'blocked') return 'Waiting for dependencies'
   if (lifecycle === 'done') return 'Node completed'
   return 'Not ready'
@@ -113,12 +103,10 @@ function getNextDependencyKind(kind: PlanDependencyKind): PlanDependencyKind {
 }
 
 export function NodeInspector({
-  availableAgent,
   canRemoveItem,
   dependencies,
   item,
   items,
-  onAdvance,
   onRemoveDependency,
   onRemoveItem,
   onUpdateDependencyKind,
@@ -138,10 +126,7 @@ export function NodeInspector({
   const mergeDependenciesPassed = mergeBlockerIds.length === 0
   const reviewPassed = item.primaryPr.review === 'Approved' || item.primaryPr.state === 'Merged'
   const checksPassed = item.primaryPr.checks === 'Passed' || item.primaryPr.state === 'Merged'
-  const actionDisabled =
-    !['ready', 'active', 'review'].includes(item.resolvedLifecycle) ||
-    (item.resolvedLifecycle === 'ready' && !availableAgent) ||
-    (item.resolvedLifecycle === 'review' && !mergeDependenciesPassed)
+  const claimCommand = `bun .agents/skills/plan-node/scripts/plan-node.ts claim --node ${item.id} --agent <agent-id>`
 
   return (
     <aside className='hidden min-h-0 w-[360px] shrink-0 flex-col border-[var(--border)] border-l bg-[var(--surface-1)] lg:flex'>
@@ -172,9 +157,13 @@ export function NodeInspector({
                 Title
               </label>
               <ChipInput
+                key={`${item.id}-title-${item.title}`}
                 id={`${item.id}-title`}
-                value={item.title}
-                onChange={(event) => onUpdateItem({ title: event.currentTarget.value })}
+                defaultValue={item.title}
+                onBlur={(event) => {
+                  const title = event.currentTarget.value.trim()
+                  if (title) onUpdateItem({ title })
+                }}
               />
             </div>
             <div>
@@ -185,10 +174,11 @@ export function NodeInspector({
                 Outcome
               </label>
               <ChipTextarea
+                key={`${item.id}-summary-${item.summary}`}
                 id={`${item.id}-summary`}
                 rows={3}
-                value={item.summary}
-                onChange={(event) => onUpdateItem({ summary: event.currentTarget.value })}
+                defaultValue={item.summary}
+                onBlur={(event) => onUpdateItem({ summary: event.currentTarget.value.trim() })}
               />
             </div>
           </div>
@@ -232,8 +222,12 @@ export function NodeInspector({
                 type='number'
                 min={1}
                 inputClassName='font-mono'
-                defaultValue={item.issue.number}
+                defaultValue={item.issue.number ?? ''}
                 onBlur={(event) => {
+                  if (!event.currentTarget.value.trim()) {
+                    onUpdateItem({ issueNumber: null })
+                    return
+                  }
                   const issueNumber = event.currentTarget.valueAsNumber
                   if (Number.isInteger(issueNumber) && issueNumber > 0) {
                     onUpdateItem({ issueNumber })
@@ -283,9 +277,10 @@ export function NodeInspector({
                 Human owner
               </label>
               <ChipInput
+                key={`${item.id}-owner-${item.humanOwner}`}
                 id={`${item.id}-owner`}
-                value={item.humanOwner}
-                onChange={(event) => onUpdateItem({ humanOwner: event.currentTarget.value })}
+                defaultValue={item.humanOwner}
+                onBlur={(event) => onUpdateItem({ humanOwner: event.currentTarget.value.trim() })}
               />
             </div>
           </div>
@@ -353,14 +348,24 @@ export function NodeInspector({
         </section>
 
         <section>
-          <p className='mb-1.5 text-[var(--text-muted)] text-xs'>Authority scope</p>
-          <div className='flex flex-wrap gap-1'>
-            {item.authorityScope.map((scope) => (
-              <Badge key={scope} variant='outline' size='sm'>
-                {scope}
-              </Badge>
+          <p className='mb-1.5 text-[var(--text-muted)] text-xs'>Interfaces & contracts</p>
+          <div className='space-y-2 rounded-lg border border-[var(--border)] bg-[var(--surface-2)] p-3'>
+            {item.interfaces.map((planInterface) => (
+              <article key={planInterface.name}>
+                <h3 className='text-[var(--text-body)] text-xs'>{planInterface.name}</h3>
+                <p className='mt-1 break-words rounded bg-[var(--surface-3)] px-2 py-1.5 font-mono text-[10px] text-[var(--text-secondary)] leading-4'>
+                  {planInterface.usage}
+                </p>
+              </article>
             ))}
           </div>
+        </section>
+
+        <section>
+          <p className='mb-1.5 text-[var(--text-muted)] text-xs'>Agent claim</p>
+          <p className='break-words rounded-lg border border-[var(--border)] bg-[var(--surface-2)] px-3 py-2 font-mono text-[10px] text-[var(--text-secondary)] leading-4'>
+            {claimCommand}
+          </p>
         </section>
 
         <section>
@@ -384,23 +389,63 @@ export function NodeInspector({
             <div className='rounded-lg border border-[var(--border)] bg-[var(--surface-2)] px-3 py-1.5'>
               <DetailRow icon={BrainCircuit} label='Agent' value={item.agent ?? 'Unassigned'} />
               <DetailRow icon={Fingerprint} label='Session' value={item.execution.sessionId} />
-              <DetailRow icon={FolderCode} label='Worktree' value={item.execution.worktree} />
-              <DetailRow icon={Split} label='Branch' value={item.execution.branch} />
+              <DetailRow icon={Fingerprint} label='Attempt' value={item.execution.attemptId} />
+              <div className='py-1.5'>
+                <label
+                  className='mb-1 flex items-center gap-1.5 text-[10px] text-[var(--text-muted)]'
+                  htmlFor={`${item.id}-worktree`}
+                >
+                  <FolderCode className='size-3 text-[var(--text-icon)]' />
+                  Worktree
+                </label>
+                <ChipInput
+                  key={`${item.id}-worktree-${item.execution.worktree}`}
+                  id={`${item.id}-worktree`}
+                  inputClassName='font-mono'
+                  defaultValue={item.execution.worktree}
+                  onBlur={(event) => {
+                    const executionWorktree = event.currentTarget.value.trim()
+                    if (executionWorktree) onUpdateItem({ executionWorktree })
+                  }}
+                />
+              </div>
+              <div className='py-1.5'>
+                <label
+                  className='mb-1 flex items-center gap-1.5 text-[10px] text-[var(--text-muted)]'
+                  htmlFor={`${item.id}-branch`}
+                >
+                  <Split className='size-3 text-[var(--text-icon)]' />
+                  Branch
+                </label>
+                <ChipInput
+                  key={`${item.id}-branch-${item.execution.branch}`}
+                  id={`${item.id}-branch`}
+                  inputClassName='font-mono'
+                  defaultValue={item.execution.branch}
+                  onBlur={(event) => {
+                    const executionBranch = event.currentTarget.value.trim()
+                    if (executionBranch) onUpdateItem({ executionBranch })
+                  }}
+                />
+              </div>
+              <DetailRow
+                icon={Fingerprint}
+                label='Writer fencing token'
+                value={String(item.execution.lease.fencingToken)}
+              />
             </div>
           </section>
         )}
       </div>
 
       <div className='flex gap-2 border-[var(--border)] border-t p-3'>
-        <Chip
-          variant={actionDisabled ? undefined : 'primary'}
-          leftIcon={item.resolvedLifecycle === 'done' ? CircleCheck : Play}
-          className='min-w-0 flex-1'
-          disabled={actionDisabled}
-          onClick={onAdvance}
+        <Badge
+          variant={item.resolvedLifecycle === 'ready' ? 'blue-secondary' : 'outline'}
+          icon={item.resolvedLifecycle === 'done' ? CircleCheck : Play}
+          className='min-w-0 flex-1 justify-center'
         >
-          {getActionLabel(item.resolvedLifecycle, availableAgent, !mergeDependenciesPassed)}
-        </Chip>
+          {getActionLabel(item.resolvedLifecycle, !mergeDependenciesPassed)}
+        </Badge>
         <Chip
           variant='destructive'
           leftIcon={Trash}

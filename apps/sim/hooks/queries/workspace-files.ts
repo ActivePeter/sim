@@ -123,11 +123,12 @@ export function getWorkspaceFilesQueryOptions(
 export function useWorkspaceFiles(
   workspaceId: string,
   scope: WorkspaceFileQueryScope = 'active',
-  options?: { enabled?: boolean }
+  options?: { enabled?: boolean; refetchInterval?: number | false }
 ) {
   return useQuery({
     ...getWorkspaceFilesQueryOptions(workspaceId, scope),
     enabled: !!workspaceId && (options?.enabled ?? true),
+    refetchInterval: options?.refetchInterval ?? false,
     placeholderData: keepPreviousData, // Show cached data immediately
   })
 }
@@ -589,16 +590,27 @@ interface UpdateFileContentParams {
   fileId: string
   content: string
   encoding?: 'base64' | 'utf-8'
+  expectedContentUpdatedAt?: string
 }
 
 export function useUpdateWorkspaceFileContent() {
   const queryClient = useQueryClient()
 
   return useMutation({
-    mutationFn: async ({ workspaceId, fileId, content, encoding }: UpdateFileContentParams) => {
+    mutationFn: async ({
+      workspaceId,
+      fileId,
+      content,
+      encoding,
+      expectedContentUpdatedAt,
+    }: UpdateFileContentParams) => {
       return requestJson(updateWorkspaceFileContentContract, {
         params: { id: workspaceId, fileId },
-        body: encoding ? { content, encoding } : { content },
+        body: {
+          content,
+          ...(encoding ? { encoding } : {}),
+          ...(expectedContentUpdatedAt ? { expectedContentUpdatedAt } : {}),
+        },
       })
     },
     onSettled: (_data, _error, variables) => {

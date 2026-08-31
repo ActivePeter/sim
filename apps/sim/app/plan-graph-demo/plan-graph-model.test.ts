@@ -2,39 +2,68 @@ import { describe, expect, it } from 'vitest'
 import {
   addDagDependency,
   addDagItem,
-  advancePlanItem,
+  applyGitHubBindingUpdates,
+  claimDagItem,
   createDemoDag,
-  createDemoPlanItems,
   getBlockingItemIds,
   getMergeBlockingItemIds,
   getNextDagItemId,
   getNextReadyItem,
+  type PlanClaimInput,
   type PlanDependency,
-  type PlanItem,
+  parseDagDocument,
   removeDagDependency,
   removeDagItem,
   resolvePlanItems,
+  serializeDagDocument,
   updateDagDependencyKind,
   updateDagItem,
 } from '@/app/plan-graph-demo/plan-graph-model'
 
-describe('plan graph demo model', () => {
-  it('models the demo as an isolated DAG document', () => {
+const CLAIM: PlanClaimInput = {
+  agent: 'Codex local',
+  attemptId: 'attempt-pg-01-a',
+  sessionId: 'session-pg-01-a',
+  worktree: '/worktrees/sim-pg-01',
+  branch: 'plan/agent-session-prs/pg-01',
+  baseSha: 'abc1234',
+  claimedAt: '2026-08-31T00:00:00.000Z',
+  expiresAt: '2026-08-31T01:00:00.000Z',
+}
+
+describe('plan graph model', () => {
+  it('models Sim self-hosting as an isolated persisted DAG document', () => {
     const dag = createDemoDag()
     const secondDag = createDemoDag()
 
     expect(dag).toMatchObject({
+      schemaVersion: 1,
       id: 'agent-session-prs',
       kind: 'dag',
-      name: 'Agent session PR rollout',
-      revision: 7,
+      name: 'Sim self-hosting roadmap',
+      repository: 'ActivePeter/sim',
+      revision: 1,
     })
     expect(dag.items).not.toBe(secondDag.items)
     expect(dag.dependencies).not.toBe(secondDag.dependencies)
     expect(dag.positions).not.toBe(secondDag.positions)
+    expect(dag.items.find((item) => item.id === 'PG-01')).toMatchObject({
+      primaryPr: { number: null, state: 'Unopened' },
+      interfaces: expect.arrayContaining([
+        expect.objectContaining({ name: 'Latest trial service' }),
+        expect.objectContaining({ name: 'Pinned snapshot service' }),
+      ]),
+    })
   })
 
-  it('adds and edits a DAG node with artifact bindings', () => {
+  it('round-trips the durable document through its runtime validator', () => {
+    const dag = createDemoDag()
+
+    expect(parseDagDocument(serializeDagDocument(dag))).toEqual(dag)
+    expect(() => parseDagDocument('{"schemaVersion":2}')).toThrow()
+  })
+
+  it('adds and edits a DAG node with optional artifact bindings', () => {
     const dag = createDemoDag()
     const itemId = getNextDagItemId(dag.items)
     const withItem = addDagItem(dag, itemId)
@@ -43,22 +72,21 @@ describe('plan graph demo model', () => {
       issueNumber: 42,
       primaryPrNumber: 84,
     })
-    const cleared = updateDagItem(updated, itemId, { primaryPrNumber: null })
+    const cleared = updateDagItem(updated, itemId, {
+      issueNumber: null,
+      primaryPrNumber: null,
+    })
 
     expect(itemId).toBe('PG-07')
-    expect(withItem.items.find((item) => item.id === itemId)?.primaryPr).toMatchObject({
-      number: null,
-      state: 'Unopened',
-    })
     expect(updated.items.find((item) => item.id === itemId)).toMatchObject({
       title: 'Editable DAG node',
       issue: { number: 42 },
       primaryPr: { number: 84, state: 'Draft' },
     })
     expect(updated.positions[itemId]).toBeDefined()
-    expect(cleared.items.find((item) => item.id === itemId)?.primaryPr).toMatchObject({
-      number: null,
-      state: 'Unopened',
+    expect(cleared.items.find((item) => item.id === itemId)).toMatchObject({
+      issue: { number: null, state: 'Unknown' },
+      primaryPr: { number: null, state: 'Unopened' },
     })
   })
 
@@ -66,15 +94,15 @@ describe('plan graph demo model', () => {
     const dag = createDemoDag()
     const dependency: PlanDependency = {
       id: 'edge-new',
-      source: 'PG-05',
-      target: 'PG-04',
+      source: 'PG-02',
+      target: 'PG-03',
       kind: 'requires',
     }
     const withDependency = addDagDependency(dag, dependency)
     const changedKind = updateDagDependencyKind(withDependency, dependency.id, 'integrate-with')
     const cyclic = addDagDependency(changedKind, {
       id: 'edge-cycle',
-      source: 'PG-05',
+      source: 'PG-06',
       target: 'PG-01',
       kind: 'requires',
     })
@@ -101,100 +129,101 @@ describe('plan graph demo model', () => {
   })
 
   it('derives ready and blocked states from completed prerequisites', () => {
-    const items = createDemoPlanItems()
-    const resolved = resolvePlanItems(items)
+    const dag = createDemoDag()
+    const resolved = resolvePlanItems(dag.items, dag.dependencies, new Date(CLAIM.claimedAt))
 
-    expect(resolved.find((item) => item.id === 'PG-02')?.resolvedLifecycle).toBe('ready')
-    expect(resolved.find((item) => item.id === 'PG-03')?.resolvedLifecycle).toBe('blocked')
-    expect(getBlockingItemIds('PG-03', items)).toEqual(['PG-02'])
-  })
-
-  it('unlocks both fan-out nodes after their prerequisite is done', () => {
-    let items = createDemoPlanItems()
-    items = advancePlanItem(items, 'PG-02', 'Codex 01')
-    items = advancePlanItem(items, 'PG-02', 'Codex 01')
-    items = advancePlanItem(items, 'PG-02', 'Codex 01')
-
-    const resolved = resolvePlanItems(items)
-
-    expect(resolved.find((item) => item.id === 'PG-03')?.resolvedLifecycle).toBe('ready')
-    expect(resolved.find((item) => item.id === 'PG-04')?.resolvedLifecycle).toBe('ready')
-  })
-
-  it('claims a ready node without mutating the previous snapshot', () => {
-    const items = createDemoPlanItems()
-    const next = advancePlanItem(items, 'PG-02', 'Claude 01')
-
-    expect(items.find((item) => item.id === 'PG-02')?.lifecycle).toBe('planned')
-    expect(next.find((item) => item.id === 'PG-02')).toMatchObject({
-      lifecycle: 'active',
-      agent: 'Claude 01',
-      execution: {
-        lease: 'active',
-        status: 'running',
-      },
-      primaryPr: {
-        state: 'Draft',
-        checks: 'Running',
-      },
-    })
-  })
-
-  it('does not advance a blocked node', () => {
-    const items = createDemoPlanItems()
-    const next = advancePlanItem(items, 'PG-03', 'Codex 02')
-
-    expect(next.find((item) => item.id === 'PG-03')?.lifecycle).toBe('planned')
-    expect(next.find((item) => item.id === 'PG-03')?.agent).toBeUndefined()
-  })
-
-  it('supports dependency policies supplied by a caller', () => {
-    const items: PlanItem[] = createDemoPlanItems().slice(0, 2)
-    const dependencies: PlanDependency[] = [
-      { id: 'custom', source: 'PG-02', target: 'PG-01', kind: 'requires' },
-    ]
-
-    expect(getBlockingItemIds('PG-01', items, dependencies)).toEqual(['PG-02'])
-  })
-
-  it('advances against the DAG dependency set supplied by a caller', () => {
-    const items = createDemoPlanItems()
-    const next = advancePlanItem(items, 'PG-03', 'Codex 02', [])
-
-    expect(next.find((item) => item.id === 'PG-03')).toMatchObject({
-      lifecycle: 'active',
-      agent: 'Codex 02',
-      primaryPr: {
-        number: 23,
-        state: 'Draft',
-      },
-    })
-  })
-
-  it('allows an integration consumer to start but blocks its merge', () => {
-    let items = createDemoPlanItems()
-    for (let transition = 0; transition < 3; transition += 1) {
-      items = advancePlanItem(items, 'PG-02', 'Codex 01')
-    }
-    for (let transition = 0; transition < 3; transition += 1) {
-      items = advancePlanItem(items, 'PG-03', 'Codex 01')
-    }
-
-    expect(resolvePlanItems(items).find((item) => item.id === 'PG-06')?.resolvedLifecycle).toBe(
-      'ready'
+    expect(resolved.find((item) => item.id === 'PG-01')?.resolvedLifecycle).toBe('ready')
+    expect(resolved.find((item) => item.id === 'PG-02')?.resolvedLifecycle).toBe('blocked')
+    expect(getBlockingItemIds('PG-02', dag.items, dag.dependencies)).toEqual(['PG-01'])
+    expect(getNextReadyItem(dag.items, dag.dependencies, new Date(CLAIM.claimedAt))?.id).toBe(
+      'PG-01'
     )
-    expect(getMergeBlockingItemIds('PG-06', items)).toEqual(['PG-04'])
-
-    items = advancePlanItem(items, 'PG-06', 'Codex 02')
-    items = advancePlanItem(items, 'PG-06', 'Codex 02')
-    items = advancePlanItem(items, 'PG-06', 'Codex 02')
-
-    expect(items.find((item) => item.id === 'PG-06')?.lifecycle).toBe('review')
   })
 
-  it('returns the first node that is actually ready', () => {
-    const items = createDemoPlanItems()
+  it('claims a ready node once with a fencing token', () => {
+    const dag = createDemoDag()
+    const claimed = claimDagItem(dag, 'PG-01', CLAIM)
+    const racingClaim = claimDagItem(claimed, 'PG-01', { ...CLAIM, agent: 'Claude local' })
 
-    expect(getNextReadyItem(items)?.id).toBe('PG-02')
+    expect(dag.items.find((item) => item.id === 'PG-01')?.lifecycle).toBe('planned')
+    expect(claimed.items.find((item) => item.id === 'PG-01')).toMatchObject({
+      lifecycle: 'active',
+      agent: 'Codex local',
+      execution: {
+        attemptId: 'attempt-pg-01-a',
+        status: 'running',
+        lease: { state: 'active', fencingToken: 1 },
+      },
+    })
+    expect(racingClaim).toBe(claimed)
+  })
+
+  it('allows takeover after lease expiry and advances the fencing token', () => {
+    const dag = claimDagItem(createDemoDag(), 'PG-01', CLAIM)
+    const takeover = claimDagItem(dag, 'PG-01', {
+      ...CLAIM,
+      agent: 'Claude local',
+      attemptId: 'attempt-pg-01-b',
+      claimedAt: '2026-08-31T02:00:00.000Z',
+      expiresAt: '2026-08-31T03:00:00.000Z',
+    })
+
+    expect(takeover.items.find((item) => item.id === 'PG-01')).toMatchObject({
+      agent: 'Claude local',
+      execution: { attemptId: 'attempt-pg-01-b', lease: { fencingToken: 2 } },
+    })
+  })
+
+  it('does not claim a blocked node', () => {
+    const dag = createDemoDag()
+
+    expect(claimDagItem(dag, 'PG-02', CLAIM)).toBe(dag)
+  })
+
+  it('projects a real merged PR and unlocks all fan-out children', () => {
+    const claimed = claimDagItem(createDemoDag(), 'PG-01', CLAIM)
+    const syncedAt = '2026-08-31T02:00:00.000Z'
+    const merged = applyGitHubBindingUpdates(
+      claimed,
+      [
+        {
+          itemId: 'PG-01',
+          issue: { number: 1, state: 'Closed', url: 'https://github.com/ActivePeter/sim/issues/1' },
+          primaryPr: {
+            number: 1,
+            state: 'Merged',
+            checks: 'Passed',
+            review: 'Approved',
+            headSha: 'def5678',
+            syncedAt,
+          },
+        },
+      ],
+      syncedAt
+    )
+    const resolved = resolvePlanItems(merged.items, merged.dependencies)
+
+    expect(merged.items.find((item) => item.id === 'PG-01')).toMatchObject({
+      lifecycle: 'done',
+      execution: { status: 'completed', lease: { state: 'released' } },
+    })
+    expect(
+      resolved.filter((item) => item.resolvedLifecycle === 'ready').map((item) => item.id)
+    ).toEqual(['PG-02', 'PG-03', 'PG-04'])
+  })
+
+  it('lets integrate-with start independently but keeps the merge barrier', () => {
+    const dag = createDemoDag()
+    const doneItems = dag.items.map((item) =>
+      ['PG-01', 'PG-02', 'PG-03', 'PG-04'].includes(item.id)
+        ? { ...item, lifecycle: 'done' as const }
+        : item
+    )
+
+    expect(
+      resolvePlanItems(doneItems, dag.dependencies).find((item) => item.id === 'PG-06')
+        ?.resolvedLifecycle
+    ).toBe('ready')
+    expect(getMergeBlockingItemIds('PG-06', doneItems, dag.dependencies)).toEqual(['PG-05'])
   })
 })

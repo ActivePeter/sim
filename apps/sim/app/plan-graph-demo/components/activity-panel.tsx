@@ -17,14 +17,17 @@ const ACTIVITY_ICONS = {
 
 interface ActivityPanelProps {
   activities: readonly PlanActivity[]
+  persistent: boolean
 }
 
-export function ActivityPanel({ activities }: ActivityPanelProps) {
+export function ActivityPanel({ activities, persistent }: ActivityPanelProps) {
   return (
     <section className='h-[148px] shrink-0 border-[var(--border)] border-t bg-[var(--surface-1)]'>
       <div className='flex h-9 items-center justify-between border-[var(--border)] border-b px-3'>
         <h2 className='text-[var(--text-primary)] text-xs'>Plan activity</h2>
-        <span className='text-[10px] text-[var(--text-muted)]'>Live projection · demo</span>
+        <span className='text-[10px] text-[var(--text-muted)]'>
+          {persistent ? 'Durable workspace projection' : 'Local preview'}
+        </span>
       </div>
       <div className='grid h-[111px] grid-cols-1 divide-y divide-[var(--border)] overflow-y-auto md:grid-cols-3 md:divide-x md:divide-y-0'>
         {activities.slice(0, 3).map((activity) => {
