@@ -226,7 +226,7 @@ build_candidate_source() {
 	(
 		cd -- "$source_stage"
 		export DOCKER_BUILD=true
-		bun run --cwd apps/sim build -- --webpack
+		bun run --cwd apps/sim build:deployment
 	)
 }
 
