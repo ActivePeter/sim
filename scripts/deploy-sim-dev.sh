@@ -167,6 +167,14 @@ link_release_uploads() {
 	ln -s -- "$uploads_root" "$uploads_link"
 }
 
+merge_local_uploads() {
+	local local_uploads="$1"
+	local uploads_root="${2:-$SHARED_UPLOADS_ROOT}"
+	[[ -d "$local_uploads" && ! -L "$local_uploads" ]] || return 0
+	mkdir -p -- "$uploads_root"
+	rsync --archive --chmod=D0700,F0600 "$local_uploads/" "$uploads_root/"
+}
+
 validate_release() {
 	local release="$1"
 	[[ -d "$release" && -x "$release/bin/node" && -f "$release/apps/sim/server.js" && -d "$release/apps/sim/.next/static" && -f "$release/manifest.env" ]]
@@ -183,12 +191,19 @@ prepare_release_with_shared_uploads() {
 		printf -v "$result_variable" '%s' "$release"
 		return 0
 	fi
+	if [[ -L "$release/apps/sim/uploads" ]]; then
+		fail "release uploads link points to unexpected state: $release"
+	fi
+	merge_local_uploads "$release/apps/sim/uploads"
 	clone_id="$(basename -- "$release")-state-$RANDOM"
 	clone_root="$SERVICE_RELEASES_ROOT/$clone_id"
 	STAGING_ROOT="$DEPLOY_ROOT/.staging-$SERVICE_NAME-$clone_id"
 	clone_staging="$STAGING_ROOT/runtime"
 	mkdir -p -- "$STAGING_ROOT" "$SERVICE_RELEASES_ROOT"
 	cp -al -- "$release" "$clone_staging"
+	if [[ -d "$clone_staging/apps/sim/uploads" && ! -L "$clone_staging/apps/sim/uploads" ]]; then
+		rm -rf -- "$clone_staging/apps/sim/uploads"
+	fi
 	link_release_uploads "$clone_staging"
 	validate_release "$clone_staging" || fail "state-linked candidate is incomplete: $clone_staging"
 	mv -- "$clone_staging" "$clone_root"

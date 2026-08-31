@@ -106,6 +106,13 @@ release_uploads_link_is_valid \
 	"$temporary_root/state-link/uploads" || fail_test 'release did not link shared uploads'
 [[ ! -d "$temporary_root/state-link/release/apps/sim/uploads/workspace" ]] || fail_test 'release copied mutable uploads'
 
+mkdir -p "$temporary_root/state-merge/local/workspace" "$temporary_root/state-merge/shared"
+printf 'durable\n' >"$temporary_root/state-merge/local/workspace/plan.json"
+merge_local_uploads \
+	"$temporary_root/state-merge/local" \
+	"$temporary_root/state-merge/shared"
+grep -Fqx durable "$temporary_root/state-merge/shared/workspace/plan.json" || fail_test 'local uploads were not preserved'
+
 configure_service latest
 SERVICE_RELEASES_ROOT="$temporary_root/reuse/releases"
 SERVICE_CURRENT_LINK="$temporary_root/reuse/current"
