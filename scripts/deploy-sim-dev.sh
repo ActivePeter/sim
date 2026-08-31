@@ -404,7 +404,7 @@ start_service() {
 		log "Starting Sim $SERVICE_NAME from $release on 0.0.0.0:$SERVICE_PORT."
 	} >>"$SERVICE_LOG"
 	(
-		cd -- "$release"
+		cd -- "$release/apps/sim"
 		close_deployment_lock_for_child
 		nohup setsid env \
 			NODE_ENV=production \
