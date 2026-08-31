@@ -90,6 +90,35 @@ assert_equal \
 	"$(stat -c '%i' "$temporary_root/dependencies/source/package/index.js")" \
 	"$(stat -c '%i' "$temporary_root/dependencies/snapshot/package/index.js")"
 
+configure_service latest
+SERVICE_RELEASES_ROOT="$temporary_root/reuse/releases"
+SERVICE_CURRENT_LINK="$temporary_root/reuse/current"
+SERVICE_PREVIOUS_LINK="$temporary_root/reuse/previous"
+reusable_release="$SERVICE_RELEASES_ROOT/candidate"
+mkdir -p "$reusable_release/apps/sim/.next/static" "$reusable_release/bin"
+touch "$reusable_release/apps/sim/server.js" "$reusable_release/bin/node"
+chmod 0755 "$reusable_release/bin/node"
+{
+	printf 'SERVICE=%q\n' "$SERVICE_NAME"
+	printf 'PORT=%q\n' "$SERVICE_PORT"
+	printf 'COMMIT=%q\n' test-commit
+	printf 'SOURCE=%q\n' "$SOURCE_ROOT"
+	printf 'PUBLIC_URL=%q\n' "$SERVICE_URL"
+	printf 'BUILT_AT=%q\n' '2026-08-31T00:00:00Z'
+} >"$reusable_release/manifest.env"
+assert_equal "$reusable_release" "$(find_reusable_release test-commit)"
+configure_service latest
+
+set +e
+(
+	service_pid() { return 1; }
+	is_port_listening() { return 1; }
+	stop_service
+)
+stopped_service_status=$?
+set -e
+assert_equal 0 "$stopped_service_status"
+
 set +e
 (
 	set -e

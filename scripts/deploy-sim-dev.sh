@@ -223,6 +223,33 @@ require_clean_source() {
 	[[ -z "$(git -C "$SOURCE_ROOT" status --porcelain=v1 --untracked-files=normal)" ]] || fail 'source has uncommitted files; validate and commit before deployment'
 }
 
+release_matches_source_commit() {
+	local release="$1"
+	local expected_commit="$2"
+	local BUILT_AT= COMMIT= PORT= PUBLIC_URL= SERVICE= SOURCE=
+	validate_release "$release" || return 1
+	# shellcheck disable=SC1090
+	source "$release/manifest.env"
+	[[ "$SERVICE" == "$SERVICE_NAME" && "$PORT" == "$SERVICE_PORT" && "$COMMIT" == "$expected_commit" && "$SOURCE" == "$SOURCE_ROOT" && "$PUBLIC_URL" == "$SERVICE_URL" ]]
+}
+
+find_reusable_release() {
+	local expected_commit="$1"
+	local current
+	local previous
+	local release
+	current="$(resolve_release_link "$SERVICE_CURRENT_LINK" || true)"
+	previous="$(resolve_release_link "$SERVICE_PREVIOUS_LINK" || true)"
+	while IFS= read -r release; do
+		[[ "$release" != "$ACTIVE_RELEASE" && "$release" != "$current" && "$release" != "$previous" ]] || continue
+		if release_matches_source_commit "$release" "$expected_commit"; then
+			printf '%s\n' "$release"
+			return 0
+		fi
+	done < <(find "$SERVICE_RELEASES_ROOT" -mindepth 1 -maxdepth 1 -type d -printf '%T@ %p\n' 2>/dev/null | sort -rn | cut -d' ' -f2-)
+	return 1
+}
+
 build_candidate_source() {
 	local source_stage="$1"
 	(
@@ -246,12 +273,19 @@ build_release() {
 	local commit
 	local release_id
 	local release_root
+	local reusable_release
 	local runtime_root
 	local source_stage
 	local standalone_root
 
 	require_clean_source
 	commit="$(git -C "$SOURCE_ROOT" rev-parse HEAD)"
+	reusable_release="$(find_reusable_release "$commit" || true)"
+	if [[ -n "$reusable_release" ]]; then
+		log "Reusing complete, unselected Sim $SERVICE_NAME candidate for $commit."
+		printf -v "$result_variable" '%s' "$reusable_release"
+		return 0
+	fi
 	release_id="$(date -u +'%Y%m%dT%H%M%SZ')-${commit:0:12}-$RANDOM"
 	STAGING_ROOT="$DEPLOY_ROOT/.staging-$SERVICE_NAME-$release_id"
 	BUILD_STAGING_ROOT="$BUILD_ROOT/.staging-$SERVICE_NAME-$release_id"
@@ -283,8 +317,6 @@ build_release() {
 	} >"$runtime_root/manifest.env"
 	validate_release "$runtime_root" || fail "candidate runtime is incomplete: $runtime_root"
 	mv -- "$runtime_root" "$release_root"
-	rm -rf -- "$BUILD_STAGING_ROOT"
-	BUILD_STAGING_ROOT=
 	rmdir -- "$STAGING_ROOT"
 	STAGING_ROOT=
 	printf -v "$result_variable" '%s' "$release_root"
@@ -296,7 +328,7 @@ stop_service() {
 	pid="$(service_pid || true)"
 	if [[ -z "$pid" ]]; then
 		is_port_listening && fail "port $SERVICE_PORT is owned by an unrecognized process"
-		return
+		return 0
 	fi
 	if ! kill -0 "$pid" 2>/dev/null; then
 		rm -f -- "$SERVICE_PID_FILE"
