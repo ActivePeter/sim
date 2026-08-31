@@ -27,7 +27,8 @@ The service listens on `0.0.0.0`; port 3301 is the default.
 The shared `scripts/deploy-sim-dev.sh` entry point keeps this release independent from the latest
 service. It holds a global deployment lock, uses immutable standalone releases, verifies process
 ownership and public health, rolls back after failed activation, and retains selected, previous, and
-live releases during cleanup.
+live releases during cleanup. Local uploads remain in the shared mutable deployment state and are
+linked into each release before activation.
 
 Never silently refresh a snapshot, never point it at the latest service's mutable selection, never
 kill an unknown port owner, and never start an ad-hoc server on port 3301. On failure, report the

@@ -19,7 +19,8 @@ receive an IP-based origin. The service listens on `0.0.0.0`; port 3300 is the d
 The shared `scripts/deploy-sim-dev.sh` entry point holds one fail-fast lock across both Sim demo
 services. It builds an immutable standalone candidate while the old release remains online,
 validates process ownership before stopping anything, atomically promotes the candidate, checks the
-Plan Graph URL and wildcard listener, and restores the prior release on failure.
+Plan Graph URL and wildcard listener, and restores the prior release on failure. Local uploads live
+under the shared deployment state root and are linked into each release before it becomes immutable.
 
 For crash recovery only, restart the already-selected release without rebuilding:
 

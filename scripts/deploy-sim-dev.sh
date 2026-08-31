@@ -9,6 +9,9 @@ readonly BUILD_ROOT="${SIM_DEV_BUILD_ROOT:-$(dirname -- "$SOURCE_ROOT")/.sim-dev
 readonly SERVICE_ENV_FILE="${SIM_DEV_ENV_FILE:-$DEPLOY_ROOT/runtime.env}"
 readonly DEPLOY_LOCK="$DEPLOY_ROOT/deploy.lock"
 readonly DEPLOY_LOG="$DEPLOY_ROOT/deploy.log"
+readonly MUTABLE_ROOT="$DEPLOY_ROOT/state"
+readonly SHARED_UPLOADS_ROOT="$MUTABLE_ROOT/uploads"
+readonly UPLOADS_INITIALIZED_MARKER="$MUTABLE_ROOT/uploads.initialized"
 readonly DEPLOY_TIMEOUT_SECONDS="${SIM_DEV_DEPLOY_TIMEOUT_SECONDS:-180}"
 readonly RELEASE_RETENTION="${SIM_DEV_RELEASE_RETENTION:-3}"
 readonly PUBLIC_HOST="${SIM_PUBLIC_HOST:-127.0.0.1}"
@@ -135,9 +138,63 @@ require_runtime_environment() {
 	export BETTER_AUTH_URL="$SERVICE_URL"
 }
 
+initialize_shared_uploads() {
+	mkdir -p -- "$MUTABLE_ROOT" "$SHARED_UPLOADS_ROOT"
+	chmod 0700 "$MUTABLE_ROOT" "$SHARED_UPLOADS_ROOT"
+	if [[ ! -f "$UPLOADS_INITIALIZED_MARKER" ]]; then
+		if [[ -d "$SOURCE_ROOT/apps/sim/uploads" ]]; then
+			rsync --archive --ignore-existing --chmod=D0700,F0600 "$SOURCE_ROOT/apps/sim/uploads/" "$SHARED_UPLOADS_ROOT/"
+		fi
+		(umask 077 && touch "$UPLOADS_INITIALIZED_MARKER")
+	fi
+}
+
+release_uploads_link_is_valid() {
+	local release="$1"
+	local uploads_root="${2:-$SHARED_UPLOADS_ROOT}"
+	[[ -L "$release/apps/sim/uploads" && "$(readlink -f -- "$release/apps/sim/uploads")" == "$(readlink -f -- "$uploads_root")" ]]
+}
+
+link_release_uploads() {
+	local release="$1"
+	local uploads_root="${2:-$SHARED_UPLOADS_ROOT}"
+	local uploads_link="$release/apps/sim/uploads"
+	if [[ -L "$uploads_link" ]]; then
+		release_uploads_link_is_valid "$release" "$uploads_root" || fail "release uploads link points to unexpected state: $release"
+		return 0
+	fi
+	[[ ! -e "$uploads_link" ]] || fail "release contains mutable uploads data: $release"
+	ln -s -- "$uploads_root" "$uploads_link"
+}
+
 validate_release() {
 	local release="$1"
 	[[ -d "$release" && -x "$release/bin/node" && -f "$release/apps/sim/server.js" && -d "$release/apps/sim/.next/static" && -f "$release/manifest.env" ]]
+}
+
+prepare_release_with_shared_uploads() {
+	local result_variable="$1"
+	local release="$2"
+	local clone_id
+	local clone_root
+	local clone_staging
+	initialize_shared_uploads
+	if release_uploads_link_is_valid "$release"; then
+		printf -v "$result_variable" '%s' "$release"
+		return 0
+	fi
+	clone_id="$(basename -- "$release")-state-$RANDOM"
+	clone_root="$SERVICE_RELEASES_ROOT/$clone_id"
+	STAGING_ROOT="$DEPLOY_ROOT/.staging-$SERVICE_NAME-$clone_id"
+	clone_staging="$STAGING_ROOT/runtime"
+	mkdir -p -- "$STAGING_ROOT" "$SERVICE_RELEASES_ROOT"
+	cp -al -- "$release" "$clone_staging"
+	link_release_uploads "$clone_staging"
+	validate_release "$clone_staging" || fail "state-linked candidate is incomplete: $clone_staging"
+	mv -- "$clone_staging" "$clone_root"
+	rmdir -- "$STAGING_ROOT"
+	STAGING_ROOT=
+	printf -v "$result_variable" '%s' "$clone_root"
 }
 
 resolve_release_link() {
@@ -344,6 +401,8 @@ build_release() {
 	if [[ -d "$source_stage/apps/sim/public" ]]; then
 		rsync --archive "$source_stage/apps/sim/public/" "$runtime_root/apps/sim/public/"
 	fi
+	initialize_shared_uploads
+	link_release_uploads "$runtime_root"
 	cp -a -- "$(command -v node)" "$runtime_root/bin/node"
 	chmod 0755 "$runtime_root/bin/node"
 	{
@@ -397,6 +456,7 @@ start_service() {
 	local release="$1"
 	local pid
 	validate_release "$release" || return 1
+	release_uploads_link_is_valid "$release" || return 1
 	is_port_listening && return 1
 	mkdir -p -- "$SERVICE_ROOT"
 	{
@@ -528,7 +588,11 @@ run_deployment_action() {
 		if [[ -z "$candidate" && -n "$ACTIVE_RELEASE" && "$ACTIVE_RELEASE" != "$selected" ]] && release_matches_service "$ACTIVE_RELEASE"; then
 			candidate="$ACTIVE_RELEASE"
 		fi
+		if [[ -z "$candidate" && -n "$selected" ]] && ! release_uploads_link_is_valid "$selected"; then
+			candidate="$selected"
+		fi
 		[[ -n "$candidate" ]] || fail "no complete, unselected $SERVICE_NAME candidate is available"
+		prepare_release_with_shared_uploads candidate "$candidate"
 		log "Recovering Sim $SERVICE_NAME candidate $candidate."
 		if [[ "$candidate" == "$ACTIVE_RELEASE" ]] && wait_until_ready "$SERVICE_NAME recovered candidate" "$candidate"; then
 			promote_release "$candidate" "$selected"

@@ -97,6 +97,15 @@ assert_equal \
 	"$(stat -c '%i' "$temporary_root/dependencies/source/package/index.js")" \
 	"$(stat -c '%i' "$temporary_root/dependencies/snapshot/package/index.js")"
 
+mkdir -p "$temporary_root/state-link/release/apps/sim" "$temporary_root/state-link/uploads"
+link_release_uploads \
+	"$temporary_root/state-link/release" \
+	"$temporary_root/state-link/uploads"
+release_uploads_link_is_valid \
+	"$temporary_root/state-link/release" \
+	"$temporary_root/state-link/uploads" || fail_test 'release did not link shared uploads'
+[[ ! -d "$temporary_root/state-link/release/apps/sim/uploads/workspace" ]] || fail_test 'release copied mutable uploads'
+
 configure_service latest
 SERVICE_RELEASES_ROOT="$temporary_root/reuse/releases"
 SERVICE_CURRENT_LINK="$temporary_root/reuse/current"
