@@ -167,6 +167,12 @@ process_environment_value() {
 	tr '\0' '\n' <"/proc/$pid/environ" | sed -n "s/^${name}=//p" | head -n 1
 }
 
+is_release_working_directory() {
+	local release="$1"
+	local working_directory="$2"
+	[[ "$working_directory" == "$release/apps/sim" ]]
+}
+
 is_recognized_service_process() {
 	local pid="$1"
 	local expected_release="${2:-}"
@@ -179,7 +185,8 @@ is_recognized_service_process() {
 	process_release="$(process_environment_value "$pid" SIM_DEV_RELEASE_ROOT || true)"
 	working_directory="$(readlink -f -- "/proc/$pid/cwd" 2>/dev/null || true)"
 	[[ "$process_service" == "$SERVICE_NAME" ]] || return 1
-	[[ -n "$process_release" && "$working_directory" == "$process_release" ]] || return 1
+	[[ -n "$process_release" ]] || return 1
+	is_release_working_directory "$process_release" "$working_directory" || return 1
 	[[ -z "$expected_release" || "$process_release" == "$expected_release" ]] || return 1
 	validate_release "$process_release"
 }
@@ -506,13 +513,22 @@ cleanup_releases() {
 run_deployment_action() {
 	local action="$1"
 	local candidate
+	local selected
 	case "$action" in
 	recover)
 		prepare_active_release
+		selected="$(resolve_release_link "$SERVICE_CURRENT_LINK" || true)"
 		candidate="$(find_recovery_release || true)"
+		if [[ -z "$candidate" && -n "$ACTIVE_RELEASE" && "$ACTIVE_RELEASE" != "$selected" ]] && release_matches_service "$ACTIVE_RELEASE"; then
+			candidate="$ACTIVE_RELEASE"
+		fi
 		[[ -n "$candidate" ]] || fail "no complete, unselected $SERVICE_NAME candidate is available"
 		log "Recovering Sim $SERVICE_NAME candidate $candidate."
-		activate_release "$candidate" "$ACTIVE_RELEASE"
+		if [[ "$candidate" == "$ACTIVE_RELEASE" ]] && wait_until_ready "$SERVICE_NAME recovered candidate" "$candidate"; then
+			promote_release "$candidate" "$selected"
+		else
+			activate_release "$candidate" "${selected:-$ACTIVE_RELEASE}"
+		fi
 		;;
 	restart)
 		prepare_snapshot_restart candidate

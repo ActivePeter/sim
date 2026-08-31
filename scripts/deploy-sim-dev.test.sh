@@ -123,6 +123,14 @@ stopped_service_status=$?
 set -e
 assert_equal 0 "$stopped_service_status"
 
+release_root="$temporary_root/recognized-release"
+mkdir -p "$release_root/apps/sim"
+working_directory="$release_root/apps/sim"
+is_release_working_directory "$release_root" "$working_directory" || fail_test 'standalone working directory was rejected'
+if is_release_working_directory "$release_root" "$temporary_root"; then
+	fail_test 'working directory outside the release app root was accepted'
+fi
+
 set +e
 (
 	set -e
