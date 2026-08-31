@@ -19,6 +19,15 @@ asks for a refresh:
 bun run deploy:sim:snapshot:update
 ```
 
+To pin the already-selected healthy latest runtime without compiling it again:
+
+```bash
+bun run deploy:sim:snapshot:from-latest
+```
+
+This remains an explicit snapshot move. It clones the immutable runtime into the snapshot release
+set, rewrites only its service manifest for port 3301, and keeps later snapshot restarts pinned.
+
 The command reads secrets from
 `${SIM_DEV_ENV_FILE:-${XDG_STATE_HOME:-$HOME/.local/state}/sim-dev-services/runtime.env}` or the inherited environment.
 Never print that file or its values. Configure `SIM_PUBLIC_HOST` there for an IP-based browser URL.

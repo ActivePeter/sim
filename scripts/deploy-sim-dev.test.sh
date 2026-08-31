@@ -21,12 +21,16 @@ source "$DEPLOY_SCRIPT"
 activation_definition="$(declare -f activate_release)"
 eval "${activation_definition/activate_release/activate_real_release}"
 
-assert_equal update "$(resolve_deploy_action latest false false)"
-assert_equal restart "$(resolve_deploy_action latest false true)"
-assert_equal restart "$(resolve_deploy_action snapshot false false)"
-assert_equal update "$(resolve_deploy_action snapshot true false)"
+assert_equal update "$(resolve_deploy_action latest false false false)"
+assert_equal restart "$(resolve_deploy_action latest false true false)"
+assert_equal restart "$(resolve_deploy_action snapshot false false false)"
+assert_equal update "$(resolve_deploy_action snapshot true false false)"
+assert_equal clone-latest "$(resolve_deploy_action snapshot false false true)"
 if (resolve_deploy_action invalid false false) >/dev/null 2>&1; then
 	fail_test 'invalid service was accepted'
+fi
+if (resolve_deploy_action latest false false true) >/dev/null 2>&1; then
+	fail_test 'latest accepted snapshot cloning'
 fi
 
 SIM_PUBLIC_HOST=192.0.2.10

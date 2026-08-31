@@ -53,6 +53,7 @@ Usage: deploy-sim-dev.sh <latest|snapshot> [options]
   snapshot                  Restart the selected snapshot on port 3301.
   snapshot --update-snapshot
                             Build the current clean commit and select it as the snapshot.
+  snapshot --from-latest    Pin a clone of the selected healthy latest release on port 3301.
   <service> --restart-selected
                             Restart the selected release without rebuilding (recovery only).
   <service> --recover-candidate
@@ -65,7 +66,14 @@ resolve_deploy_action() {
 	local service="$1"
 	local update_snapshot="$2"
 	local restart_selected="$3"
+	local from_latest="${4:-false}"
 
+	if [[ "$from_latest" == true ]]; then
+		[[ "$service" == snapshot ]] || fail '--from-latest is valid only for snapshot'
+		[[ "$update_snapshot" == false && "$restart_selected" == false ]] || fail '--from-latest cannot be combined with another deployment action'
+		printf 'clone-latest\n'
+		return
+	fi
 	if [[ "$restart_selected" == true ]]; then
 		printf 'restart\n'
 		return
@@ -571,6 +579,42 @@ prepare_snapshot_restart() {
 	printf -v "$result_variable" '%s' "$selected"
 }
 
+clone_selected_latest_release() {
+	local result_variable="$1"
+	local latest_release
+	local clone_id
+	local clone_root
+	local clone_staging
+	local BUILT_AT= COMMIT= PORT= PUBLIC_URL= SERVICE= SOURCE=
+	latest_release="$(resolve_release_link "$DEPLOY_ROOT/latest/current" || true)"
+	[[ -n "$latest_release" ]] || fail 'no selected latest release is available to snapshot'
+	release_uploads_link_is_valid "$latest_release" || fail 'selected latest release does not use shared mutable uploads'
+	# shellcheck disable=SC1090
+	source "$latest_release/manifest.env"
+	[[ "$SERVICE" == latest && -n "$COMMIT" && "$SOURCE" == "$SOURCE_ROOT" ]] || fail 'selected latest release manifest is incompatible'
+	clone_id="$(date -u +'%Y%m%dT%H%M%SZ')-${COMMIT:0:12}-from-latest-$RANDOM"
+	clone_root="$SERVICE_RELEASES_ROOT/$clone_id"
+	STAGING_ROOT="$DEPLOY_ROOT/.staging-$SERVICE_NAME-$clone_id"
+	clone_staging="$STAGING_ROOT/runtime"
+	mkdir -p -- "$STAGING_ROOT" "$SERVICE_RELEASES_ROOT"
+	cp -al -- "$latest_release" "$clone_staging"
+	rm -f -- "$clone_staging/manifest.env"
+	{
+		printf 'SERVICE=%q\n' "$SERVICE_NAME"
+		printf 'PORT=%q\n' "$SERVICE_PORT"
+		printf 'COMMIT=%q\n' "$COMMIT"
+		printf 'SOURCE=%q\n' "$SOURCE_ROOT"
+		printf 'PUBLIC_URL=%q\n' "$SERVICE_URL"
+		printf 'BUILT_AT=%q\n' "$(date -u +'%Y-%m-%dT%H:%M:%SZ')"
+		printf 'ORIGIN_RELEASE=%q\n' "$latest_release"
+	} >"$clone_staging/manifest.env"
+	validate_release "$clone_staging" || fail "latest-derived snapshot is incomplete: $clone_staging"
+	mv -- "$clone_staging" "$clone_root"
+	rmdir -- "$STAGING_ROOT"
+	STAGING_ROOT=
+	printf -v "$result_variable" '%s' "$clone_root"
+}
+
 cleanup_releases() {
 	local current
 	local index=0
@@ -596,6 +640,11 @@ run_deployment_action() {
 	local candidate
 	local selected
 	case "$action" in
+	clone-latest)
+		prepare_active_release
+		clone_selected_latest_release candidate
+		activate_release "$candidate" "$ACTIVE_RELEASE"
+		;;
 	recover)
 		prepare_active_release
 		selected="$(resolve_release_link "$SERVICE_CURRENT_LINK" || true)"
@@ -661,6 +710,7 @@ require_commands() {
 
 main() {
 	local action
+	local from_latest=false
 	local recover_candidate=false
 	local restart_selected=false
 	local service="${1:-}"
@@ -674,6 +724,7 @@ main() {
 	shift
 	while (( $# > 0 )); do
 		case "$1" in
+		--from-latest) from_latest=true ;;
 		--recover-candidate) recover_candidate=true ;;
 		--update-snapshot) update_snapshot=true ;;
 		--restart-selected) restart_selected=true ;;
@@ -697,10 +748,10 @@ main() {
 	[[ "$DEPLOY_TIMEOUT_SECONDS" =~ ^[1-9][0-9]*$ ]] || fail 'SIM_DEV_DEPLOY_TIMEOUT_SECONDS must be a positive integer'
 	[[ "$RELEASE_RETENTION" =~ ^[1-9][0-9]*$ ]] || fail 'SIM_DEV_RELEASE_RETENTION must be a positive integer'
 	if [[ "$recover_candidate" == true ]]; then
-		[[ "$update_snapshot" == false && "$restart_selected" == false ]] || fail '--recover-candidate cannot be combined with another deployment action'
+		[[ "$update_snapshot" == false && "$restart_selected" == false && "$from_latest" == false ]] || fail '--recover-candidate cannot be combined with another deployment action'
 		action=recover
 	else
-		action="$(resolve_deploy_action "$service" "$update_snapshot" "$restart_selected")"
+		action="$(resolve_deploy_action "$service" "$update_snapshot" "$restart_selected" "$from_latest")"
 	fi
 	acquire_deployment_lock || return $?
 	trap cleanup_staging EXIT

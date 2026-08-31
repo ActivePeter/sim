@@ -16,6 +16,7 @@
     "dev:full:capped": "bunx concurrently -n \"App,Realtime\" -c \"cyan,magenta\" \"cd apps/sim && bun run dev:capped\" \"cd apps/realtime && bun run dev\"",
     "deploy:sim:latest": "bash scripts/deploy-sim-dev.sh latest",
     "deploy:sim:snapshot": "bash scripts/deploy-sim-dev.sh snapshot",
+    "deploy:sim:snapshot:from-latest": "bash scripts/deploy-sim-dev.sh snapshot --from-latest",
     "deploy:sim:snapshot:update": "bash scripts/deploy-sim-dev.sh snapshot --update-snapshot",
     "test": "bun run test:setup && bun run test:deploy-sim && bun run test:npm-package-versions && bun run test:icon-path-precision && bun run test:tool-registry-boundary && bun run test:tool-request-boundary && bun run test:migrations-safety && bun run test:generators && turbo run test",
     "test:deploy-sim": "bash scripts/deploy-sim-dev.test.sh",
