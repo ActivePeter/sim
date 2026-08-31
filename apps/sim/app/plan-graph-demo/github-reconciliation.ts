@@ -29,6 +29,11 @@ interface GitHubCheckRunsResponse {
   total_count: number
 }
 
+interface GitHubCombinedStatusResponse {
+  state: 'error' | 'failure' | 'pending' | 'success'
+  statuses: Array<{ context: string; state: 'error' | 'failure' | 'pending' | 'success' }>
+}
+
 interface GitHubReviewResponse {
   id: number
   state: 'APPROVED' | 'CHANGES_REQUESTED' | 'COMMENTED' | 'DISMISSED' | 'PENDING'
@@ -57,13 +62,28 @@ async function requestGitHub<T>(url: string, signal?: AbortSignal): Promise<T | 
   return (await response.json()) as T
 }
 
-export function resolveCheckState(response: GitHubCheckRunsResponse): CheckState {
-  if (response.total_count === 0) return 'Pending'
-  if (response.check_runs.some((run) => run.status !== 'completed' || !run.conclusion)) {
+export function resolveCheckState(
+  response: GitHubCheckRunsResponse,
+  combinedStatus?: GitHubCombinedStatusResponse
+): CheckState {
+  if (response.total_count === 0 && !combinedStatus?.statuses.length) return 'Pending'
+  const passing = new Set(['success', 'neutral', 'skipped'])
+  if (
+    combinedStatus?.state === 'error' ||
+    combinedStatus?.state === 'failure' ||
+    response.check_runs.some(
+      (run) => run.status === 'completed' && !passing.has(run.conclusion ?? '')
+    )
+  ) {
+    return 'Failed'
+  }
+  if (
+    combinedStatus?.state === 'pending' ||
+    response.check_runs.some((run) => run.status !== 'completed' || !run.conclusion)
+  ) {
     return 'Running'
   }
-  const passing = new Set(['success', 'neutral', 'skipped'])
-  return response.check_runs.every((run) => passing.has(run.conclusion ?? '')) ? 'Passed' : 'Failed'
+  return 'Passed'
 }
 
 export function resolveReviewState(reviews: readonly GitHubReviewResponse[]): ReviewState {
@@ -115,9 +135,13 @@ async function projectPullRequest(
     }
   }
   const apiBase = `https://api.github.com/repos/${repository}`
-  const [checks, reviews] = await Promise.all([
+  const [checks, statuses, reviews] = await Promise.all([
     requestGitHub<GitHubCheckRunsResponse>(
       `${apiBase}/commits/${encodeURIComponent(response.head.sha)}/check-runs`,
+      signal
+    ),
+    requestGitHub<GitHubCombinedStatusResponse>(
+      `${apiBase}/commits/${encodeURIComponent(response.head.sha)}/status`,
       signal
     ),
     requestGitHub<GitHubReviewResponse[]>(`${apiBase}/pulls/${number}/reviews`, signal),
@@ -131,7 +155,10 @@ async function projectPullRequest(
         : response.draft
           ? 'Draft'
           : 'Open',
-    checks: checks ? resolveCheckState(checks) : 'Pending',
+    checks:
+      checks || statuses
+        ? resolveCheckState(checks ?? { check_runs: [], total_count: 0 }, statuses ?? undefined)
+        : 'Pending',
     review: reviews ? resolveReviewState(reviews) : 'Pending',
     url: response.html_url,
     baseSha: response.base.sha,

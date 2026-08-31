@@ -34,6 +34,18 @@ describe('GitHub plan reconciliation', () => {
         check_runs: [{ status: 'completed', conclusion: 'failure' }],
       })
     ).toBe('Failed')
+    expect(
+      resolveCheckState(
+        {
+          total_count: 1,
+          check_runs: [{ status: 'completed', conclusion: 'success' }],
+        },
+        {
+          state: 'failure',
+          statuses: [{ context: 'deployment', state: 'failure' }],
+        }
+      )
+    ).toBe('Failed')
   })
 
   it('uses the latest material review per author', () => {
@@ -73,6 +85,9 @@ describe('GitHub plan reconciliation', () => {
       if (url.endsWith('/commits/head-sha/check-runs')) {
         return Response.json({ check_runs: [], total_count: 0 })
       }
+      if (url.endsWith('/commits/head-sha/status')) {
+        return Response.json({ state: 'failure', statuses: [{ context: 'ci', state: 'failure' }] })
+      }
       if (url.endsWith('/pulls/7205/reviews')) return Response.json([])
       return new Response(null, { status: 404 })
     })
@@ -90,6 +105,7 @@ describe('GitHub plan reconciliation', () => {
     expect(result.updates[0]?.primaryPr).toMatchObject({
       number: 7205,
       state: 'Open',
+      checks: 'Failed',
       url: 'https://github.com/simstudioai/sim/pull/7205',
     })
   })
