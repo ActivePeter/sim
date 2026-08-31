@@ -111,6 +111,11 @@ acquire_deployment_lock() {
 	fi
 }
 
+close_deployment_lock_for_child() {
+	[[ "${DEPLOY_LOCK_FD:-}" =~ ^[1-9][0-9]*$ ]] || return 0
+	exec {DEPLOY_LOCK_FD}>&-
+}
+
 source_runtime_environment() {
 	local mode
 	if [[ -f "$SERVICE_ENV_FILE" ]]; then
@@ -400,6 +405,7 @@ start_service() {
 	} >>"$SERVICE_LOG"
 	(
 		cd -- "$release"
+		close_deployment_lock_for_child
 		nohup setsid env \
 			NODE_ENV=production \
 			HOSTNAME=0.0.0.0 \

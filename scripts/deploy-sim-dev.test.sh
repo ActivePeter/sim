@@ -73,6 +73,13 @@ cleanup_test() {
 }
 trap cleanup_test EXIT
 
+(
+	exec {DEPLOY_LOCK_FD}>"$temporary_root/inherited.lock"
+	inherited_lock_fd="$DEPLOY_LOCK_FD"
+	close_deployment_lock_for_child
+	[[ ! -e "/proc/$BASHPID/fd/$inherited_lock_fd" ]] || fail_test 'service child retained the deployment lock'
+)
+
 mkdir -p "$temporary_root/source/apps/sim"
 build_invocation="$({
 	bun() { printf '%s|%s\n' "${DOCKER_BUILD:-}" "$*"; }
