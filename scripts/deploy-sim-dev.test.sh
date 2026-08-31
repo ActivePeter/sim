@@ -78,7 +78,17 @@ build_invocation="$({
 	bun() { printf '%s|%s\n' "${DOCKER_BUILD:-}" "$*"; }
 	build_candidate_source "$temporary_root/source"
 })"
-assert_equal 'true|run --cwd apps/sim build:deployment' "$build_invocation"
+assert_equal 'true|run --cwd apps/sim build' "$build_invocation"
+
+mkdir -p "$temporary_root/dependencies/source/package"
+printf 'fixture\n' >"$temporary_root/dependencies/source/package/index.js"
+snapshot_dependency_tree \
+	"$temporary_root/dependencies/source" \
+	"$temporary_root/dependencies/snapshot"
+[[ ! -L "$temporary_root/dependencies/snapshot" ]] || fail_test 'dependency snapshot is a symlink'
+assert_equal \
+	"$(stat -c '%i' "$temporary_root/dependencies/source/package/index.js")" \
+	"$(stat -c '%i' "$temporary_root/dependencies/snapshot/package/index.js")"
 
 set +e
 (

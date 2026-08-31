@@ -5,6 +5,7 @@ set -euo pipefail
 readonly SCRIPT_PATH="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd -P)/$(basename -- "${BASH_SOURCE[0]}")"
 readonly SOURCE_ROOT="${SIM_SOURCE_ROOT:-$(git -C "$(dirname -- "$SCRIPT_PATH")/.." rev-parse --show-toplevel)}"
 readonly DEPLOY_ROOT="${SIM_DEV_DEPLOY_ROOT:-${XDG_STATE_HOME:-$HOME/.local/state}/sim-dev-services}"
+readonly BUILD_ROOT="${SIM_DEV_BUILD_ROOT:-$(dirname -- "$SOURCE_ROOT")/.sim-dev-builds-$(basename -- "$SOURCE_ROOT")}"
 readonly SERVICE_ENV_FILE="${SIM_DEV_ENV_FILE:-$DEPLOY_ROOT/runtime.env}"
 readonly DEPLOY_LOCK="$DEPLOY_ROOT/deploy.lock"
 readonly DEPLOY_LOG="$DEPLOY_ROOT/deploy.log"
@@ -24,6 +25,7 @@ SERVICE_PID_FILE=
 SERVICE_LOG=
 SERVICE_URL=
 STAGING_ROOT=
+BUILD_STAGING_ROOT=
 ACTIVE_RELEASE=
 DEPLOY_LOCK_FD=
 
@@ -226,8 +228,17 @@ build_candidate_source() {
 	(
 		cd -- "$source_stage"
 		export DOCKER_BUILD=true
-		bun run --cwd apps/sim build:deployment
+		bun run --cwd apps/sim build
 	)
+}
+
+snapshot_dependency_tree() {
+	local source_modules="$1"
+	local target_modules="$2"
+	[[ -d "$source_modules" && ! -L "$source_modules" ]] || fail "dependency source is not a directory: $source_modules"
+	[[ ! -e "$target_modules" && ! -L "$target_modules" ]] || fail "dependency target already exists: $target_modules"
+	cp -al -- "$source_modules" "$target_modules"
+	[[ -d "$target_modules" && ! -L "$target_modules" ]] || fail "dependency snapshot is invalid: $target_modules"
 }
 
 build_release() {
@@ -243,12 +254,13 @@ build_release() {
 	commit="$(git -C "$SOURCE_ROOT" rev-parse HEAD)"
 	release_id="$(date -u +'%Y%m%dT%H%M%SZ')-${commit:0:12}-$RANDOM"
 	STAGING_ROOT="$DEPLOY_ROOT/.staging-$SERVICE_NAME-$release_id"
-	source_stage="$STAGING_ROOT/source"
+	BUILD_STAGING_ROOT="$BUILD_ROOT/.staging-$SERVICE_NAME-$release_id"
+	source_stage="$BUILD_STAGING_ROOT/source"
 	runtime_root="$STAGING_ROOT/runtime"
 	release_root="$SERVICE_RELEASES_ROOT/$release_id"
 	mkdir -p -- "$source_stage" "$runtime_root/bin" "$SERVICE_RELEASES_ROOT" "$(dirname -- "$DEPLOY_LOG")"
 	git -C "$SOURCE_ROOT" archive --format=tar HEAD | tar -xf - -C "$source_stage"
-	ln -s -- "$SOURCE_ROOT/node_modules" "$source_stage/node_modules"
+	snapshot_dependency_tree "$SOURCE_ROOT/node_modules" "$source_stage/node_modules"
 	log "Building Sim $SERVICE_NAME candidate from $commit while the selected service stays online."
 	build_candidate_source "$source_stage" 2>&1 | tee -a "$DEPLOY_LOG"
 	standalone_root="$source_stage/apps/sim/.next/standalone"
@@ -271,7 +283,8 @@ build_release() {
 	} >"$runtime_root/manifest.env"
 	validate_release "$runtime_root" || fail "candidate runtime is incomplete: $runtime_root"
 	mv -- "$runtime_root" "$release_root"
-	rm -rf -- "$source_stage"
+	rm -rf -- "$BUILD_STAGING_ROOT"
+	BUILD_STAGING_ROOT=
 	rmdir -- "$STAGING_ROOT"
 	STAGING_ROOT=
 	printf -v "$result_variable" '%s' "$release_root"
@@ -467,11 +480,14 @@ cleanup_staging() {
 	case "$STAGING_ROOT" in
 	"$DEPLOY_ROOT"/.staging-*) rm -rf -- "$STAGING_ROOT" ;;
 	esac
+	case "$BUILD_STAGING_ROOT" in
+	"$BUILD_ROOT"/.staging-*) rm -rf -- "$BUILD_STAGING_ROOT" ;;
+	esac
 }
 
 require_commands() {
 	local command
-	for command in awk bun cp curl cut date dirname find flock git grep head kill ln mkdir mv node nohup readlink rsync sed setsid sort ss stat tail tar tee tr; do
+	for command in awk basename bun cp curl cut date dirname find flock git grep head kill ln mkdir mv node nohup readlink rsync sed setsid sort ss stat tail tar tee tr; do
 		require_command "$command"
 	done
 }
