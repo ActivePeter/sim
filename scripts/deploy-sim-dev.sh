@@ -416,8 +416,8 @@ materialize_dependency_cache() {
 prepare_dependency_cache() {
 	local result_variable="$1"
 	local cache_key
-	local dependency_modules
 	local lock_blob
+	local resolved_modules
 	local source_stamp
 	lock_blob="$(git -C "$SOURCE_ROOT" rev-parse 'HEAD:bun.lock')"
 	source_stamp="$(stat -Lc '%d:%i:%Y' "$SOURCE_ROOT/node_modules")"
@@ -425,9 +425,9 @@ prepare_dependency_cache() {
 	if ! dependency_cache_is_valid "$DEPENDENCY_CACHE_ROOT/$cache_key" "$cache_key"; then
 		log "Caching Sim dependencies for isolated local builds ($cache_key)."
 	fi
-	materialize_dependency_cache dependency_modules "$SOURCE_ROOT/node_modules" "$DEPENDENCY_CACHE_ROOT" "$cache_key"
-	ACTIVE_DEPENDENCY_CACHE="$(dirname -- "$dependency_modules")"
-	printf -v "$result_variable" '%s' "$dependency_modules"
+	materialize_dependency_cache resolved_modules "$SOURCE_ROOT/node_modules" "$DEPENDENCY_CACHE_ROOT" "$cache_key"
+	ACTIVE_DEPENDENCY_CACHE="$(dirname -- "$resolved_modules")"
+	printf -v "$result_variable" '%s' "$resolved_modules"
 }
 
 snapshot_dependency_tree() {

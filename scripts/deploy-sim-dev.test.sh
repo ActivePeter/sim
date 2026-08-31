@@ -111,6 +111,24 @@ materialize_dependency_cache \
 	fixture-key
 assert_equal "$cached_modules" "$reused_modules"
 grep -Fqx fixture "$reused_modules/package/index.js" || fail_test 'completed dependency cache was rebuilt'
+(
+	git() {
+		if [[ "$*" == *rev-parse* ]]; then
+			printf 'fixture-lock\n'
+		else
+			while IFS= read -r _; do :; done
+			printf 'fixture-cache-key\n'
+		fi
+	}
+	stat() { printf 'fixture-source-stamp\n'; }
+	bun() { printf 'fixture-bun\n'; }
+	node() { printf 'fixture-node\n'; }
+	dependency_cache_is_valid() { return 0; }
+	materialize_dependency_cache() { printf -v "$1" '%s' /test/cache/node_modules; }
+	prepared_modules=
+	prepare_dependency_cache prepared_modules
+	assert_equal /test/cache/node_modules "$prepared_modules"
+)
 snapshot_dependency_tree \
 	"$cached_modules" \
 	"$temporary_root/dependencies/snapshot"
