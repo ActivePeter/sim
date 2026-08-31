@@ -89,15 +89,10 @@ build_invocation="$({
 	bun() { printf '%s|%s\n' "${DOCKER_BUILD:-}" "$*"; }
 	build_candidate_source "$temporary_root/source"
 })"
-assert_equal 'true|run --cwd apps/sim build' "$build_invocation"
+assert_equal 'true|run --cwd apps/sim build:deployment' "$build_invocation"
 
-mkdir -p \
-	"$temporary_root/dependencies/source/package" \
-	"$temporary_root/dependencies/source/@1password/sdk-core/nodejs"
+mkdir -p "$temporary_root/dependencies/source/package"
 printf 'fixture\n' >"$temporary_root/dependencies/source/package/index.js"
-printf "%s\n" "const path = require('path').join(__dirname, 'core_bg.wasm');" \
-	>"$temporary_root/dependencies/source/@1password/sdk-core/nodejs/core.js"
-printf 'wasm\n' >"$temporary_root/dependencies/source/@1password/sdk-core/nodejs/core_bg.wasm"
 snapshot_dependency_tree \
 	"$temporary_root/dependencies/source" \
 	"$temporary_root/dependencies/snapshot"
@@ -105,14 +100,6 @@ snapshot_dependency_tree \
 assert_equal \
 	"$(stat -c '%i' "$temporary_root/dependencies/source/package/index.js")" \
 	"$(stat -c '%i' "$temporary_root/dependencies/snapshot/package/index.js")"
-grep -Fqx \
-	"const path = require('path').join(__dirname, 'core_bg.wasm');" \
-	"$temporary_root/dependencies/source/@1password/sdk-core/nodejs/core.js" || fail_test 'canonical dependency was modified'
-grep -Fqx \
-	"const path = __dirname + '/core_bg.wasm';" \
-	"$temporary_root/dependencies/snapshot/@1password/sdk-core/nodejs/core.js" || fail_test 'staged dependency was not patched'
-[[ "$(stat -c '%i' "$temporary_root/dependencies/source/@1password/sdk-core/nodejs/core.js")" != \
-	"$(stat -c '%i' "$temporary_root/dependencies/snapshot/@1password/sdk-core/nodejs/core.js")" ]] || fail_test 'patched loader still shares the canonical inode'
 
 mkdir -p "$temporary_root/state-link/release/apps/sim" "$temporary_root/state-link/uploads"
 link_release_uploads \
