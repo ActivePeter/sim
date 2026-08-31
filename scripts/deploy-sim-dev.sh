@@ -385,6 +385,24 @@ snapshot_dependency_tree() {
 	[[ ! -e "$target_modules" && ! -L "$target_modules" ]] || fail "dependency target already exists: $target_modules"
 	cp -al -- "$source_modules" "$target_modules"
 	[[ -d "$target_modules" && ! -L "$target_modules" ]] || fail "dependency snapshot is invalid: $target_modules"
+	patch_staged_onepassword_loader "$target_modules"
+}
+
+patch_staged_onepassword_loader() {
+	local target_modules="$1"
+	local loader="$target_modules/@1password/sdk-core/nodejs/core.js"
+	local temporary_loader="$loader.tmp.$$"
+	local original="const path = require('path').join(__dirname, 'core_bg.wasm');"
+	local replacement="const path = __dirname + '/core_bg.wasm';"
+	[[ -f "$loader" ]] || return 0
+	if grep -Fqx "$replacement" "$loader"; then
+		return 0
+	fi
+	grep -Fqx "$original" "$loader" || fail "unsupported @1password/sdk-core WASM loader"
+	sed "s|^${original}$|${replacement}|" "$loader" >"$temporary_loader"
+	chmod --reference="$loader" "$temporary_loader"
+	mv -f -- "$temporary_loader" "$loader"
+	grep -Fqx "$replacement" "$loader" || fail "failed to patch staged @1password/sdk-core WASM loader"
 }
 
 build_release() {
@@ -703,7 +721,7 @@ cleanup_staging() {
 
 require_commands() {
 	local command
-	for command in awk basename bun cp curl cut date dirname find flock git grep head kill ln mkdir mv node nohup readlink rsync sed setsid sort ss stat tail tar tee tr; do
+	for command in awk basename bun chmod cp curl cut date dirname find flock git grep head kill ln mkdir mv node nohup readlink rsync sed setsid sort ss stat tail tar tee tr; do
 		require_command "$command"
 	done
 }
