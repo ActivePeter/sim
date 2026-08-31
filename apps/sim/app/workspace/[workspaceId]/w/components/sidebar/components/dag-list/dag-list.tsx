@@ -2,7 +2,8 @@
 
 import { cn } from '@sim/emcn'
 import { Split } from '@sim/emcn/icons'
-import { DEMO_DAGS } from '@/lib/dags/demo-catalog'
+import { DEFAULT_DEMO_DAG_ID, DEMO_DAGS } from '@/lib/dags/demo-catalog'
+import { useI18n } from '@/lib/i18n'
 import {
   CollapsedResourceFlyout,
   CollapsedSidebarMenu,
@@ -19,10 +20,13 @@ interface DagListProps {
 
 export function DagList({ currentDagId, isCollapsed, workspaceId }: DagListProps) {
   const hover = useHoverMenu()
+  const { t } = useI18n()
+  const getName = (dag: (typeof DEMO_DAGS)[number]) =>
+    dag.id === DEFAULT_DEMO_DAG_ID ? t('plan.demo.name') : dag.name
   const flyoutEntries = DEMO_DAGS.map((dag) => ({
     kind: 'item' as const,
     id: dag.id,
-    name: dag.name,
+    name: getName(dag),
     pinned: false,
     href: `/workspace/${workspaceId}/d/${dag.id}`,
   }))
@@ -33,13 +37,13 @@ export function DagList({ currentDagId, isCollapsed, workspaceId }: DagListProps
         <CollapsedSidebarMenu
           icon={<Split className='size-[16px] flex-shrink-0 text-[var(--text-icon)]' />}
           hover={hover}
-          ariaLabel='DAGs'
+          ariaLabel={t('sidebar.dags')}
         >
           <CollapsedResourceFlyout
             entries={flyoutEntries}
             icon={Split}
             currentItemId={currentDagId}
-            emptyLabel='No DAGs yet'
+            emptyLabel={t('sidebar.noDags')}
           />
         </CollapsedSidebarMenu>
       </div>
@@ -53,7 +57,7 @@ export function DagList({ currentDagId, isCollapsed, workspaceId }: DagListProps
           key={dag.id}
           item={{
             id: dag.id,
-            label: dag.name,
+            label: getName(dag),
             icon: Split,
             href: `/workspace/${workspaceId}/d/${dag.id}`,
           }}

@@ -40,7 +40,7 @@ describe('plan graph model', () => {
       schemaVersion: 1,
       id: 'agent-session-prs',
       kind: 'dag',
-      name: 'Sim self-hosting roadmap',
+      name: 'Sim 自举开发路线',
       repository: 'ActivePeter/sim',
       revision: 1,
     })
@@ -50,10 +50,24 @@ describe('plan graph model', () => {
     expect(dag.items.find((item) => item.id === 'PG-01')).toMatchObject({
       primaryPr: { number: null, state: 'Unopened' },
       interfaces: expect.arrayContaining([
-        expect.objectContaining({ name: 'Latest trial service' }),
-        expect.objectContaining({ name: 'Pinned snapshot service' }),
+        expect.objectContaining({ name: 'Latest 试用服务' }),
+        expect.objectContaining({ name: '固定快照服务' }),
       ]),
     })
+    expect(dag.items.find((item) => item.id === 'PG-07')).toMatchObject({
+      repository: 'simstudioai/sim',
+      lifecycle: 'review',
+      primaryPr: {
+        number: 7205,
+        state: 'Open',
+        url: 'https://github.com/simstudioai/sim/pull/7205',
+      },
+    })
+    expect(
+      dag.dependencies.some(
+        (dependency) => dependency.source === 'PG-07' || dependency.target === 'PG-07'
+      )
+    ).toBe(false)
   })
 
   it('round-trips the durable document through its runtime validator', () => {
@@ -77,7 +91,7 @@ describe('plan graph model', () => {
       primaryPrNumber: null,
     })
 
-    expect(itemId).toBe('PG-07')
+    expect(itemId).toBe('PG-08')
     expect(updated.items.find((item) => item.id === itemId)).toMatchObject({
       title: 'Editable DAG node',
       issue: { number: 42 },

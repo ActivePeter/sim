@@ -4,9 +4,8 @@ import { DEFAULT_DEMO_DAG_ID } from '@/lib/dags/demo-catalog'
 import { DagDemo } from '@/app/plan-graph-demo/plan-graph-demo'
 
 export const metadata: Metadata = {
-  title: 'Agent DAG Demo | Sim',
-  description:
-    'A DAG canvas for human-authored PR dependencies executed by multiple coding agents.',
+  title: 'Agent DAG 演示 | Sim',
+  description: '供人编排 PR 依赖关系、由多个编码 Agent 并行执行的 DAG 画布。',
 }
 
 export default function DagDemoPage() {

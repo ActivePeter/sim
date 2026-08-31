@@ -1,5 +1,14 @@
-import { describe, expect, it } from 'vitest'
-import { resolveCheckState, resolveReviewState } from '@/app/plan-graph-demo/github-reconciliation'
+import { afterEach, describe, expect, it, vi } from 'vitest'
+import {
+  reconcileDagWithGitHub,
+  resolveCheckState,
+  resolveReviewState,
+} from '@/app/plan-graph-demo/github-reconciliation'
+import { createDemoDag } from '@/app/plan-graph-demo/plan-graph-model'
+
+afterEach(() => {
+  vi.unstubAllGlobals()
+})
 
 describe('GitHub plan reconciliation', () => {
   it('summarizes check runs conservatively', () => {
@@ -44,5 +53,44 @@ describe('GitHub plan reconciliation', () => {
         },
       ])
     ).toBe('Approved')
+  })
+
+  it('reconciles a node against its repository override', async () => {
+    const fetchMock = vi.fn(async (input: string | URL | Request) => {
+      const url = String(input)
+      if (url.endsWith('/pulls/7205')) {
+        return Response.json({
+          base: { sha: 'base-sha' },
+          draft: false,
+          head: { sha: 'head-sha' },
+          html_url: 'https://github.com/simstudioai/sim/pull/7205',
+          mergeable: false,
+          merged_at: null,
+          number: 7205,
+          state: 'open',
+        })
+      }
+      if (url.endsWith('/commits/head-sha/check-runs')) {
+        return Response.json({ check_runs: [], total_count: 0 })
+      }
+      if (url.endsWith('/pulls/7205/reviews')) return Response.json([])
+      return new Response(null, { status: 404 })
+    })
+    vi.stubGlobal('fetch', fetchMock)
+    const dag = createDemoDag()
+    const codexItem = dag.items.find((item) => item.id === 'PG-07')
+    expect(codexItem).toBeDefined()
+
+    const result = await reconcileDagWithGitHub({ ...dag, items: [codexItem!] })
+
+    expect(fetchMock).toHaveBeenCalledWith(
+      'https://api.github.com/repos/simstudioai/sim/pulls/7205',
+      expect.any(Object)
+    )
+    expect(result.updates[0]?.primaryPr).toMatchObject({
+      number: 7205,
+      state: 'Open',
+      url: 'https://github.com/simstudioai/sim/pull/7205',
+    })
   })
 })

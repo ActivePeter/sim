@@ -1,5 +1,8 @@
+'use client'
+
 import { Badge, Chip, ChipLink } from '@sim/emcn'
 import { Plus, RefreshCw, Split, SquareArrowUpRight, Workflow } from '@sim/emcn/icons'
+import { useI18n } from '@/lib/i18n'
 import type { PlanCounts } from '@/app/plan-graph-demo/plan-graph-model'
 
 interface PlanHeaderProps {
@@ -33,7 +36,12 @@ export function PlanHeader({
   repository,
   revision,
 }: PlanHeaderProps) {
-  const persistenceLabel = isSaving ? 'Saving…' : fileId ? 'Saved' : 'Local preview'
+  const { locale, t } = useI18n()
+  const persistenceLabel = isSaving
+    ? t('plan.header.saving')
+    : fileId
+      ? t('plan.header.saved')
+      : t('plan.header.localPreview')
   return (
     <header className='flex h-[58px] shrink-0 items-center justify-between gap-4 border-[var(--border)] border-b bg-[var(--surface-1)] px-4'>
       <div className='flex min-w-0 items-center gap-3'>
@@ -51,21 +59,23 @@ export function PlanHeader({
             </Badge>
           </div>
           <p className='truncate text-[var(--text-muted)] text-xs'>
-            {repository} · revision {revision}
-            {lastGithubSyncAt ? ` · GitHub ${new Date(lastGithubSyncAt).toLocaleTimeString()}` : ''}
+            {repository} · {t('plan.header.revision', { revision })}
+            {lastGithubSyncAt
+              ? ` · GitHub ${new Date(lastGithubSyncAt).toLocaleTimeString(locale)}`
+              : ''}
           </p>
         </div>
       </div>
 
       <div className='hidden items-center gap-2 xl:flex'>
         <Badge variant='blue-secondary' size='sm' dot>
-          {counts.ready} ready
+          {t('plan.header.ready', { count: counts.ready })}
         </Badge>
         <Badge variant='purple' size='sm' dot>
-          {counts.active} running
+          {t('plan.header.running', { count: counts.active })}
         </Badge>
         <Badge variant='gray' size='sm' dot>
-          {counts.blocked} blocked
+          {t('plan.header.blocked', { count: counts.blocked })}
         </Badge>
       </div>
 
@@ -77,16 +87,16 @@ export function PlanHeader({
           leftIcon={SquareArrowUpRight}
           className='hidden 2xl:inline-flex'
         >
-          Epic #1
+          {t('plan.header.epic', { number: 1 })}
         </ChipLink>
         <Chip leftIcon={RefreshCw} disabled={isSyncing || isSaving} onClick={onSyncGithub}>
-          {isSyncing ? 'Syncing…' : 'Sync GitHub'}
+          {isSyncing ? t('plan.header.syncing') : t('plan.header.syncGithub')}
         </Chip>
         <Chip leftIcon={Plus} disabled={isSaving} onClick={onAddNode}>
-          Add node
+          {t('plan.header.addNode')}
         </Chip>
         <Chip leftIcon={RefreshCw} disabled={isSaving} onClick={onReset}>
-          Reset
+          {t('plan.header.reset')}
         </Chip>
         <Chip
           variant='primary'
@@ -94,7 +104,9 @@ export function PlanHeader({
           disabled={!nextReadyItemId || isSaving}
           onClick={onInspectNext}
         >
-          {nextReadyItemId ? `Inspect next · ${nextReadyItemId}` : 'No ready node'}
+          {nextReadyItemId
+            ? t('plan.header.inspectNext', { itemId: nextReadyItemId })
+            : t('plan.header.noReadyNode')}
         </Chip>
       </div>
     </header>

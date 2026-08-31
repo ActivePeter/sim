@@ -42,6 +42,7 @@ interface PlanItem {
   execution?: PlanExecution
   id: string
   lifecycle: 'active' | 'done' | 'planned' | 'review'
+  repository?: string
   primaryPr: {
     checks: 'Failed' | 'Passed' | 'Pending' | 'Running'
     number: number | null
@@ -400,7 +401,7 @@ async function bindPullRequest(args: {
     state: 'Draft',
     checks: 'Pending',
     review: 'Pending',
-    url: `https://github.com/${next.repository}/pull/${pullRequestNumber}`,
+    url: `https://github.com/${node.repository ?? next.repository}/pull/${pullRequestNumber}`,
   }
   next.revision += 1
   await savePlan(args.apiUrl, args.apiKey, args.workspaceId, args.file, next)

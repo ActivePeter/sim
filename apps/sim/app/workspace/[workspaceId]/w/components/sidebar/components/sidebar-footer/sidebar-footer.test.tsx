@@ -46,6 +46,7 @@ vi.mock('@/components/icons', () => ({
   SlackIcon: ({ className }: { className?: string }) => <svg className={className} />,
 }))
 
+import { I18nProvider } from '@/lib/i18n'
 import { SidebarFooter } from '@/app/workspace/[workspaceId]/w/components/sidebar/components/sidebar-footer/sidebar-footer'
 
 let container: HTMLDivElement
@@ -55,16 +56,18 @@ async function renderFooter(initialState: Record<string, unknown>) {
   desktopMocks.getState.mockResolvedValue(initialState)
   await act(async () => {
     root.render(
-      <SidebarFooter
-        workspaceId='workspace-1'
-        isCollapsed={false}
-        showCollapsedTooltips={false}
-        getSettingsHref={(section) => `/workspace/workspace-1/settings/${section}`}
-        onOpenSettings={() => {}}
-        onOpenDocs={() => {}}
-        onJoinSlack={() => {}}
-        onContactSupport={() => {}}
-      />
+      <I18nProvider initialLocale='en'>
+        <SidebarFooter
+          workspaceId='workspace-1'
+          isCollapsed={false}
+          showCollapsedTooltips={false}
+          getSettingsHref={(section) => `/workspace/workspace-1/settings/${section}`}
+          onOpenSettings={() => {}}
+          onOpenDocs={() => {}}
+          onJoinSlack={() => {}}
+          onContactSupport={() => {}}
+        />
+      </I18nProvider>
     )
   })
 }
@@ -108,6 +111,7 @@ function menuItem(label: string): HTMLElement {
 beforeEach(() => {
   vi.clearAllMocks()
   desktopMocks.listener = null
+  window.localStorage.clear()
   desktopMocks.onState.mockImplementation((listener) => {
     desktopMocks.listener = listener
     return desktopMocks.unsubscribe
@@ -124,6 +128,16 @@ afterEach(() => {
 })
 
 describe('SidebarFooter desktop update affordance', () => {
+  it('persists a language choice from the profile menu', async () => {
+    await renderFooter({ status: 'idle' })
+
+    openProfileMenu()
+    act(() => menuItem('简体中文').click())
+
+    expect(window.localStorage.getItem('sim-locale')).toBe('zh-CN')
+    expect(document.documentElement.lang).toBe('zh-CN')
+  })
+
   it('renders profile settings destinations with native link semantics', async () => {
     await renderFooter({ status: 'idle' })
 

@@ -1,11 +1,21 @@
+'use client'
+
 import { BrainCircuit, CircleCheck, Clock, Workflow } from '@sim/emcn/icons'
+import { type TranslationKey, type TranslationValues, useI18n } from '@/lib/i18n'
+
+export interface PlanActivityMessage {
+  key: TranslationKey
+  values?: TranslationValues
+}
+
+export type PlanActivityText = string | PlanActivityMessage
 
 export interface PlanActivity {
   id: string
-  detail: string
+  detail: PlanActivityText
   kind: 'agent' | 'merge' | 'plan' | 'review'
-  time: string
-  title: string
+  time: PlanActivityText
+  title: PlanActivityText
 }
 
 const ACTIVITY_ICONS = {
@@ -21,12 +31,16 @@ interface ActivityPanelProps {
 }
 
 export function ActivityPanel({ activities, persistent }: ActivityPanelProps) {
+  const { t } = useI18n()
+  const renderText = (text: PlanActivityText) =>
+    typeof text === 'string' ? text : t(text.key, text.values)
+
   return (
     <section className='h-[148px] shrink-0 border-[var(--border)] border-t bg-[var(--surface-1)]'>
       <div className='flex h-9 items-center justify-between border-[var(--border)] border-b px-3'>
-        <h2 className='text-[var(--text-primary)] text-xs'>Plan activity</h2>
+        <h2 className='text-[var(--text-primary)] text-xs'>{t('plan.activity.panelTitle')}</h2>
         <span className='text-[10px] text-[var(--text-muted)]'>
-          {persistent ? 'Durable workspace projection' : 'Local preview'}
+          {persistent ? t('plan.projection.durable') : t('plan.projection.local')}
         </span>
       </div>
       <div className='grid h-[111px] grid-cols-1 divide-y divide-[var(--border)] overflow-y-auto md:grid-cols-3 md:divide-x md:divide-y-0'>
@@ -39,13 +53,15 @@ export function ActivityPanel({ activities, persistent }: ActivityPanelProps) {
               </div>
               <div className='min-w-0'>
                 <div className='flex items-center gap-2'>
-                  <p className='truncate text-[var(--text-body)] text-xs'>{activity.title}</p>
+                  <p className='truncate text-[var(--text-body)] text-xs'>
+                    {renderText(activity.title)}
+                  </p>
                   <span className='shrink-0 text-[10px] text-[var(--text-muted)]'>
-                    {activity.time}
+                    {renderText(activity.time)}
                   </span>
                 </div>
                 <p className='mt-1 line-clamp-2 text-[var(--text-muted)] text-xs leading-4'>
-                  {activity.detail}
+                  {renderText(activity.detail)}
                 </p>
               </div>
             </article>

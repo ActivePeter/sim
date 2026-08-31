@@ -58,6 +58,7 @@ export interface PlanItem {
   wave: number
   lifecycle: StoredPlanLifecycle
   humanOwner: string
+  repository?: string
   interfaces: PlanInterface[]
   expectedPaths: string[]
   issue: PlanIssueBinding
@@ -113,6 +114,7 @@ export interface DagItemUpdate {
   humanOwner?: string
   issueNumber?: number | null
   primaryPrNumber?: number | null
+  repository?: string
   summary?: string
   title?: string
 }
@@ -137,33 +139,33 @@ export interface GitHubBindingUpdate {
 const INITIAL_PLAN_ITEMS: readonly PlanItem[] = [
   {
     id: 'PG-01',
-    title: 'Self-hosting Plan Graph MVP',
+    title: '自举 Plan Graph MVP',
     summary:
-      "Persist Sim's own roadmap, atomically claim work, reconcile its real pull request, and hand an executable worktree brief to an agent.",
+      '持久化 Sim 自己的开发路线，原子化认领任务，同步真实 Pull Request，并向 Agent 交付可执行的 worktree 任务说明。',
     kind: 'implementation',
     wave: 0,
     lifecycle: 'planned',
     humanOwner: 'Peter',
     interfaces: [
       {
-        name: 'Plan document CAS',
-        usage: 'PUT file content with expectedContentUpdatedAt from the latest read.',
+        name: '计划文档 CAS',
+        usage: '使用最新读取结果中的 expectedContentUpdatedAt，以 PUT 方式更新文件内容。',
       },
       {
-        name: 'Agent node claim',
+        name: 'Agent 节点认领',
         usage:
           'bun .agents/skills/plan-node/scripts/plan-node.ts claim --node PG-01 --agent codex-01',
       },
       {
-        name: 'GitHub reconciliation',
-        usage: 'Select Sync GitHub to refresh Issue, PR, checks, review, and merge state.',
+        name: 'GitHub 状态同步',
+        usage: '点击“同步 GitHub”，刷新 Issue、PR、检查、评审和合并状态。',
       },
       {
-        name: 'Latest trial service',
+        name: 'Latest 试用服务',
         usage: 'bun run deploy:sim:latest → http://<host>:3300/plan-graph-demo',
       },
       {
-        name: 'Pinned snapshot service',
+        name: '固定快照服务',
         usage: 'bun run deploy:sim:snapshot:update → http://<host>:3301/plan-graph-demo',
       },
     ],
@@ -189,20 +191,19 @@ const INITIAL_PLAN_ITEMS: readonly PlanItem[] = [
   },
   {
     id: 'PG-02',
-    title: 'Agent environment provider',
-    summary:
-      'Turn an accepted claim into an isolated worktree, branch, session, heartbeat, and recoverable execution attempt.',
+    title: 'Agent 环境提供器',
+    summary: '将已接受的认领转换为隔离的 worktree、分支、会话、心跳和可恢复执行尝试。',
     kind: 'implementation',
     wave: 1,
     lifecycle: 'planned',
-    humanOwner: 'Unassigned',
+    humanOwner: '未分配',
     interfaces: [
       {
-        name: 'Environment provision',
+        name: '环境创建',
         usage: 'provision({ repository, branch, baseSha, attemptId }) → { worktree }',
       },
       {
-        name: 'Lease heartbeat',
+        name: '租约心跳',
         usage: 'heartbeat({ nodeId, attemptId, fencingToken })',
       },
     ],
@@ -212,20 +213,19 @@ const INITIAL_PLAN_ITEMS: readonly PlanItem[] = [
   },
   {
     id: 'PG-03',
-    title: 'Durable GitHub event reconciliation',
-    summary:
-      'Replace manual public polling with authenticated reconciliation, idempotent webhooks, delivery cursors, and drift detection.',
+    title: '持久化 GitHub 事件同步',
+    summary: '用带认证的同步、幂等 webhook、投递游标和漂移检测替代手动公开轮询。',
     kind: 'integration',
     wave: 1,
     lifecycle: 'planned',
-    humanOwner: 'Unassigned',
+    humanOwner: '未分配',
     interfaces: [
       {
-        name: 'Repository snapshot',
+        name: '仓库快照',
         usage: 'reconcile({ repository, issue, pullRequest, lastExternalVersion })',
       },
       {
-        name: 'Webhook ingest',
+        name: 'Webhook 接收',
         usage: 'ingest({ deliveryId, event, payload })',
       },
     ],
@@ -235,20 +235,19 @@ const INITIAL_PLAN_ITEMS: readonly PlanItem[] = [
   },
   {
     id: 'PG-04',
-    title: 'Dedicated plan persistence and realtime',
-    summary:
-      'Move the workspace-file MVP into Plan Space tables, revision events, presence, and collaborative graph projection.',
+    title: '专用计划持久化与实时协作',
+    summary: '将工作区文件 MVP 演进为 Plan Space 数据表、版本事件、在线状态和协作式图投影。',
     kind: 'implementation',
     wave: 1,
     lifecycle: 'planned',
-    humanOwner: 'Unassigned',
+    humanOwner: '未分配',
     interfaces: [
       {
-        name: 'Plan repository',
+        name: '计划存储库',
         usage: 'saveRevision({ planId, expectedRevision, graph })',
       },
       {
-        name: 'Plan event stream',
+        name: '计划事件流',
         usage: 'subscribe({ planId, afterCursor })',
       },
     ],
@@ -258,16 +257,15 @@ const INITIAL_PLAN_ITEMS: readonly PlanItem[] = [
   },
   {
     id: 'PG-05',
-    title: 'Parent SHA and merge barriers',
-    summary:
-      'Detect stale stacked branches, expose Needs Sync, and enforce dependency-aware review and merge gates.',
+    title: '父提交 SHA 与合并屏障',
+    summary: '检测过期的堆叠分支，展示“需要同步”，并执行依赖感知的评审与合并门禁。',
     kind: 'contract',
     wave: 2,
     lifecycle: 'planned',
-    humanOwner: 'Unassigned',
+    humanOwner: '未分配',
     interfaces: [
       {
-        name: 'Merge decision',
+        name: '合并决策',
         usage: 'evaluateMerge({ node, prerequisites, githubSnapshot }) → blockers[]',
       },
     ],
@@ -277,22 +275,65 @@ const INITIAL_PLAN_ITEMS: readonly PlanItem[] = [
   },
   {
     id: 'PG-06',
-    title: 'Fan-out and fan-in self-hosting proof',
-    summary:
-      'Run two agents on independent branches, converge through an integration gate, and recover the whole graph after restart.',
+    title: '扇出/汇合自举验证',
+    summary: '让两个 Agent 在独立分支并行工作，通过集成门禁汇合，并在重启后恢复整张图。',
     kind: 'integration',
     wave: 3,
     lifecycle: 'planned',
     humanOwner: 'Peter',
     interfaces: [
       {
-        name: 'Self-hosting acceptance',
-        usage: 'A → (B, C) → D completes with distinct attempts, worktrees, PRs, and checks.',
+        name: '自举验收',
+        usage: 'A → (B, C) → D 使用不同的执行尝试、worktree、PR 和检查并完成。',
       },
     ],
     expectedPaths: ['apps/sim/app/plan-graph', 'apps/sim/e2e/plan-graph'],
     issue: { number: null, state: 'Unknown' },
     primaryPr: { number: null, state: 'Unopened', checks: 'Pending', review: 'Pending' },
+  },
+  {
+    id: 'PG-07',
+    title: '可复用的 Codex 编码 Agent 工作流',
+    summary:
+      '在隔离沙箱中运行可复用的 Codex 编码 Agent，跨工作流步骤输出实现计划或持续维护 Pull Request。',
+    kind: 'implementation',
+    wave: 0,
+    lifecycle: 'review',
+    humanOwner: 'Peter',
+    repository: 'simstudioai/sim',
+    interfaces: [
+      {
+        name: 'Codex 工作流节点',
+        usage: '在工作流中添加 Codex，输入任务，然后选择“规划”或“创建 PR”。',
+      },
+      {
+        name: '可复用 Agent 会话',
+        usage: '在多个 Codex 节点中选择同一个 Agent，复用其沙箱、代码检出和原生线程。',
+      },
+      {
+        name: '分层配置',
+        usage: '先设置工作区默认值，按需在工作流或 Agent 层覆盖，仅在必要时使用步骤级覆盖。',
+      },
+    ],
+    expectedPaths: [
+      'apps/sim/blocks/blocks/codex.ts',
+      'apps/sim/executor/handlers/codex',
+      'apps/sim/components/codex',
+      'apps/sim/lib/codex',
+      'apps/sim/hooks/use-agent-session-catalog.ts',
+      'packages/db/migrations/0310_codex_configuration_layers.sql',
+    ],
+    issue: { number: null, state: 'Unknown' },
+    primaryPr: {
+      number: 7205,
+      state: 'Open',
+      checks: 'Failed',
+      review: 'Pending',
+      url: 'https://github.com/simstudioai/sim/pull/7205',
+      baseSha: 'a042b8ffad812f1b365a63d56a943e1109791dcd',
+      headSha: 'fa1b75c4566657fbf5c40dfd160e8a72b08c21b2',
+      mergeable: false,
+    },
   },
 ]
 
@@ -308,6 +349,7 @@ export const PLAN_DEPENDENCIES: readonly PlanDependency[] = [
 
 export const INITIAL_PLAN_POSITIONS: Readonly<Record<string, PlanPosition>> = {
   'PG-01': { x: 40, y: 250 },
+  'PG-07': { x: 40, y: 560 },
   'PG-02': { x: 380, y: 40 },
   'PG-03': { x: 380, y: 280 },
   'PG-04': { x: 380, y: 520 },
@@ -355,6 +397,10 @@ const itemSchema = z.object({
   wave: z.number().int().nonnegative(),
   lifecycle: z.enum(['planned', 'active', 'review', 'done']),
   humanOwner: z.string(),
+  repository: z
+    .string()
+    .regex(/^[^/]+\/[^/]+$/)
+    .optional(),
   interfaces: z.array(z.object({ name: z.string().min(1), usage: z.string().min(1) })),
   expectedPaths: z.array(z.string()),
   issue: issueSchema,
@@ -389,7 +435,7 @@ export function createDemoDag(dagId: string = DEFAULT_DEMO_DAG_ID): DagDocument 
     schemaVersion: 1,
     id: dagId,
     kind: 'dag',
-    name: catalogItem?.name ?? 'Untitled PR DAG',
+    name: catalogItem?.name ?? '未命名 PR DAG',
     repository: catalogItem?.repository ?? 'ActivePeter/sim',
     remote: 'fork',
     defaultBranch: 'main',
@@ -431,13 +477,13 @@ export function addDagItem(document: DagDocument, itemId: string): DagDocument {
   const itemsInWave = document.items.filter((item) => item.wave === wave).length
   const item: PlanItem = {
     id: itemId,
-    title: 'Untitled DAG item',
-    summary: 'Describe the outcome this node must deliver before its dependents can proceed.',
+    title: '未命名 DAG 节点',
+    summary: '描述该节点必须交付的结果，以及后续节点开始前需要满足的条件。',
     kind: 'implementation',
     wave,
     lifecycle: 'planned',
-    humanOwner: 'Unassigned',
-    interfaces: [{ name: 'New interface', usage: 'Show the smallest valid call here.' }],
+    humanOwner: '未分配',
+    interfaces: [{ name: '新接口', usage: '在此给出最简单的有效用法。' }],
     expectedPaths: [],
     issue: { number: null, state: 'Unknown' },
     primaryPr: { number: null, state: 'Unopened', checks: 'Pending', review: 'Pending' },
@@ -460,13 +506,13 @@ export function updateDagItem(
 ): DagDocument {
   const currentItem = document.items.find((item) => item.id === itemId)
   if (!currentItem) return document
-  const issue =
+  let issue =
     update.issueNumber === undefined
       ? currentItem.issue
       : update.issueNumber === null
         ? { number: null, state: 'Unknown' as const }
         : { ...currentItem.issue, number: update.issueNumber }
-  const primaryPr =
+  let primaryPr =
     update.primaryPrNumber === undefined
       ? currentItem.primaryPr
       : update.primaryPrNumber === null
@@ -484,11 +530,26 @@ export function updateDagItem(
                 ? ('Draft' as const)
                 : currentItem.primaryPr.state,
           }
+  const repository = update.repository ?? currentItem.repository
+  const artifactRepository = repository ?? document.repository
+  if (issue.number !== null && (update.repository || update.issueNumber !== undefined)) {
+    issue = {
+      ...issue,
+      url: `https://github.com/${artifactRepository}/issues/${issue.number}`,
+    }
+  }
+  if (primaryPr.number !== null && (update.repository || update.primaryPrNumber !== undefined)) {
+    primaryPr = {
+      ...primaryPr,
+      url: `https://github.com/${artifactRepository}/pull/${primaryPr.number}`,
+    }
+  }
   const nextItem: PlanItem = {
     ...currentItem,
     title: update.title ?? currentItem.title,
     summary: update.summary ?? currentItem.summary,
     humanOwner: update.humanOwner ?? currentItem.humanOwner,
+    repository,
     issue,
     primaryPr,
     execution: currentItem.execution

@@ -147,9 +147,10 @@ export async function reconcileDagWithGitHub(
   signal?: AbortSignal
 ): Promise<{ syncedAt: string; updates: GitHubBindingUpdate[] }> {
   const syncedAt = new Date().toISOString()
-  const apiBase = `https://api.github.com/repos/${document.repository}`
   const updates = await Promise.all(
     document.items.map(async (item): Promise<GitHubBindingUpdate> => {
+      const repository = item.repository ?? document.repository
+      const apiBase = `https://api.github.com/repos/${repository}`
       const [issue, pullRequest] = await Promise.all([
         item.issue.number
           ? requestGitHub<GitHubIssueResponse>(`${apiBase}/issues/${item.issue.number}`, signal)
@@ -163,13 +164,11 @@ export async function reconcileDagWithGitHub(
       ])
       return {
         itemId: item.id,
-        ...(item.issue.number
-          ? { issue: projectIssue(item.issue.number, issue, document.repository) }
-          : {}),
+        ...(item.issue.number ? { issue: projectIssue(item.issue.number, issue, repository) } : {}),
         ...(item.primaryPr.number
           ? {
               primaryPr: await projectPullRequest(
-                document.repository,
+                repository,
                 item.primaryPr.number,
                 pullRequest,
                 syncedAt,

@@ -18,6 +18,7 @@ import {
   Undo,
 } from '@sim/emcn'
 import { SelectAll } from '@sim/emcn/icons'
+import { useI18n } from '@/lib/i18n'
 
 export type CanvasInteractionMode = 'cursor' | 'hand'
 
@@ -42,6 +43,7 @@ export const CanvasActionBar = memo(function CanvasActionBar({
   onRedo,
   onUndo,
 }: CanvasActionBarProps) {
+  const { t } = useI18n()
   const [isCanvasModeOpen, setIsCanvasModeOpen] = useState(false)
   const showHistory = Boolean(onUndo && onRedo)
 
@@ -56,7 +58,7 @@ export const CanvasActionBar = memo(function CanvasActionBar({
             <div className='flex cursor-pointer items-center gap-1'>
               <Tooltip.Trigger asChild>
                 <Button
-                  aria-label={mode === 'hand' ? 'Mover mode' : 'Pointer mode'}
+                  aria-label={mode === 'hand' ? t('canvas.moverMode') : t('canvas.pointerMode')}
                   className='size-[28px] rounded-sm p-0'
                   variant='active'
                 >
@@ -68,7 +70,7 @@ export const CanvasActionBar = memo(function CanvasActionBar({
                 </Button>
               </Tooltip.Trigger>
               <Button
-                aria-label='Choose canvas mode'
+                aria-label={t('canvas.chooseMode')}
                 variant='ghost'
                 className={cn('size-[20px] rounded-sm p-0', chipHoverSurfaceClass)}
               >
@@ -78,7 +80,9 @@ export const CanvasActionBar = memo(function CanvasActionBar({
               </Button>
             </div>
           </PopoverTrigger>
-          <Tooltip.Content side='top'>{mode === 'hand' ? 'Mover' : 'Pointer'}</Tooltip.Content>
+          <Tooltip.Content side='top'>
+            {mode === 'hand' ? t('canvas.mover') : t('canvas.pointer')}
+          </Tooltip.Content>
         </Tooltip.Root>
         <PopoverContent side='top' sideOffset={8} maxWidth={100} minWidth={100}>
           <PopoverItem
@@ -88,7 +92,7 @@ export const CanvasActionBar = memo(function CanvasActionBar({
             }}
           >
             <Hand className='size-[14px]' />
-            <span>Mover</span>
+            <span>{t('canvas.mover')}</span>
           </PopoverItem>
           <PopoverItem
             onClick={() => {
@@ -97,7 +101,7 @@ export const CanvasActionBar = memo(function CanvasActionBar({
             }}
           >
             <Cursor className='size-[14px]' />
-            <span>Pointer</span>
+            <span>{t('canvas.pointer')}</span>
           </PopoverItem>
         </PopoverContent>
       </Popover>
@@ -109,7 +113,7 @@ export const CanvasActionBar = memo(function CanvasActionBar({
           <Tooltip.Root>
             <Tooltip.Trigger asChild>
               <Button
-                aria-label='Undo'
+                aria-label={t('canvas.undo')}
                 variant='ghost'
                 className={cn('size-[28px] rounded-sm p-0', chipHoverSurfaceClass)}
                 onClick={onUndo}
@@ -119,14 +123,14 @@ export const CanvasActionBar = memo(function CanvasActionBar({
               </Button>
             </Tooltip.Trigger>
             <Tooltip.Content side='top'>
-              <Tooltip.Shortcut keys='⌘Z'>Undo</Tooltip.Shortcut>
+              <Tooltip.Shortcut keys='⌘Z'>{t('canvas.undo')}</Tooltip.Shortcut>
             </Tooltip.Content>
           </Tooltip.Root>
 
           <Tooltip.Root>
             <Tooltip.Trigger asChild>
               <Button
-                aria-label='Redo'
+                aria-label={t('canvas.redo')}
                 variant='ghost'
                 className={cn('size-[28px] rounded-sm p-0', chipHoverSurfaceClass)}
                 onClick={onRedo}
@@ -136,7 +140,7 @@ export const CanvasActionBar = memo(function CanvasActionBar({
               </Button>
             </Tooltip.Trigger>
             <Tooltip.Content side='top'>
-              <Tooltip.Shortcut keys='⌘⇧Z'>Redo</Tooltip.Shortcut>
+              <Tooltip.Shortcut keys='⌘⇧Z'>{t('canvas.redo')}</Tooltip.Shortcut>
             </Tooltip.Content>
           </Tooltip.Root>
         </>
@@ -147,7 +151,7 @@ export const CanvasActionBar = memo(function CanvasActionBar({
       <Tooltip.Root>
         <Tooltip.Trigger asChild>
           <Button
-            aria-label='Fit to view'
+            aria-label={t('canvas.fitToView')}
             variant='ghost'
             className={cn('size-[28px] rounded-sm p-0', chipHoverSurfaceClass)}
             onClick={onFitView}
@@ -156,7 +160,7 @@ export const CanvasActionBar = memo(function CanvasActionBar({
           </Button>
         </Tooltip.Trigger>
         <Tooltip.Content side='top'>
-          <Tooltip.Shortcut keys='⌘⇧F'>Fit to View</Tooltip.Shortcut>
+          <Tooltip.Shortcut keys='⌘⇧F'>{t('canvas.fitToView')}</Tooltip.Shortcut>
         </Tooltip.Content>
       </Tooltip.Root>
     </div>

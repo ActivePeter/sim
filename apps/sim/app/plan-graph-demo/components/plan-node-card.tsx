@@ -1,3 +1,5 @@
+'use client'
+
 import { Button, cn, Tooltip } from '@sim/emcn'
 import { Task, Trash, Workflow } from '@sim/emcn/icons'
 import {
@@ -10,6 +12,7 @@ import {
   WorkflowBlockView,
 } from '@sim/workflow-renderer'
 import type { NodeProps } from 'reactflow'
+import { type TranslationFunction, type TranslationKey, useI18n } from '@/lib/i18n'
 import type { PlanLifecycle, ResolvedPlanItem } from '@/app/plan-graph-demo/plan-graph-model'
 
 export interface PlanNodeData {
@@ -22,14 +25,14 @@ export interface PlanNodeData {
   wouldCreateConnectionCycle: (source: string, target: string) => boolean
 }
 
-const STATUS_LABELS = {
-  active: 'Running',
-  blocked: 'Blocked',
-  done: 'Merged',
-  planned: 'Planned',
-  ready: 'Ready to claim',
-  review: 'In review',
-} as const satisfies Record<PlanLifecycle, string>
+const STATUS_LABEL_KEYS = {
+  active: 'plan.status.running',
+  blocked: 'plan.status.blocked',
+  done: 'plan.status.merged',
+  planned: 'plan.status.planned',
+  ready: 'plan.status.readyToClaim',
+  review: 'plan.status.inReview',
+} as const satisfies Record<PlanLifecycle, TranslationKey>
 
 const ACTION_BUTTON_STYLES = cn(
   WORKFLOW_ACTION_BUTTON_CLASSNAME,
@@ -44,13 +47,17 @@ function getRingStyles(item: ResolvedPlanItem, selected: boolean): string {
   return ''
 }
 
-function getStatusDetail(item: ResolvedPlanItem): string {
-  if (item.resolvedLifecycle === 'blocked') return `Waiting on ${item.blockerIds.join(' + ')}`
-  if (item.agent) return `${STATUS_LABELS[item.resolvedLifecycle]} · ${item.agent}`
-  return STATUS_LABELS[item.resolvedLifecycle]
+function getStatusDetail(item: ResolvedPlanItem, t: TranslationFunction): string {
+  if (item.resolvedLifecycle === 'blocked') {
+    return t('plan.node.waitingOn', { items: item.blockerIds.join(' + ') })
+  }
+  const status = t(STATUS_LABEL_KEYS[item.resolvedLifecycle])
+  return item.agent ? `${status} · ${item.agent}` : status
 }
 
 function DagNodeActionBar({ data }: { data: PlanNodeData }) {
+  const { t } = useI18n()
+
   return (
     <WorkflowActionBarView variant='swell'>
       <Tooltip.Root preferAbove>
@@ -60,8 +67,8 @@ function DagNodeActionBar({ data }: { data: PlanNodeData }) {
               variant='ghost'
               aria-label={
                 data.item.issue.number === null
-                  ? 'Issue not linked'
-                  : `Open issue ${data.item.issue.number}`
+                  ? t('plan.node.issueNotLinked')
+                  : t('plan.node.openIssueNumber', { number: data.item.issue.number })
               }
               className={cn(ACTION_BUTTON_STYLES, WORKFLOW_FIRST_SWELL_ACTION_BUTTON_CLASSNAME)}
               disabled={!data.issueUrl}
@@ -76,7 +83,7 @@ function DagNodeActionBar({ data }: { data: PlanNodeData }) {
           </span>
         </Tooltip.Trigger>
         <Tooltip.Content side='top'>
-          {data.issueUrl ? 'Open issue' : 'Issue not linked'}
+          {data.issueUrl ? t('plan.node.openIssue') : t('plan.node.issueNotLinked')}
         </Tooltip.Content>
       </Tooltip.Root>
 
@@ -87,8 +94,10 @@ function DagNodeActionBar({ data }: { data: PlanNodeData }) {
               variant='ghost'
               aria-label={
                 data.item.primaryPr.number === null
-                  ? 'Pull request not opened'
-                  : `Open pull request ${data.item.primaryPr.number}`
+                  ? t('plan.node.notOpened')
+                  : t('plan.node.openPullRequestNumber', {
+                      number: data.item.primaryPr.number,
+                    })
               }
               className={ACTION_BUTTON_STYLES}
               disabled={!data.pullRequestUrl}
@@ -105,7 +114,7 @@ function DagNodeActionBar({ data }: { data: PlanNodeData }) {
           </span>
         </Tooltip.Trigger>
         <Tooltip.Content side='top'>
-          {data.pullRequestUrl ? 'Open pull request' : 'Pull request not opened'}
+          {data.pullRequestUrl ? t('plan.node.openPullRequest') : t('plan.node.notOpened')}
         </Tooltip.Content>
       </Tooltip.Root>
 
@@ -114,7 +123,7 @@ function DagNodeActionBar({ data }: { data: PlanNodeData }) {
           <span className='inline-flex'>
             <Button
               variant='ghost'
-              aria-label='Delete PR node'
+              aria-label={t('plan.node.deletePr')}
               className={cn(ACTION_BUTTON_STYLES, WORKFLOW_LAST_SWELL_ACTION_BUTTON_CLASSNAME)}
               disabled={!data.canRemove}
               onPointerDown={(event) => event.stopPropagation()}
@@ -127,13 +136,14 @@ function DagNodeActionBar({ data }: { data: PlanNodeData }) {
             </Button>
           </span>
         </Tooltip.Trigger>
-        <Tooltip.Content side='top'>Delete node</Tooltip.Content>
+        <Tooltip.Content side='top'>{t('plan.node.delete')}</Tooltip.Content>
       </Tooltip.Root>
     </WorkflowActionBarView>
   )
 }
 
 export function PlanNodeCard({ data, selected }: NodeProps<PlanNodeData>) {
+  const { t } = useI18n()
   const { item } = data
   const ringStyles = getRingStyles(item, selected)
 
@@ -159,20 +169,27 @@ export function PlanNodeCard({ data, selected }: NodeProps<PlanNodeData>) {
       wouldCreateConnectionCycle={data.wouldCreateConnectionCycle}
       onSelect={data.onSelect}
       actionBar={<DagNodeActionBar data={data} />}
-      typeLabel='PR'
+      typeLabel={t('plan.node.type')}
       rows={
         <>
           <SubBlockRowView
-            title='Issue'
-            displayValue={item.issue.number === null ? 'Not linked' : `#${item.issue.number}`}
-          />
-          <SubBlockRowView
-            title='Pull request'
+            title={t('plan.node.issue')}
             displayValue={
-              item.primaryPr.number === null ? 'Not opened' : `#${item.primaryPr.number}`
+              item.issue.number === null ? t('plan.node.notLinked') : `#${item.issue.number}`
             }
           />
-          <SubBlockRowView title={`Wave ${item.wave}`} displayValue={getStatusDetail(item)} />
+          <SubBlockRowView
+            title={t('plan.node.pullRequest')}
+            displayValue={
+              item.primaryPr.number === null
+                ? t('plan.node.notOpened')
+                : `#${item.primaryPr.number}`
+            }
+          />
+          <SubBlockRowView
+            title={t('plan.node.wave', { wave: item.wave })}
+            displayValue={getStatusDetail(item, t)}
+          />
         </>
       }
     />

@@ -91,31 +91,36 @@ export function DagCanvasAdapter({
 
   const derivedNodes = useMemo<Node<PlanNodeData>[]>(
     () =>
-      resolvedItems.map((item) => ({
-        id: item.id,
-        type: 'dagNode',
-        position: positions[item.id] ?? { x: 0, y: 0 },
-        dragHandle: '.workflow-drag-handle',
-        draggable: true,
-        zIndex: BLOCK_Z_BASE,
-        data: {
-          canRemove: items.length > 1,
-          issueUrl:
-            item.issue.number === null
-              ? undefined
-              : `https://github.com/${repository}/issues/${item.issue.number}`,
-          item,
-          onRemove: () => onRemoveItem(item.id),
-          onSelect: () => onSelectItem(item.id),
-          pullRequestUrl:
-            item.primaryPr.number === null
-              ? undefined
-              : `https://github.com/${repository}/pull/${item.primaryPr.number}`,
-          wouldCreateConnectionCycle: (source, target) =>
-            wouldCreateDagCycle(dependencies, source, target),
-        },
-        selected: false,
-      })),
+      resolvedItems.map((item) => {
+        const artifactRepository = item.repository ?? repository
+        return {
+          id: item.id,
+          type: 'dagNode',
+          position: positions[item.id] ?? { x: 0, y: 0 },
+          dragHandle: '.workflow-drag-handle',
+          draggable: true,
+          zIndex: BLOCK_Z_BASE,
+          data: {
+            canRemove: items.length > 1,
+            issueUrl:
+              item.issue.url ??
+              (item.issue.number === null
+                ? undefined
+                : `https://github.com/${artifactRepository}/issues/${item.issue.number}`),
+            item,
+            onRemove: () => onRemoveItem(item.id),
+            onSelect: () => onSelectItem(item.id),
+            pullRequestUrl:
+              item.primaryPr.url ??
+              (item.primaryPr.number === null
+                ? undefined
+                : `https://github.com/${artifactRepository}/pull/${item.primaryPr.number}`),
+            wouldCreateConnectionCycle: (source, target) =>
+              wouldCreateDagCycle(dependencies, source, target),
+          },
+          selected: false,
+        }
+      }),
     [dependencies, items.length, onRemoveItem, onSelectItem, positions, repository, resolvedItems]
   )
 

@@ -1,3 +1,5 @@
+'use client'
+
 import { Badge, Button, Chip, ChipInput, ChipTextarea, cn } from '@sim/emcn'
 import {
   BrainCircuit,
@@ -13,6 +15,7 @@ import {
   User,
   Workflow,
 } from '@sim/emcn/icons'
+import { type TranslationFunction, type TranslationKey, useI18n } from '@/lib/i18n'
 import {
   type DagItemUpdate,
   getMergeBlockingItemIds,
@@ -25,18 +28,30 @@ import {
 const DEPENDENCY_KINDS: readonly PlanDependencyKind[] = ['requires', 'contract', 'integrate-with']
 
 const STATUS_BADGES = {
-  active: { label: 'Running', variant: 'purple' },
-  blocked: { label: 'Blocked', variant: 'gray' },
-  done: { label: 'Merged', variant: 'green' },
-  planned: { label: 'Planned', variant: 'gray' },
-  ready: { label: 'Ready', variant: 'blue-secondary' },
-  review: { label: 'In review', variant: 'amber' },
+  active: { labelKey: 'plan.status.running', variant: 'purple' },
+  blocked: { labelKey: 'plan.status.blocked', variant: 'gray' },
+  done: { labelKey: 'plan.status.merged', variant: 'green' },
+  planned: { labelKey: 'plan.status.planned', variant: 'gray' },
+  ready: { labelKey: 'plan.status.ready', variant: 'blue-secondary' },
+  review: { labelKey: 'plan.status.inReview', variant: 'amber' },
 } as const satisfies Record<
   PlanLifecycle,
   {
-    label: string
+    labelKey: TranslationKey
     variant: 'amber' | 'blue-secondary' | 'gray' | 'green' | 'purple'
   }
+>
+
+const GITHUB_STATE_KEYS = {
+  Closed: 'plan.github.closed',
+  Draft: 'plan.github.draft',
+  Merged: 'plan.github.merged',
+  Open: 'plan.github.open',
+  Unknown: 'plan.github.unknown',
+  Unopened: 'plan.github.unopened',
+} as const satisfies Record<
+  'Closed' | 'Draft' | 'Merged' | 'Open' | 'Unknown' | 'Unopened',
+  TranslationKey
 >
 
 interface NodeInspectorProps {
@@ -48,6 +63,7 @@ interface NodeInspectorProps {
   onRemoveItem: () => void
   onUpdateDependencyKind: (dependencyId: string, kind: PlanDependencyKind) => void
   onUpdateItem: (update: DagItemUpdate) => void
+  repository: string
 }
 
 interface DetailRowProps {
@@ -88,13 +104,27 @@ function GateRow({ label, passed }: GateRowProps) {
   )
 }
 
-function getActionLabel(lifecycle: PlanLifecycle, mergeBlocked: boolean): string {
-  if (lifecycle === 'ready') return 'Ready for agent claim'
-  if (lifecycle === 'active') return 'Claim is active'
-  if (lifecycle === 'review') return mergeBlocked ? 'Integration gate blocked' : 'Waiting on GitHub'
-  if (lifecycle === 'blocked') return 'Waiting for dependencies'
-  if (lifecycle === 'done') return 'Node completed'
-  return 'Not ready'
+function getActionLabel(
+  lifecycle: PlanLifecycle,
+  mergeBlocked: boolean,
+  t: TranslationFunction
+): string {
+  if (lifecycle === 'ready') return t('plan.inspector.action.ready')
+  if (lifecycle === 'active') return t('plan.inspector.action.claimActive')
+  if (lifecycle === 'review') {
+    return mergeBlocked
+      ? t('plan.inspector.action.integrationBlocked')
+      : t('plan.inspector.action.waitingGithub')
+  }
+  if (lifecycle === 'blocked') return t('plan.inspector.action.waitingDependencies')
+  if (lifecycle === 'done') return t('plan.inspector.action.completed')
+  return t('plan.inspector.action.notReady')
+}
+
+function dependencyKindLabel(kind: PlanDependencyKind, t: TranslationFunction): string {
+  if (kind === 'contract') return t('plan.dependency.contract')
+  if (kind === 'integrate-with') return t('plan.dependency.integrateWith')
+  return t('plan.dependency.requires')
 }
 
 function getNextDependencyKind(kind: PlanDependencyKind): PlanDependencyKind {
@@ -111,7 +141,9 @@ export function NodeInspector({
   onRemoveItem,
   onUpdateDependencyKind,
   onUpdateItem,
+  repository,
 }: NodeInspectorProps) {
+  const { locale, t } = useI18n()
   const status = STATUS_BADGES[item.resolvedLifecycle]
   const prerequisiteIds = dependencies
     .filter((dependency) => dependency.target === item.id)
@@ -135,26 +167,26 @@ export function NodeInspector({
           <div className='mb-1.5 flex items-center gap-2'>
             <span className='font-mono text-[var(--text-muted)] text-xs'>{item.id}</span>
             <Badge variant={status.variant} size='sm' dot>
-              {status.label}
+              {t(status.labelKey)}
             </Badge>
           </div>
           <h2 className='text-[var(--text-primary)] text-base leading-6'>{item.title}</h2>
         </div>
         <Badge variant='type' size='sm'>
-          Wave {item.wave}
+          {t('plan.inspector.wave', { wave: item.wave })}
         </Badge>
       </div>
 
       <div className='flex min-h-0 flex-1 flex-col gap-5 overflow-y-auto px-4 py-4'>
         <section>
-          <p className='mb-2 text-[var(--text-muted)] text-xs'>Objective</p>
+          <p className='mb-2 text-[var(--text-muted)] text-xs'>{t('plan.inspector.objective')}</p>
           <div className='space-y-2'>
             <div>
               <label
                 className='mb-1 block text-[10px] text-[var(--text-muted)]'
                 htmlFor={`${item.id}-title`}
               >
-                Title
+                {t('plan.inspector.title')}
               </label>
               <ChipInput
                 key={`${item.id}-title-${item.title}`}
@@ -171,7 +203,7 @@ export function NodeInspector({
                 className='mb-1 block text-[10px] text-[var(--text-muted)]'
                 htmlFor={`${item.id}-summary`}
               >
-                Outcome
+                {t('plan.inspector.outcome')}
               </label>
               <ChipTextarea
                 key={`${item.id}-summary-${item.summary}`}
@@ -188,21 +220,44 @@ export function NodeInspector({
           <section className='rounded-lg border border-[var(--badge-amber-bg)] bg-[color-mix(in_srgb,var(--badge-amber-bg)_35%,transparent)] p-3'>
             <div className='mb-1.5 flex items-center gap-1.5 text-[var(--badge-amber-text)] text-xs'>
               <CirclePause className='size-3.5' />
-              Why this node is blocked
+              {t('plan.inspector.whyBlocked')}
             </div>
             <p className='text-[var(--text-secondary)] text-xs leading-5'>
-              Waiting for{' '}
-              {item.blockerIds
-                .map((blockerId) => itemById.get(blockerId)?.title ?? blockerId)
-                .join(' and ')}
-              .
+              {t('plan.inspector.waitingFor', {
+                items: item.blockerIds
+                  .map((blockerId) => itemById.get(blockerId)?.title ?? blockerId)
+                  .join(locale === 'zh-CN' ? '、' : ' and '),
+              })}
             </p>
           </section>
         )}
 
         <section>
-          <p className='mb-1.5 text-[var(--text-muted)] text-xs'>Artifact bindings</p>
+          <p className='mb-1.5 text-[var(--text-muted)] text-xs'>
+            {t('plan.inspector.artifactBindings')}
+          </p>
           <div className='space-y-2 rounded-lg border border-[var(--border)] bg-[var(--surface-2)] p-3'>
+            <div>
+              <label
+                className='mb-1 flex items-center gap-1.5 text-[10px] text-[var(--text-muted)]'
+                htmlFor={`${item.id}-repository`}
+              >
+                <FolderCode className='size-3 text-[var(--text-icon)]' />
+                {t('plan.inspector.repository')}
+              </label>
+              <ChipInput
+                key={`${item.id}-repository-${item.repository ?? repository}`}
+                id={`${item.id}-repository`}
+                inputClassName='font-mono'
+                defaultValue={item.repository ?? repository}
+                onBlur={(event) => {
+                  const artifactRepository = event.currentTarget.value.trim()
+                  if (/^[^/]+\/[^/]+$/.test(artifactRepository)) {
+                    onUpdateItem({ repository: artifactRepository })
+                  }
+                }}
+              />
+            </div>
             <div>
               <div className='mb-1 flex items-center justify-between gap-2'>
                 <label
@@ -210,10 +265,10 @@ export function NodeInspector({
                   htmlFor={`${item.id}-issue`}
                 >
                   <Task className='size-3 text-[var(--text-icon)]' />
-                  GitHub issue
+                  {t('plan.inspector.githubIssue')}
                 </label>
                 <Badge variant='outline' size='sm'>
-                  {item.issue.state}
+                  {t(GITHUB_STATE_KEYS[item.issue.state])}
                 </Badge>
               </div>
               <ChipInput
@@ -242,10 +297,10 @@ export function NodeInspector({
                   htmlFor={`${item.id}-pr`}
                 >
                   <Workflow className='size-3 text-[var(--text-icon)]' />
-                  Primary pull request
+                  {t('plan.inspector.primaryPullRequest')}
                 </label>
                 <Badge variant='outline' size='sm'>
-                  {item.primaryPr.state}
+                  {t(GITHUB_STATE_KEYS[item.primaryPr.state])}
                 </Badge>
               </div>
               <ChipInput
@@ -253,7 +308,7 @@ export function NodeInspector({
                 id={`${item.id}-pr`}
                 type='number'
                 min={1}
-                placeholder='Not opened'
+                placeholder={t('plan.node.notOpened')}
                 inputClassName='font-mono'
                 defaultValue={item.primaryPr.number ?? ''}
                 onBlur={(event) => {
@@ -274,7 +329,7 @@ export function NodeInspector({
                 htmlFor={`${item.id}-owner`}
               >
                 <User className='size-3 text-[var(--text-icon)]' />
-                Human owner
+                {t('plan.inspector.humanOwner')}
               </label>
               <ChipInput
                 key={`${item.id}-owner-${item.humanOwner}`}
@@ -288,8 +343,10 @@ export function NodeInspector({
 
         <section>
           <div className='mb-1.5 flex items-center justify-between gap-2'>
-            <p className='text-[var(--text-muted)] text-xs'>Dependencies</p>
-            <span className='text-[10px] text-[var(--text-muted)]'>Click policy to change</span>
+            <p className='text-[var(--text-muted)] text-xs'>{t('plan.inspector.dependencies')}</p>
+            <span className='text-[10px] text-[var(--text-muted)]'>
+              {t('plan.inspector.clickPolicy')}
+            </span>
           </div>
           <div className='space-y-1.5 rounded-lg border border-[var(--border)] bg-[var(--surface-2)] p-2.5'>
             {incomingDependencies.length > 0 ? (
@@ -304,12 +361,15 @@ export function NodeInspector({
                       onUpdateDependencyKind(dependency.id, getNextDependencyKind(dependency.kind))
                     }
                   >
-                    {dependency.kind}
+                    {dependencyKindLabel(dependency.kind, t)}
                   </Chip>
                   <Button
                     variant='quiet'
                     size='icon'
-                    aria-label={`Remove ${dependency.source} to ${dependency.target} dependency`}
+                    aria-label={t('plan.inspector.removeDependency', {
+                      sourceId: dependency.source,
+                      targetId: dependency.target,
+                    })}
                     onClick={() => onRemoveDependency(dependency.id)}
                   >
                     <Trash className='size-3.5' />
@@ -317,19 +377,23 @@ export function NodeInspector({
                 </div>
               ))
             ) : (
-              <p className='py-1 text-[var(--text-muted)] text-xs'>No incoming dependencies.</p>
+              <p className='py-1 text-[var(--text-muted)] text-xs'>
+                {t('plan.inspector.noIncomingDependencies')}
+              </p>
             )}
             <div className='grid grid-cols-2 gap-2 border-[var(--border)] border-t pt-2'>
               <div>
-                <p className='text-[10px] text-[var(--text-muted)]'>Inputs</p>
+                <p className='text-[10px] text-[var(--text-muted)]'>{t('plan.inspector.inputs')}</p>
                 <p className='mt-1 truncate font-mono text-[var(--text-body)] text-xs'>
-                  {prerequisiteIds.length > 0 ? prerequisiteIds.join(' · ') : 'None'}
+                  {prerequisiteIds.length > 0 ? prerequisiteIds.join(' · ') : t('common.none')}
                 </p>
               </div>
               <div>
-                <p className='text-[10px] text-[var(--text-muted)]'>Unlocks</p>
+                <p className='text-[10px] text-[var(--text-muted)]'>
+                  {t('plan.inspector.unlocks')}
+                </p>
                 <p className='mt-1 truncate font-mono text-[var(--text-body)] text-xs'>
-                  {dependentIds.length > 0 ? dependentIds.join(' · ') : 'None'}
+                  {dependentIds.length > 0 ? dependentIds.join(' · ') : t('common.none')}
                 </p>
               </div>
             </div>
@@ -337,18 +401,31 @@ export function NodeInspector({
         </section>
 
         <section>
-          <p className='mb-1.5 text-[var(--text-muted)] text-xs'>Merge gates</p>
+          <p className='mb-1.5 text-[var(--text-muted)] text-xs'>
+            {t('plan.inspector.mergeGates')}
+          </p>
           <div className='rounded-lg border border-[var(--border)] bg-[var(--surface-2)] px-3 py-2'>
-            <GateRow label='Start dependencies satisfied' passed={dependenciesPassed} />
-            <GateRow label='Merge dependencies satisfied' passed={mergeDependenciesPassed} />
-            <GateRow label='Parent SHA is current' passed={item.resolvedLifecycle !== 'blocked'} />
-            <GateRow label='Required checks passed' passed={checksPassed} />
-            <GateRow label='Review approved' passed={reviewPassed} />
+            <GateRow
+              label={t('plan.inspector.startDependenciesSatisfied')}
+              passed={dependenciesPassed}
+            />
+            <GateRow
+              label={t('plan.inspector.mergeDependenciesSatisfied')}
+              passed={mergeDependenciesPassed}
+            />
+            <GateRow
+              label={t('plan.inspector.parentShaCurrent')}
+              passed={item.resolvedLifecycle !== 'blocked'}
+            />
+            <GateRow label={t('plan.inspector.requiredChecksPassed')} passed={checksPassed} />
+            <GateRow label={t('plan.inspector.reviewApproved')} passed={reviewPassed} />
           </div>
         </section>
 
         <section>
-          <p className='mb-1.5 text-[var(--text-muted)] text-xs'>Interfaces & contracts</p>
+          <p className='mb-1.5 text-[var(--text-muted)] text-xs'>
+            {t('plan.inspector.interfaces')}
+          </p>
           <div className='space-y-2 rounded-lg border border-[var(--border)] bg-[var(--surface-2)] p-3'>
             {item.interfaces.map((planInterface) => (
               <article key={planInterface.name}>
@@ -362,14 +439,18 @@ export function NodeInspector({
         </section>
 
         <section>
-          <p className='mb-1.5 text-[var(--text-muted)] text-xs'>Agent claim</p>
+          <p className='mb-1.5 text-[var(--text-muted)] text-xs'>
+            {t('plan.inspector.agentClaim')}
+          </p>
           <p className='break-words rounded-lg border border-[var(--border)] bg-[var(--surface-2)] px-3 py-2 font-mono text-[10px] text-[var(--text-secondary)] leading-4'>
             {claimCommand}
           </p>
         </section>
 
         <section>
-          <p className='mb-1.5 text-[var(--text-muted)] text-xs'>Expected paths</p>
+          <p className='mb-1.5 text-[var(--text-muted)] text-xs'>
+            {t('plan.inspector.expectedPaths')}
+          </p>
           <div className='space-y-1'>
             {item.expectedPaths.map((path) => (
               <div
@@ -385,18 +466,32 @@ export function NodeInspector({
 
         {item.execution && (
           <section>
-            <p className='mb-1.5 text-[var(--text-muted)] text-xs'>Execution attempt</p>
+            <p className='mb-1.5 text-[var(--text-muted)] text-xs'>
+              {t('plan.inspector.executionAttempt')}
+            </p>
             <div className='rounded-lg border border-[var(--border)] bg-[var(--surface-2)] px-3 py-1.5'>
-              <DetailRow icon={BrainCircuit} label='Agent' value={item.agent ?? 'Unassigned'} />
-              <DetailRow icon={Fingerprint} label='Session' value={item.execution.sessionId} />
-              <DetailRow icon={Fingerprint} label='Attempt' value={item.execution.attemptId} />
+              <DetailRow
+                icon={BrainCircuit}
+                label={t('plan.inspector.agent')}
+                value={item.agent ?? t('common.unassigned')}
+              />
+              <DetailRow
+                icon={Fingerprint}
+                label={t('plan.inspector.session')}
+                value={item.execution.sessionId}
+              />
+              <DetailRow
+                icon={Fingerprint}
+                label={t('plan.inspector.attempt')}
+                value={item.execution.attemptId}
+              />
               <div className='py-1.5'>
                 <label
                   className='mb-1 flex items-center gap-1.5 text-[10px] text-[var(--text-muted)]'
                   htmlFor={`${item.id}-worktree`}
                 >
                   <FolderCode className='size-3 text-[var(--text-icon)]' />
-                  Worktree
+                  {t('plan.inspector.worktree')}
                 </label>
                 <ChipInput
                   key={`${item.id}-worktree-${item.execution.worktree}`}
@@ -415,7 +510,7 @@ export function NodeInspector({
                   htmlFor={`${item.id}-branch`}
                 >
                   <Split className='size-3 text-[var(--text-icon)]' />
-                  Branch
+                  {t('plan.inspector.branch')}
                 </label>
                 <ChipInput
                   key={`${item.id}-branch-${item.execution.branch}`}
@@ -430,7 +525,7 @@ export function NodeInspector({
               </div>
               <DetailRow
                 icon={Fingerprint}
-                label='Writer fencing token'
+                label={t('plan.inspector.writerFencingToken')}
                 value={String(item.execution.lease.fencingToken)}
               />
             </div>
@@ -444,7 +539,7 @@ export function NodeInspector({
           icon={item.resolvedLifecycle === 'done' ? CircleCheck : Play}
           className='min-w-0 flex-1 justify-center'
         >
-          {getActionLabel(item.resolvedLifecycle, !mergeDependenciesPassed)}
+          {getActionLabel(item.resolvedLifecycle, !mergeDependenciesPassed, t)}
         </Badge>
         <Chip
           variant='destructive'
@@ -452,7 +547,7 @@ export function NodeInspector({
           disabled={!canRemoveItem}
           onClick={onRemoveItem}
         >
-          Delete
+          {t('plan.inspector.delete')}
         </Chip>
       </div>
     </aside>

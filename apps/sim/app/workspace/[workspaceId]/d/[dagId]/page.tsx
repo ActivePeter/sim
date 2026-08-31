@@ -4,7 +4,7 @@ import { getDemoDag } from '@/lib/dags/demo-catalog'
 import { DagDemo } from '@/app/plan-graph-demo/plan-graph-demo'
 
 export const metadata: Metadata = {
-  title: 'PR Dependency DAG',
+  title: 'PR 依赖 DAG | Sim',
 }
 
 interface DagPageProps {

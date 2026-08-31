@@ -8,6 +8,7 @@ import { generateShortId } from '@sim/utils/id'
 import { ReactFlowProvider } from 'reactflow'
 import { CanvasEditorFrame } from '@/components/canvas'
 import { DEFAULT_DEMO_DAG_ID } from '@/lib/dags/demo-catalog'
+import { useI18n } from '@/lib/i18n'
 import {
   ActivityPanel,
   DagCanvasAdapter,
@@ -36,17 +37,17 @@ import {
 const INITIAL_ACTIVITIES: readonly PlanActivity[] = [
   {
     id: 'activity-self-hosting',
-    title: 'Sim self-hosting roadmap initialized',
-    detail: 'The graph is backed by a durable workspace file with optimistic concurrency.',
+    title: { key: 'plan.activity.initializedTitle' },
+    detail: { key: 'plan.activity.initializedDetail' },
     kind: 'plan',
-    time: 'Now',
+    time: { key: 'common.now' },
   },
   {
     id: 'activity-ready',
-    title: 'PG-01 is ready to claim',
-    detail: 'This MVP branch and its first real pull request are the first execution attempt.',
+    title: { key: 'plan.activity.readyTitle' },
+    detail: { key: 'plan.activity.readyDetail' },
     kind: 'agent',
-    time: 'Now',
+    time: { key: 'common.now' },
   },
 ]
 
@@ -61,6 +62,7 @@ interface PendingDeletion {
 }
 
 export function DagDemo({ dagId = DEFAULT_DEMO_DAG_ID, workspaceId }: DagDemoProps = {}) {
+  const { t } = useI18n()
   const { dag, error, fileId, isLoading, isSaving, reset, updateDag } = usePersistedDag(
     workspaceId,
     dagId
@@ -90,10 +92,10 @@ export function DagDemo({ dagId = DEFAULT_DEMO_DAG_ID, workspaceId }: DagDemoPro
     setSelectedItemId(itemId)
     prependActivity({
       id: generateShortId(),
-      title: `${itemId} added to the durable DAG`,
-      detail: 'Edit its bindings, then drag a connector to define a dependency.',
+      title: { key: 'plan.activity.addedTitle', values: { itemId } },
+      detail: { key: 'plan.activity.addedDetail' },
       kind: 'plan',
-      time: 'Now',
+      time: { key: 'common.now' },
     })
   }
 
@@ -110,10 +112,10 @@ export function DagDemo({ dagId = DEFAULT_DEMO_DAG_ID, workspaceId }: DagDemoPro
     )
     prependActivity({
       id: generateShortId(),
-      title: `${itemId} removed`,
-      detail: 'Its position and dependency edges were removed in the same revision.',
+      title: { key: 'plan.activity.removedTitle', values: { itemId } },
+      detail: { key: 'plan.activity.removedItemDetail' },
       kind: 'plan',
-      time: 'Now',
+      time: { key: 'common.now' },
     })
   }
 
@@ -135,12 +137,17 @@ export function DagDemo({ dagId = DEFAULT_DEMO_DAG_ID, workspaceId }: DagDemoPro
       if (accepted) updateDag(() => next)
       prependActivity({
         id: generateShortId(),
-        title: accepted ? `${sourceId} → ${targetId} connected` : 'Dependency rejected',
+        title: accepted
+          ? {
+              key: 'plan.activity.connectedTitle',
+              values: { sourceId, targetId },
+            }
+          : { key: 'plan.activity.dependencyRejectedTitle' },
         detail: accepted
-          ? 'A requires edge was persisted.'
-          : 'DAGs reject duplicate, self-referential, and cyclic dependencies.',
+          ? { key: 'plan.activity.connectedDetail' }
+          : { key: 'plan.activity.dependencyRejectedDetail' },
         kind: 'plan',
-        time: 'Now',
+        time: { key: 'common.now' },
       })
     },
     [dag, prependActivity, updateDag]
@@ -159,10 +166,13 @@ export function DagDemo({ dagId = DEFAULT_DEMO_DAG_ID, workspaceId }: DagDemoPro
     if (!dependency || !updateDag((current) => removeDagDependency(current, dependencyId))) return
     prependActivity({
       id: generateShortId(),
-      title: `${dependency.source} → ${dependency.target} removed`,
-      detail: 'The dependency edge was removed from the durable graph.',
+      title: {
+        key: 'plan.activity.removedTitle',
+        values: { itemId: `${dependency.source} → ${dependency.target}` },
+      },
+      detail: { key: 'plan.activity.removedDependencyDetail' },
       kind: 'plan',
-      time: 'Now',
+      time: { key: 'common.now' },
     })
   }
 
@@ -196,20 +206,20 @@ export function DagDemo({ dagId = DEFAULT_DEMO_DAG_ID, workspaceId }: DagDemoPro
       )
       prependActivity({
         id: generateShortId(),
-        title: 'GitHub artifacts reconciled',
+        title: { key: 'plan.activity.githubReconciledTitle' },
         detail: changed
-          ? 'Issue, PR, checks, review, and merge projections were persisted.'
-          : 'All artifact bindings already matched GitHub.',
+          ? { key: 'plan.activity.githubChangedDetail' }
+          : { key: 'plan.activity.githubUnchangedDetail' },
         kind: 'review',
-        time: 'Now',
+        time: { key: 'common.now' },
       })
     } catch (cause) {
       prependActivity({
         id: generateShortId(),
-        title: 'GitHub sync failed',
-        detail: getErrorMessage(cause, 'Unknown GitHub reconciliation error'),
+        title: { key: 'plan.activity.githubSyncFailedTitle' },
+        detail: getErrorMessage(cause, t('plan.activity.unknownGithubError')),
         kind: 'review',
-        time: 'Now',
+        time: { key: 'common.now' },
       })
     }
   }
@@ -224,7 +234,7 @@ export function DagDemo({ dagId = DEFAULT_DEMO_DAG_ID, workspaceId }: DagDemoPro
   if (isLoading || !dag || !selectedItem) {
     return (
       <div className='flex h-full items-center justify-center bg-[var(--bg)] text-[var(--text-muted)] text-sm'>
-        {error ?? 'Loading durable Plan Graph…'}
+        {error ?? t('plan.loading')}
       </div>
     )
   }
@@ -237,7 +247,7 @@ export function DagDemo({ dagId = DEFAULT_DEMO_DAG_ID, workspaceId }: DagDemoPro
         isSaving={isSaving}
         isSyncing={githubSync.isPending}
         lastGithubSyncAt={dag.lastGithubSyncAt}
-        name={dag.name}
+        name={dag.id === DEFAULT_DEMO_DAG_ID ? t('plan.demo.name') : dag.name}
         nextReadyItemId={nextReadyItem?.id}
         onAddNode={handleAddItem}
         onInspectNext={handleInspectNext}
@@ -266,20 +276,21 @@ export function DagDemo({ dagId = DEFAULT_DEMO_DAG_ID, workspaceId }: DagDemoPro
             onUpdateDependencyKind={handleUpdateDependencyKind}
             onUpdateItem={(update) => handleUpdateItem(selectedItem.id, update)}
             canRemoveItem={dag.items.length > 1}
+            repository={dag.repository}
           />
         }
       >
         <section className='flex min-h-0 min-w-0 flex-1 flex-col'>
           <div className='flex h-10 shrink-0 items-center justify-between gap-3 border-[var(--border)] border-b bg-[var(--surface-1)] px-3'>
             <div className='flex items-center gap-3 text-[var(--text-muted)] text-xs'>
-              <span className='hidden sm:inline'>PR dependency DAG</span>
+              <span className='hidden sm:inline'>{t('plan.canvas.title')}</span>
               <span className='flex items-center gap-1.5'>
                 <span className='h-px w-5 bg-[var(--text-placeholder)]' />
-                prerequisite → dependent
+                {t('plan.canvas.direction')}
               </span>
             </div>
             <Badge variant='gray-secondary' size='sm'>
-              Drag nodes · connect handles · select a node to inspect
+              {t('plan.canvas.instructions')}
             </Badge>
           </div>
 
@@ -310,22 +321,29 @@ export function DagDemo({ dagId = DEFAULT_DEMO_DAG_ID, workspaceId }: DagDemoPro
           if (!open) setPendingDeletion(undefined)
         }}
         icon={Trash}
-        title={pendingDeletion?.kind === 'dependency' ? 'Remove dependency' : 'Delete DAG node'}
+        title={
+          pendingDeletion?.kind === 'dependency'
+            ? t('plan.confirm.removeDependency')
+            : t('plan.confirm.deleteNode')
+        }
         text={
           pendingDeletion?.kind === 'dependency'
-            ? 'Remove this dependency edge from the durable plan?'
+            ? t('plan.confirm.removeDependencyPrompt')
             : [
-                'Delete ',
-                { text: pendingDeletion?.id ?? 'this node', bold: true },
+                t('plan.confirm.deletePrompt'),
+                { text: pendingDeletion?.id ?? t('plan.confirm.deleteNode'), bold: true },
                 '? ',
                 {
-                  text: 'Its position and every connected dependency will be removed.',
+                  text: t('plan.confirm.deleteDetail'),
                   error: true,
                 },
               ]
         }
         confirm={{
-          label: pendingDeletion?.kind === 'dependency' ? 'Remove' : 'Delete',
+          label:
+            pendingDeletion?.kind === 'dependency'
+              ? t('plan.confirm.remove')
+              : t('plan.inspector.delete'),
           onClick: confirmDeletion,
         }}
       />
