@@ -85,6 +85,7 @@ export function DagCanvasAdapter({
   const [lastInteractedNodeId, setLastInteractedNodeId] = useState<string | null>(selectedItemId)
   const canvasContainerRef = useRef<HTMLDivElement>(null)
   const dragInProgressRef = useRef(false)
+  const hasInteractedRef = useRef(false)
   const initializedRef = useRef(false)
   const previousEdgesRef = useRef<Edge<PlanEdgeData>[]>([])
   const reactFlowInstance = useReactFlow<PlanNodeData, PlanEdgeData>()
@@ -352,12 +353,19 @@ export function DagCanvasAdapter({
   const handleInit = useCallback((instance: ReactFlowInstance) => {
     if (initializedRef.current) return
     initializedRef.current = true
-    requestAnimationFrame(() => instance.fitView(DAG_FIT_VIEW_OPTIONS))
+    requestAnimationFrame(() => {
+      if (!hasInteractedRef.current) instance.fitView(DAG_FIT_VIEW_OPTIONS)
+    })
+  }, [])
+
+  const handlePointerDownCapture = useCallback(() => {
+    hasInteractedRef.current = true
   }, [])
 
   return (
     <div
       ref={canvasContainerRef}
+      onPointerDownCapture={handlePointerDownCapture}
       className={`relative h-full min-h-0 w-full ${WORKFLOW_CONNECTION_CONTAINER_CLASSNAME}`}
       data-connection-active='false'
     >
