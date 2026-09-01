@@ -29,6 +29,12 @@ export async function ensureAnonymousUserExists(): Promise<void> {
         updatedAt: now,
       })
       logger.info('Created anonymous user for DISABLE_AUTH mode')
+    } else if (existingUser.email !== ANONYMOUS_USER.email) {
+      await db
+        .update(schema.user)
+        .set({ email: ANONYMOUS_USER.email, updatedAt: new Date() })
+        .where(eq(schema.user.id, ANONYMOUS_USER_ID))
+      logger.info('Updated anonymous user email for DISABLE_AUTH mode')
     }
 
     const existingStats = await db.query.userStats.findFirst({

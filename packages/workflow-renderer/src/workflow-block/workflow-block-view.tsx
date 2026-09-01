@@ -384,6 +384,10 @@ export interface WorkflowBlockViewProps {
   id: string
   type: string
   name: string
+  /** Maximum visible lines for the block name. Ordinary workflow blocks remain single-line. */
+  nameMaxLines?: 1 | 2
+  /** Makes the rendered card fill dimensions supplied by its React Flow node wrapper. */
+  fillsNodeBounds?: boolean
   isPending?: boolean
   isEnabled: boolean
   isLocked: boolean
@@ -418,6 +422,12 @@ export interface WorkflowBlockViewProps {
   hasContentBelowHeader: boolean
   conditionRows: { id: string; title: string; value: string }[]
   routerRows: { id: string; value: string }[]
+  /**
+   * Whether this node exposes Workflow's error-output footer and port.
+   * Defaults to the ordinary executable-block behavior; graph documents can disable it while
+   * retaining the same card, selection, and connection rendering.
+   */
+  showsErrorOutput?: boolean
   /** Router 'Context' summary-row value (router_v2 only). */
   routerContextValue?: string
   /** Connection-cycle guard; reads fresh edge state on every call. */
@@ -514,6 +524,8 @@ export function WorkflowBlockView({
   id,
   type,
   name,
+  nameMaxLines = 1,
+  fillsNodeBounds = false,
   isPending,
   isEnabled,
   isLocked,
@@ -530,6 +542,7 @@ export function WorkflowBlockView({
   hasContentBelowHeader,
   conditionRows,
   routerRows,
+  showsErrorOutput,
   routerContextValue,
   wouldCreateConnectionCycle,
   sunsetStatus,
@@ -691,7 +704,7 @@ export function WorkflowBlockView({
   })
   /* Blocks that can emit an error always carry the row; `response` terminates
      the flow and has no error branch. */
-  const showErrorRow = shouldShowDefaultHandles && type !== 'response'
+  const showErrorRow = showsErrorOutput ?? (shouldShowDefaultHandles && type !== 'response')
   /*
    * The error output is a real, draggable source whenever the toggle is on (a
    * connection forces the toggle on, so connected cards always have it). It
@@ -821,7 +834,7 @@ export function WorkflowBlockView({
   return (
     <div
       ref={actionMenuRootRef}
-      className='group relative'
+      className={cn('group relative', fillsNodeBounds && 'h-full w-full')}
       data-action-menu-ready={actionMenuContentVisible ? '' : undefined}
       /* Single source of truth for "the swell is painted in the selection
          color" — the action bar keys its icon treatment off this instead of
@@ -852,7 +865,8 @@ export function WorkflowBlockView({
         onClick={onSelect}
         onKeyDown={(event) => handleKeyboardActivation(event, onSelect)}
         className={cn(
-          'workflow-drag-handle relative z-[20] w-[250px] cursor-grab select-none rounded-2xl [&:active]:cursor-grabbing'
+          'workflow-drag-handle relative z-[20] cursor-grab select-none rounded-2xl [&:active]:cursor-grabbing',
+          fillsNodeBounds ? 'h-full w-full' : 'w-[250px]'
         )}
         /* The card is sized by its own content, floored at the shortest
            silhouette the border can paint — below that the perimeter has no
@@ -935,7 +949,7 @@ export function WorkflowBlockView({
         <div
           className={cn(
             'flex items-center justify-between px-2',
-            hasContentBelowHeader && 'h-[40px]'
+            hasContentBelowHeader && (nameMaxLines === 2 ? 'min-h-[40px] py-2' : 'h-[40px]')
           )}
           /* A header-only card is nothing but this row, so it carries the
              card's floor itself and `items-center` centres the title and type
@@ -952,8 +966,10 @@ export function WorkflowBlockView({
           >
             <OverflowSpan
               value={humanizeBlockName(name)}
+              maxLines={nameMaxLines}
               className={cn(
-                'truncate text-[17px]',
+                'text-[17px]',
+                nameMaxLines === 1 ? 'truncate' : 'break-words leading-5',
                 !isEnabled && runPathStatus !== 'success' && 'text-[var(--text-muted)]'
               )}
             />

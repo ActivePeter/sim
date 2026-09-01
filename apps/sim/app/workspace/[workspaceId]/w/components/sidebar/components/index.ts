@@ -6,6 +6,7 @@ export {
   CollapsedSidebarMenu,
   CollapsedWorkflowFlyoutItem,
 } from './collapsed-sidebar-menu'
+export { DagList } from './dag-list'
 export { HelpModal } from './help-modal'
 export { NavItemContextMenu } from './nav-item-context-menu'
 export { FilesRailFlyout, TablesRailFlyout } from './rail-resource-flyout'

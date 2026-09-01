@@ -32,6 +32,9 @@ export const PUT = defineV2JsonRoute({
     assertedWorkspaceId: body.workspaceId,
     content: body.content,
     encoding: body.encoding,
+    ...(body.expectedContentUpdatedAt
+      ? { expectedUpdatedAt: new Date(body.expectedContentUpdatedAt) }
+      : {}),
   }),
   useCase: updateWorkspaceFileContent,
   present: async ({ file }) => ({ data: await toV2File(file) }),

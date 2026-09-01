@@ -12,7 +12,7 @@ export const useCanvasModeStore = create<CanvasModeState>()(
   devtools(
     persist(
       (set) => ({
-        mode: 'hand',
+        mode: 'cursor',
         setMode: (mode) => set({ mode }),
       }),
       { name: 'canvas-mode' }

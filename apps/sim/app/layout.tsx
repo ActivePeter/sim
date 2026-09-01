@@ -1,5 +1,6 @@
 import { ToastProvider } from '@sim/emcn'
 import type { Metadata, Viewport } from 'next'
+import { cookies } from 'next/headers'
 import Script from 'next/script'
 import { PublicEnvScript as RuntimePublicEnvScript } from 'next-runtime-env'
 import { NuqsAdapter } from 'nuqs/adapters/next/app'
@@ -14,6 +15,7 @@ import {
   isReactGrabEnabled,
   isReactScanEnabled,
 } from '@/lib/core/config/env-flags'
+import { APP_LOCALE_COOKIE_NAME, DEFAULT_LOCALE, I18nProvider, isAppLocale } from '@/lib/i18n'
 import { ConsentProvider } from '@/app/_shell/consent/consent-provider'
 import { DesktopUpdateGate } from '@/app/_shell/desktop-update-gate'
 import { HydrationErrorHandler } from '@/app/_shell/hydration-error-handler'
@@ -35,7 +37,10 @@ export const viewport: Viewport = {
 
 export const metadata: Metadata = generateBrandedMetadata()
 
-export default function RootLayout({ children }: { children: React.ReactNode }) {
+export default async function RootLayout({ children }: { children: React.ReactNode }) {
+  const cookieStore = await cookies()
+  const requestedLocale = cookieStore.get(APP_LOCALE_COOKIE_NAME)?.value
+  const initialLocale = isAppLocale(requestedLocale) ? requestedLocale : DEFAULT_LOCALE
   const themeCSS = generateThemeCSS()
   const application = (
     <ToastProvider>
@@ -45,7 +50,9 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
           <QueryProvider>
             <SessionProvider>
               <TooltipProvider>
-                <BrandedLayout>{children}</BrandedLayout>
+                <I18nProvider initialLocale={initialLocale}>
+                  <BrandedLayout>{children}</BrandedLayout>
+                </I18nProvider>
               </TooltipProvider>
             </SessionProvider>
           </QueryProvider>
@@ -55,7 +62,7 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
   )
 
   return (
-    <html lang='en' suppressHydrationWarning {...publicEnvHtmlAttributes()}>
+    <html lang={initialLocale} suppressHydrationWarning {...publicEnvHtmlAttributes()}>
       <head>
         {isReactScanEnabled && (
           <Script

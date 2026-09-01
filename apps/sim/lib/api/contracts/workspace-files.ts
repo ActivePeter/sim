@@ -58,6 +58,10 @@ export const updateWorkspaceFileContentBodySchema = z
   .object({
     content: z.string().max(70_000_000, 'Content is too large'),
     encoding: z.enum(['base64', 'utf-8']).optional(),
+    expectedContentUpdatedAt: z
+      .string()
+      .datetime('Expected content version must be an ISO 8601 timestamp')
+      .optional(),
   })
   .superRefine(({ content, encoding }, ctx) => {
     if (encoding === 'base64' && !isCanonicalBase64(content)) {
@@ -131,6 +135,7 @@ export const workspaceFileRecordSchema = z.object({
   deletedAt: z.coerce.date().nullable().optional(),
   uploadedAt: z.coerce.date(),
   updatedAt: z.coerce.date(),
+  contentUpdatedAt: z.coerce.date().nullable().optional(),
   storageContext: z.enum(['workspace', 'mothership']).optional(),
   share: shareRecordSchema.nullable().optional(),
 })

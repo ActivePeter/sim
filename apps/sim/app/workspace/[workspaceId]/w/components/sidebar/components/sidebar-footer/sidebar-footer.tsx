@@ -15,13 +15,24 @@ import {
   DropdownMenuTrigger,
   Skeleton,
 } from '@sim/emcn'
-import { BookOpen, Credit, Download, HelpCircle, Settings, Trash, Users } from '@sim/emcn/icons'
+import {
+  BookOpen,
+  Check,
+  Credit,
+  Download,
+  Globe,
+  HelpCircle,
+  Settings,
+  Trash,
+  Users,
+} from '@sim/emcn/icons'
 import { SlackIcon } from '@/components/icons'
 import { SettingsIntentLink } from '@/components/settings/settings-intent-link'
 import { useSession } from '@/lib/auth/auth-client'
 import { canViewWorkspaceBillingSettings } from '@/lib/billing/workspace-permissions'
 import { isBillingEnabled } from '@/lib/core/config/env-flags'
 import { getDesktopUpdates } from '@/lib/desktop'
+import { type TranslationFunction, type TranslationKey, useI18n } from '@/lib/i18n'
 import { getUserColor } from '@/lib/workspaces/colors'
 import { useWorkspaceHostContext } from '@/app/workspace/[workspaceId]/providers/workspace-host-provider'
 import type { SettingsSection } from '@/app/workspace/[workspaceId]/settings/navigation'
@@ -44,26 +55,30 @@ import { useWorkspaceInvitePolicy } from '@/hooks/use-workspace-invite-policy'
  */
 const PROFILE_MENU_ITEMS: readonly {
   section: SettingsSection
-  label: string
+  labelKey: TranslationKey
   icon: ComponentType<{ className?: string }>
 }[] = [
-  { section: 'general', label: 'Settings', icon: Settings },
-  { section: 'billing', label: 'Subscription', icon: Credit },
-  { section: 'teammates', label: 'Teammates', icon: Users },
-  { section: 'recently-deleted', label: 'Recently deleted', icon: Trash },
+  { section: 'general', labelKey: 'sidebar.profile.settings', icon: Settings },
+  { section: 'billing', labelKey: 'sidebar.profile.subscription', icon: Credit },
+  { section: 'teammates', labelKey: 'sidebar.profile.teammates', icon: Users },
+  {
+    section: 'recently-deleted',
+    labelKey: 'sidebar.profile.recentlyDeleted',
+    icon: Trash,
+  },
 ]
 
 function hasAvailableDesktopUpdate(state: DesktopUpdateState): boolean {
   return state.status === 'available' || state.status === 'downloading' || state.status === 'ready'
 }
 
-function desktopUpdateActionLabel(state: DesktopUpdateState): string {
+function desktopUpdateActionLabel(state: DesktopUpdateState, t: TranslationFunction): string {
   if (state.status === 'downloading') {
     return state.percent === undefined
-      ? 'Downloading update…'
-      : `Downloading update ${state.percent}%`
+      ? t('sidebar.downloadUpdate')
+      : t('sidebar.downloadUpdatePercent', { percent: state.percent })
   }
-  return 'Update'
+  return t('sidebar.update')
 }
 
 /** Compact primary update circle using the same footprint as the surrounding sidebar icons. */
@@ -129,6 +144,7 @@ export function SidebarFooter({
 }: SidebarFooterProps) {
   const { data: profile } = useUserProfile()
   const { data: session } = useSession()
+  const { locale, setLocale, t } = useI18n()
   const hostContext = useWorkspaceHostContext()
   const { isInvitationsDisabled } = useWorkspaceInvitePolicy(workspaceId)
   const [updateState, setUpdateState] = useState<DesktopUpdateState>({ status: 'idle' })
@@ -259,8 +275,9 @@ export function SidebarFooter({
         </DropdownMenuTrigger>
       </SidebarTooltip>
       <DropdownMenuContent align='start' side='top' sideOffset={4}>
-        {menuItems.map(({ section, label, icon: Icon }) => {
+        {menuItems.map(({ section, labelKey, icon: Icon }) => {
           const destination = resolveMenuDestination(section)
+          const label = t(labelKey)
           if (!destination) {
             return (
               <DropdownMenuItem key={section}>
@@ -285,6 +302,23 @@ export function SidebarFooter({
             </DropdownMenuItem>
           )
         })}
+        <DropdownMenuSeparator />
+        <DropdownMenuItem
+          aria-label={t('language.switchTo', { language: t('language.simplifiedChinese') })}
+          onSelect={() => setLocale('zh-CN')}
+        >
+          <Globe className='size-[14px]' />
+          <span>{t('language.simplifiedChinese')}</span>
+          {locale === 'zh-CN' ? <Check className='ml-auto size-[14px]' /> : null}
+        </DropdownMenuItem>
+        <DropdownMenuItem
+          aria-label={t('language.switchTo', { language: t('language.english') })}
+          onSelect={() => setLocale('en')}
+        >
+          <Globe className='size-[14px]' />
+          <span>{t('language.english')}</span>
+          {locale === 'en' ? <Check className='ml-auto size-[14px]' /> : null}
+        </DropdownMenuItem>
       </DropdownMenuContent>
     </DropdownMenu>
   )
@@ -305,13 +339,13 @@ export function SidebarFooter({
   const helpMenu = (
     <DropdownMenu>
       <SidebarTooltip
-        label={updateAvailable ? 'Help — update available' : 'Help'}
+        label={updateAvailable ? t('sidebar.helpUpdateAvailable') : t('sidebar.help')}
         enabled={showCollapsedTooltips}
       >
         <DropdownMenuTrigger asChild>
           <Chip
             data-item-id='help'
-            aria-label={updateAvailable ? 'Help, update available' : 'Help'}
+            aria-label={updateAvailable ? t('sidebar.helpUpdateAvailable') : t('sidebar.help')}
             leftIcon={updateAvailable ? DesktopUpdateIcon : HelpCircle}
             fullWidth={isCollapsed}
             /* Never shrinks: while the rail animates open the row is briefly wider
@@ -331,22 +365,22 @@ export function SidebarFooter({
               disabled={updateState.status === 'downloading'}
             >
               <img src='/favicon/favicon-32x32.png' alt='' className='size-[14px] rounded-[3px]' />
-              {desktopUpdateActionLabel(updateState)}
+              {desktopUpdateActionLabel(updateState, t)}
             </DropdownMenuItem>
             <DropdownMenuSeparator />
           </>
         )}
         <DropdownMenuItem onSelect={onOpenDocs}>
           <BookOpen className='size-[14px]' />
-          Docs
+          {t('sidebar.docs')}
         </DropdownMenuItem>
         <DropdownMenuItem onSelect={onJoinSlack}>
           <SlackIcon className='size-[14px]' />
-          Join Slack
+          {t('sidebar.joinSlack')}
         </DropdownMenuItem>
         <DropdownMenuItem onSelect={onContactSupport}>
           <HelpCircle className='size-[14px]' />
-          Contact support
+          {t('sidebar.support')}
         </DropdownMenuItem>
       </DropdownMenuContent>
     </DropdownMenu>

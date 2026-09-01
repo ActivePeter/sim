@@ -6,6 +6,7 @@ import { CodeHoverCard } from './code-hover-card'
 interface OverflowSpanProps {
   value: string
   className: string
+  maxLines?: 1 | 2
   /** Rich content shown instead of the plain value when this is clipped code. */
   codePreview?: CodePreview
   /**
@@ -23,7 +24,13 @@ interface OverflowSpanProps {
  * attribute here: on the canvas it pops the browser's raw, unstyled tooltip
  * with the full untruncated value (including raw code/JSON) over the graph.
  */
-export function OverflowSpan({ value, className, codePreview, children }: OverflowSpanProps) {
+export function OverflowSpan({
+  value,
+  className,
+  maxLines = 1,
+  codePreview,
+  children,
+}: OverflowSpanProps) {
   if (codePreview) {
     return (
       <CodeHoverCard preview={codePreview} className={className}>
@@ -33,16 +40,21 @@ export function OverflowSpan({ value, className, codePreview, children }: Overfl
   }
 
   return (
-    <TextOverflowSpan value={value} className={className}>
+    <TextOverflowSpan value={value} className={className} maxLines={maxLines}>
       {children}
     </TextOverflowSpan>
   )
 }
 
 /** Plain clipped text keeps the platform tooltip behavior unchanged. */
-function TextOverflowSpan({ value, className, children }: Omit<OverflowSpanProps, 'codePreview'>) {
+function TextOverflowSpan({
+  value,
+  className,
+  maxLines,
+  children,
+}: Omit<OverflowSpanProps, 'codePreview'>) {
   return (
-    <OverflowText label={value} className={className}>
+    <OverflowText label={value} className={className} maxLines={maxLines}>
       {children}
     </OverflowText>
   )

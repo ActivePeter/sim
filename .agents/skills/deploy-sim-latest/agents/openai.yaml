@@ -1,0 +1,4 @@
+interface:
+  display_name: "Deploy Sim Latest"
+  short_description: "Build and update the mutable Sim trial service"
+  default_prompt: "Use $deploy-sim-latest to publish the current validated commit for immediate testing."

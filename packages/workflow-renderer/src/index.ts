@@ -61,6 +61,14 @@ export {
 } from './workflow-block/source-handle'
 export { SubBlockRowView, type SubBlockRowViewProps } from './workflow-block/sub-block-row-view'
 export {
+  WORKFLOW_ACTION_BUTTON_CLASSNAME,
+  WORKFLOW_FIRST_SWELL_ACTION_BUTTON_CLASSNAME,
+  WORKFLOW_LAST_SWELL_ACTION_BUTTON_CLASSNAME,
+  WORKFLOW_SWELL_ACTION_BUTTON_CLASSNAME,
+  WorkflowActionBarView,
+  type WorkflowActionBarViewProps,
+} from './workflow-block/workflow-action-bar-view'
+export {
   CONNECTION_KNOB_PEAK_PX,
   CURSOR_SWELL_LENGTH_PX,
   getWorkflowBorderFrameDeltaSeconds,

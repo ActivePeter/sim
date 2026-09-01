@@ -103,6 +103,9 @@ export const v2FileSchema = z
       .string()
       .describe('ISO 8601 timestamp of the last content or metadata write.')
       .meta({ format: 'date-time', examples: ['2026-01-15T10:30:00Z'] }),
+    contentUpdatedAt: v2TimestampSchema.describe(
+      'ISO 8601 content version for optimistic concurrency. Pass this value as expectedContentUpdatedAt when replacing content.'
+    ),
     /** Non-null only for a file `DELETE` archived; see `scope` on the list. */
     deletedAt: z
       .string()
@@ -657,6 +660,11 @@ export const v2UpdateFileContentBodySchema = z
       .enum(['utf-8', 'base64'])
       .default('utf-8')
       .describe('Encoding of the content field.'),
+    expectedContentUpdatedAt: v2TimestampSchema
+      .optional()
+      .describe(
+        'Content version returned by the latest file read. The update returns 409 instead of overwriting when the file changed in between.'
+      ),
   })
   .superRefine(({ content, encoding }, ctx) => {
     if (encoding === 'base64' && !isCanonicalBase64(content)) {

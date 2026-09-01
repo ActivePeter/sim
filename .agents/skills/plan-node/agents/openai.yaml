@@ -1,0 +1,4 @@
+interface:
+  display_name: "Plan Node"
+  short_description: "Claim and deliver a durable Plan Graph node"
+  default_prompt: "Use $plan-node to claim PG-02 and deliver its PR from an isolated worktree."

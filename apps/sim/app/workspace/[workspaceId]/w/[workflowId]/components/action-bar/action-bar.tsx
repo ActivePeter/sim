@@ -19,6 +19,11 @@ import {
   isNoteColor,
   NOTE_COLOR_OPTIONS,
   type NoteColor,
+  WORKFLOW_ACTION_BUTTON_CLASSNAME,
+  WORKFLOW_FIRST_SWELL_ACTION_BUTTON_CLASSNAME,
+  WORKFLOW_LAST_SWELL_ACTION_BUTTON_CLASSNAME,
+  WORKFLOW_SWELL_ACTION_BUTTON_CLASSNAME,
+  WorkflowActionBarView,
 } from '@sim/workflow-renderer'
 import { useShallow } from 'zustand/react/shallow'
 import { isInputDefinitionTrigger } from '@/lib/workflows/triggers/input-definition-triggers'
@@ -34,14 +39,6 @@ import { useWorkflowRegistry } from '@/stores/workflows/registry/store'
 import { useWorkflowStore } from '@/stores/workflows/workflow/store'
 
 const DEFAULT_DUPLICATE_OFFSET = { x: 50, y: 50 }
-
-const ACTION_BUTTON_STYLES = [
-  'size-[24px] rounded-md p-0',
-  'border-none bg-transparent text-[var(--text-icon)]',
-  'hover-hover:bg-[var(--surface-5)] hover-hover:!text-[var(--text-primary)]',
-  'dark:hover-hover:bg-[var(--surface-4)]',
-  'transition-[background-color,color,opacity,transform] duration-150 active:scale-[0.96]',
-].join(' ')
 
 /**
  * The running hatch: the squares' own rhythm, sheared left, scrolling.
@@ -305,12 +302,8 @@ export const ActionBar = memo(
      * gray (or retracts) while `selected` is still true.
      */
     const actionButtonStyles = cn(
-      ACTION_BUTTON_STYLES,
-      isSwell && [
-        'group-data-[node-selected]:text-[var(--surface-2)]',
-        'hover-hover:group-data-[node-selected]:bg-[var(--surface-2)]',
-        'hover-hover:group-data-[node-selected]:!text-[var(--text-primary)]',
-      ]
+      WORKFLOW_ACTION_BUTTON_CLASSNAME,
+      isSwell && WORKFLOW_SWELL_ACTION_BUTTON_CLASSNAME
     )
     /*
      * End-button silhouettes: a straight diagonal edge running parallel to
@@ -344,17 +337,13 @@ export const ActionBar = memo(
             'focus-visible:!bg-[var(--white)] focus-visible:!text-[var(--surface-inverted)]',
             'dark:focus-visible:!bg-[var(--surface-4)] dark:focus-visible:!text-[var(--text-primary)]',
           ],
-        isSwell &&
-          actionId === firstActionId &&
-          "!w-[40px] [clip-path:path('M23.75_0A8_8_0_0_0_17.6_2.88L3.41_19.9A2.5_2.5_0_0_0_5.34_24L36_24A4_4_0_0_0_40_20L40_4A4_4_0_0_0_36_0Z')] [&>svg]:translate-y-px",
+        isSwell && actionId === firstActionId && WORKFLOW_FIRST_SWELL_ACTION_BUTTON_CLASSNAME,
         isSwell &&
           actionId === firstActionId &&
           (actionId === 'run' || actionId === 'color'
             ? '[&>svg]:translate-x-[8px]'
             : '[&>svg]:translate-x-[6px]'),
-        isSwell &&
-          actionId === 'delete' &&
-          "!w-[40px] [clip-path:path('M16.25_0A8_8_0_0_1_22.4_2.88L36.59_19.9A2.5_2.5_0_0_1_34.66_24L4_24A4_4_0_0_1_0_20L0_4A4_4_0_0_1_4_0Z')] [&_svg]:-translate-x-[6px] [&_svg]:translate-y-px",
+        isSwell && actionId === 'delete' && WORKFLOW_LAST_SWELL_ACTION_BUTTON_CLASSNAME,
         /*
          * A bystander card's actions dim mid-run because they are not available
          * — but `run` is Stop while the workflow runs, and `canStopWorkflow` is
@@ -401,32 +390,8 @@ export const ActionBar = memo(
     }
 
     return (
-      <div
-        data-workflow-action-bar-swell={isSwell ? '' : undefined}
-        className={cn(
-          'absolute rounded-lg',
-          isSwell
-            ? [
-                // Above RF handles (`z-30`) so icons stay clickable when a top edge crosses.
-                '-top-[28px] right-[24px] z-[40] h-[28px] w-fit overflow-hidden px-[0.2rem] py-0.5',
-                'pointer-events-auto',
-              ]
-            : [
-                '-top-[40px] pointer-events-auto right-0 flex flex-row items-center gap-[2px] p-[3px]',
-                'border-[1.5px] border-[var(--border-1)] bg-[var(--surface-2)]',
-                'opacity-0 transition-opacity duration-[150ms] group-hover:opacity-100',
-              ]
-        )}
-      >
-        <div
-          className={cn(
-            'relative flex flex-row items-center gap-[2px]',
-            isSwell && [
-              'pointer-events-none h-full opacity-0 transition-opacity duration-[30ms] [transition-timing-function:cubic-bezier(0.23,1,0.32,1)]',
-              'group-data-[action-menu-ready]:pointer-events-auto group-data-[action-menu-ready]:opacity-100 group-data-[action-menu-ready]:duration-100',
-            ]
-          )}
-        >
+      <WorkflowActionBarView variant={variant}>
+        <>
           {/*
             Painted behind the row rather than into each slot, so the hatch has a
             single phase across the whole span. The run/stop button keeps an
@@ -725,8 +690,8 @@ export const ActionBar = memo(
               </Tooltip.Content>
             )}
           </Tooltip.Root>
-        </div>
-      </div>
+        </>
+      </WorkflowActionBarView>
     )
   },
   /**

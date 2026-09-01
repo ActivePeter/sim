@@ -74,6 +74,27 @@ function setWidths(element: HTMLElement, clientWidth: number, scrollWidth: numbe
   )
 }
 
+function setHeights(element: HTMLElement, clientHeight: number, scrollHeight: number) {
+  Object.defineProperties(element, {
+    clientHeight: { configurable: true, value: clientHeight },
+    scrollHeight: { configurable: true, value: scrollHeight },
+  })
+  act(() =>
+    resizeObserverCallback(
+      [
+        {
+          target: element,
+          contentRect: element.getBoundingClientRect(),
+          borderBoxSize: [],
+          contentBoxSize: [],
+          devicePixelContentBoxSize: [],
+        },
+      ],
+      {} as ResizeObserver
+    )
+  )
+}
+
 describe('OverflowText', () => {
   it('fades and reveals the full value only when clipped', () => {
     act(() =>
@@ -120,6 +141,29 @@ describe('OverflowText', () => {
       )
     })
     expect(document.querySelector('[data-native-surface-overlay]')).toBeNull()
+  })
+
+  it('wraps to two lines and reveals the full value only when vertically clipped', () => {
+    act(() => root.render(<OverflowText label='A long roadmap card title' maxLines={2} />))
+    const label = host.querySelector<HTMLElement>('span')
+    if (!label) throw new Error('Overflow label did not render')
+
+    setWidths(label, 160, 160)
+    setHeights(label, 40, 60)
+
+    expect(label.classList.contains('line-clamp-2')).toBe(true)
+    expect(label.classList.contains('whitespace-normal')).toBe(true)
+    expect(label.classList.contains('whitespace-nowrap')).toBe(false)
+    expect(label.className).not.toContain('mask-image:linear-gradient')
+
+    act(() => {
+      label.dispatchEvent(
+        new MouseEvent('pointerover', { bubbles: true, clientX: 100, clientY: 100 })
+      )
+    })
+    expect(document.querySelector('[data-native-surface-overlay]')?.textContent).toBe(
+      'A long roadmap card title'
+    )
   })
 
   it('can disable the tooltip for a visual mirror layer', () => {

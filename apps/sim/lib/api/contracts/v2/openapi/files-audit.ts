@@ -66,6 +66,7 @@ const FILE_EXAMPLE = {
   uploadedByEmail: 'jane@example.com',
   uploadedAt: '2026-01-15T10:30:00Z',
   updatedAt: '2026-01-15T10:30:00Z',
+  contentUpdatedAt: '2026-01-15T10:30:00Z',
   deletedAt: null,
 } as const
 
