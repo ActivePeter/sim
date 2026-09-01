@@ -17,8 +17,14 @@ interface VibeVscodeSelection {
 
 interface VibeVscodeHostContext {
   language: string
-  workspaceFolders: readonly { name: string; uri: string }[]
-  activeFile?: { uri: string; selection: VibeVscodeSelection }
+  physicalWorkspace?: {
+    id: string
+    name: string
+    folders: readonly { name: string; uri: string; index: number }[]
+  }
+  logicalWorkspace?: { id: string; name: string }
+  project?: { name: string; uri: string }
+  activeFile?: { uri: string; selection?: VibeVscodeSelection }
 }
 
 interface VibeVscodeBridgeApi {
@@ -57,11 +63,53 @@ function isHostBridgeMessage(value: unknown, token: string): value is HostBridge
 
 function isHostContext(value: unknown): value is VibeVscodeHostContext {
   if (!isRecord(value) || typeof value.language !== 'string') return false
-  if (!Array.isArray(value.workspaceFolders)) return false
-  return value.workspaceFolders.every(
-    (folder) =>
-      isRecord(folder) && typeof folder.name === 'string' && typeof folder.uri === 'string'
-  )
+  if (value.physicalWorkspace !== undefined) {
+    if (
+      !isRecord(value.physicalWorkspace) ||
+      typeof value.physicalWorkspace.id !== 'string' ||
+      typeof value.physicalWorkspace.name !== 'string' ||
+      !Array.isArray(value.physicalWorkspace.folders) ||
+      !value.physicalWorkspace.folders.every(
+        (folder) =>
+          isRecord(folder) &&
+          typeof folder.name === 'string' &&
+          typeof folder.uri === 'string' &&
+          typeof folder.index === 'number'
+      )
+    ) {
+      return false
+    }
+  }
+  if (
+    value.logicalWorkspace !== undefined &&
+    (!isRecord(value.logicalWorkspace) ||
+      typeof value.logicalWorkspace.id !== 'string' ||
+      typeof value.logicalWorkspace.name !== 'string')
+  ) {
+    return false
+  }
+  if (
+    value.project !== undefined &&
+    (!isRecord(value.project) ||
+      typeof value.project.name !== 'string' ||
+      typeof value.project.uri !== 'string')
+  ) {
+    return false
+  }
+  if (value.activeFile !== undefined) {
+    if (!isRecord(value.activeFile) || typeof value.activeFile.uri !== 'string') return false
+    if (
+      value.activeFile.selection !== undefined &&
+      (!isRecord(value.activeFile.selection) ||
+        typeof value.activeFile.selection.startLine !== 'number' ||
+        typeof value.activeFile.selection.startCharacter !== 'number' ||
+        typeof value.activeFile.selection.endLine !== 'number' ||
+        typeof value.activeFile.selection.endCharacter !== 'number')
+    ) {
+      return false
+    }
+  }
+  return true
 }
 
 function readBridgeToken(): string | undefined {
