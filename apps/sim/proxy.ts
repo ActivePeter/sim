@@ -4,11 +4,13 @@ import { type NextRequest, NextResponse } from 'next/server'
 import { sendToProfound } from './lib/analytics/profound'
 import { getEnv } from './lib/core/config/env'
 import { isAuthDisabled, isDev, isHosted } from './lib/core/config/env-flags'
-import { generateRuntimeCSP } from './lib/core/security/csp'
+import { generateRuntimeCSP, getVibeVscodeEmbedCSPPolicy } from './lib/core/security/csp'
 import { getClientIp } from './lib/core/utils/request'
 import { isNonCanonicalSimHost } from './lib/core/utils/urls'
 
 const logger = createLogger('Proxy')
+
+const VIBE_VSCODE_EMBED_HEADER = 'x-vibe-vscode-embed'
 
 export interface CorsPolicy {
   origin: string
@@ -248,10 +250,25 @@ function handleInvitationRedirects(
     )
   }
   const response = NextResponse.next()
-  response.headers.set('Content-Security-Policy', generateRuntimeCSP())
-  response.headers.set('X-Content-Type-Options', 'nosniff')
-  response.headers.set('X-Frame-Options', 'SAMEORIGIN')
+  applyDocumentSecurityHeaders(request, response)
   return response
+}
+
+/** Applies the normal document boundary or the narrowly-scoped VS Code embed boundary. */
+function applyDocumentSecurityHeaders(request: NextRequest, response: NextResponse): void {
+  const isVibeVscodeEmbed = request.headers.get(VIBE_VSCODE_EMBED_HEADER) === '1'
+  response.headers.set(
+    'Content-Security-Policy',
+    isVibeVscodeEmbed ? getVibeVscodeEmbedCSPPolicy() : generateRuntimeCSP()
+  )
+  response.headers.set('X-Content-Type-Options', 'nosniff')
+  if (isVibeVscodeEmbed) {
+    response.headers.delete('X-Frame-Options')
+    response.headers.set('Cross-Origin-Embedder-Policy', 'unsafe-none')
+    response.headers.set('Cross-Origin-Opener-Policy', 'unsafe-none')
+  } else {
+    response.headers.set('X-Frame-Options', 'SAMEORIGIN')
+  }
 }
 
 /**
@@ -323,9 +340,7 @@ export async function proxy(request: NextRequest) {
       return track(request, NextResponse.redirect(new URL('/workspace', request.url)))
     }
     const response = NextResponse.next()
-    response.headers.set('Content-Security-Policy', generateRuntimeCSP())
-    response.headers.set('X-Content-Type-Options', 'nosniff')
-    response.headers.set('X-Frame-Options', 'SAMEORIGIN')
+    applyDocumentSecurityHeaders(request, response)
     return track(request, response)
   }
 
@@ -339,9 +354,7 @@ export async function proxy(request: NextRequest) {
       return track(request, NextResponse.redirect(new URL('/login', request.url)))
     }
     const response = NextResponse.next()
-    response.headers.set('Content-Security-Policy', generateRuntimeCSP())
-    response.headers.set('X-Content-Type-Options', 'nosniff')
-    response.headers.set('X-Frame-Options', 'SAMEORIGIN')
+    applyDocumentSecurityHeaders(request, response)
     return track(request, response)
   }
 
@@ -354,9 +367,7 @@ export async function proxy(request: NextRequest) {
   const response = NextResponse.next()
   response.headers.set('Vary', 'User-Agent')
 
-  response.headers.set('Content-Security-Policy', generateRuntimeCSP())
-  response.headers.set('X-Content-Type-Options', 'nosniff')
-  response.headers.set('X-Frame-Options', 'SAMEORIGIN')
+  applyDocumentSecurityHeaders(request, response)
 
   return track(request, response)
 }
