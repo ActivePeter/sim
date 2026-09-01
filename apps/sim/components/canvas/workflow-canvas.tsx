@@ -11,6 +11,10 @@ const DEFAULT_CONNECTION_LINE_STYLE = {
   stroke: 'var(--connection-line-stroke, var(--text-secondary))',
   strokeWidth: 2,
 } as const
+const DEFAULT_PAN_ACTIVATION_KEY_CODE: NonNullable<ReactFlowProps['panActivationKeyCode']> = [
+  'Control',
+  'Meta',
+]
 
 interface CanvasSelectionProps {
   panOnDrag: number[]
@@ -103,6 +107,7 @@ export function WorkflowCanvas({
   nodesDraggable,
   onMouseDown,
   onlyRenderVisibleElements = false,
+  panActivationKeyCode = DEFAULT_PAN_ACTIVATION_KEY_CODE,
   panOnDrag,
   panOnScroll = true,
   selectionKeyCode,
@@ -129,6 +134,7 @@ export function WorkflowCanvas({
       minZoom={minZoom}
       maxZoom={maxZoom}
       panOnScroll={panOnScroll}
+      panActivationKeyCode={panActivationKeyCode}
       connectionLineStyle={connectionLineStyle}
       connectionLineType={connectionLineType}
       onMouseDown={handleMouseDown}

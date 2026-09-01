@@ -80,7 +80,7 @@ export function DagCanvasAdapter({
   selectedItemId,
   sizes,
 }: DagCanvasAdapterProps) {
-  const [canvasMode, setCanvasMode] = useState<CanvasInteractionMode>('hand')
+  const [canvasMode, setCanvasMode] = useState<CanvasInteractionMode>('cursor')
   const [selectedEdgeIds, setSelectedEdgeIds] = useState<ReadonlySet<string>>(() => new Set())
   const [lastInteractedNodeId, setLastInteractedNodeId] = useState<string | null>(selectedItemId)
   const canvasContainerRef = useRef<HTMLDivElement>(null)
