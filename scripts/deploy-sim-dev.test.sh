@@ -186,6 +186,21 @@ stopped_service_status=$?
 set -e
 assert_equal 0 "$stopped_service_status"
 
+(
+	recognition_attempts=0
+	service_pid() { printf '%s\n' "$$"; }
+	kill() { return 0; }
+	is_recognized_service_process() {
+		recognition_attempts=$((recognition_attempts + 1))
+		(( recognition_attempts >= 2 ))
+	}
+	health_status() { printf '200\n'; }
+	has_public_listener() { return 0; }
+	sleep() { :; }
+	wait_until_ready 'delayed-exec candidate' /test/candidate >/dev/null
+	assert_equal 2 "$recognition_attempts"
+)
+
 release_root="$temporary_root/recognized-release"
 mkdir -p "$release_root/apps/sim"
 working_directory="$release_root/apps/sim"

@@ -576,9 +576,16 @@ wait_until_ready() {
 
 	while (( SECONDS < deadline )); do
 		pid="$(service_pid || true)"
-		if [[ -z "$pid" ]] || ! is_recognized_service_process "$pid" "$expected_release"; then
+		if [[ -z "$pid" ]] || ! kill -0 "$pid" 2>/dev/null; then
 			printf 'Sim %s process exited before becoming healthy.\n' "$label" >&2
 			return 1
+		fi
+		# The background process can briefly still expose the launcher's environment
+		# before exec(2) installs the Node process. Keep waiting, but never accept its
+		# health until the PID has the expected service and immutable-release identity.
+		if ! is_recognized_service_process "$pid" "$expected_release"; then
+			sleep 0.1
+			continue
 		fi
 		if [[ "$(health_status)" == 200 ]]; then
 			has_public_listener || {
