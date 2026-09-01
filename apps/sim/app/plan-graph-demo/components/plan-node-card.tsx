@@ -1,5 +1,6 @@
 'use client'
 
+import { useCallback } from 'react'
 import { Button, cn, Tooltip } from '@sim/emcn'
 import { Task, Trash, Workflow } from '@sim/emcn/icons'
 import {
@@ -11,17 +12,29 @@ import {
   WorkflowActionBarView,
   WorkflowBlockView,
 } from '@sim/workflow-renderer'
-import type { NodeProps } from 'reactflow'
+import { type NodeProps, NodeResizer, type NodeResizerProps } from 'reactflow'
 import { type TranslationFunction, type TranslationKey, useI18n } from '@/lib/i18n'
-import type { PlanLifecycle, ResolvedPlanItem } from '@/app/plan-graph-demo/plan-graph-model'
+import type {
+  PlanLifecycle,
+  PlanPosition,
+  PlanSize,
+  ResolvedPlanItem,
+} from '@/app/plan-graph-demo/plan-graph-model'
+
+const PLAN_NODE_MIN_WIDTH = 220
+const PLAN_NODE_MIN_HEIGHT = 156
+const PLAN_NODE_MAX_WIDTH = 560
+const PLAN_NODE_MAX_HEIGHT = 360
 
 export interface PlanNodeData {
   canRemove: boolean
   issueUrl?: string
   item: ResolvedPlanItem
+  onResize: (position: PlanPosition, size: PlanSize) => void
   onRemove: () => void
   onSelect: () => void
   pullRequestUrl?: string
+  size: PlanSize
   wouldCreateConnectionCycle: (source: string, target: string) => boolean
 }
 
@@ -146,52 +159,81 @@ export function PlanNodeCard({ data, selected }: NodeProps<PlanNodeData>) {
   const { t } = useI18n()
   const { item } = data
   const ringStyles = getRingStyles(item, selected)
+  const handleResizeEnd = useCallback<NonNullable<NodeResizerProps['onResizeEnd']>>(
+    (_event, { height, width, x, y }) => {
+      data.onResize({ x, y }, { height, width })
+    },
+    [data]
+  )
 
   return (
-    <WorkflowBlockView
-      id={item.id}
-      type='workflow'
-      name={item.title}
-      isEnabled
-      isLocked={false}
-      hasRing={Boolean(ringStyles)}
-      ringStyles={ringStyles}
-      runPathStatus={item.resolvedLifecycle === 'done' ? 'success' : undefined}
-      isRunning={item.resolvedLifecycle === 'active'}
-      Icon={Workflow}
-      iconBgColor='var(--surface-2)'
-      horizontalHandles
-      shouldShowDefaultHandles
-      hasContentBelowHeader
-      conditionRows={[]}
-      routerRows={[]}
-      showsErrorOutput={false}
-      wouldCreateConnectionCycle={data.wouldCreateConnectionCycle}
-      onSelect={data.onSelect}
-      actionBar={<DagNodeActionBar data={data} />}
-      typeLabel={t('plan.node.type')}
-      rows={
-        <>
-          <SubBlockRowView
-            title={t('plan.node.issue')}
-            displayValue={
-              item.issue.number === null ? t('plan.node.notLinked') : `#${item.issue.number}`
-            }
-          />
-          <SubBlockRowView
-            title={t('plan.node.pullRequest')}
-            displayValue={
-              item.primaryPr.number === null
-                ? t('plan.node.notOpened')
-                : `#${item.primaryPr.number}`
-            }
-          />
-          <SubBlockRowView
-            title={t('plan.node.wave', { wave: item.wave })}
-            displayValue={getStatusDetail(item, t)}
-          />
-        </>
-      }
-    />
+    <>
+      <NodeResizer
+        isVisible={selected}
+        minWidth={PLAN_NODE_MIN_WIDTH}
+        minHeight={PLAN_NODE_MIN_HEIGHT}
+        maxWidth={PLAN_NODE_MAX_WIDTH}
+        maxHeight={PLAN_NODE_MAX_HEIGHT}
+        color='var(--text-secondary)'
+        handleStyle={{
+          background: 'var(--text-secondary)',
+          border: '2px solid var(--surface-1)',
+          borderRadius: '9999px',
+          height: 9,
+          width: 9,
+          zIndex: 60,
+        }}
+        lineStyle={{ zIndex: 59 }}
+        onResizeEnd={handleResizeEnd}
+      />
+      <WorkflowBlockView
+        id={item.id}
+        type='workflow'
+        name={item.title}
+        nameMaxLines={2}
+        fillsNodeBounds
+        blockHeight={data.size.height}
+        isEnabled
+        isLocked={false}
+        hasRing={Boolean(ringStyles)}
+        ringStyles={ringStyles}
+        runPathStatus={item.resolvedLifecycle === 'done' ? 'success' : undefined}
+        isRunning={item.resolvedLifecycle === 'active'}
+        Icon={Workflow}
+        iconBgColor='var(--surface-2)'
+        horizontalHandles
+        shouldShowDefaultHandles
+        hasContentBelowHeader
+        conditionRows={[]}
+        routerRows={[]}
+        showsErrorOutput={false}
+        wouldCreateConnectionCycle={data.wouldCreateConnectionCycle}
+        onSelect={data.onSelect}
+        actionBar={<DagNodeActionBar data={data} />}
+        typeLabel={t('plan.node.type')}
+        rows={
+          <>
+            <SubBlockRowView
+              title={t('plan.node.issue')}
+              displayValue={
+                item.issue.number === null ? t('plan.node.notLinked') : `#${item.issue.number}`
+              }
+            />
+            <SubBlockRowView
+              title={t('plan.node.pullRequest')}
+              displayValue={
+                item.primaryPr.number === null
+                  ? t('plan.node.notOpened')
+                  : `#${item.primaryPr.number}`
+              }
+            />
+            <SubBlockRowView
+              title={t('plan.node.wave', { wave: item.wave })}
+              displayValue={getStatusDetail(item, t)}
+            />
+          </>
+        }
+      />
+    </>
   )
 }

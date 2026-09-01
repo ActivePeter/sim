@@ -21,6 +21,8 @@ export interface OverflowTextProps {
   children?: ReactNode
   /** Layout and typography only; truncation and fade chrome are owned here. */
   className?: string
+  /** Maximum visible lines before clipping. */
+  maxLines?: 1 | 2
   /** Forces the tooltip when the visible label was shortened before rendering. */
   showWhen?: boolean
   /** Whether the full-value tooltip may open. Disable for visual mirror layers. */
@@ -41,6 +43,7 @@ export const OverflowText = memo(function OverflowText({
   label,
   children,
   className,
+  maxLines = 1,
   showWhen,
   tooltipEnabled = true,
   focusTarget,
@@ -74,8 +77,10 @@ export const OverflowText = memo(function OverflowText({
         data-overflow-text=''
         className={cn(
           className,
-          'block min-w-0 overflow-hidden text-clip whitespace-nowrap',
-          isOverflowing && overflowTextFadeClass
+          maxLines === 1
+            ? 'block min-w-0 overflow-hidden text-clip whitespace-nowrap'
+            : 'line-clamp-2 min-w-0 overflow-hidden text-clip whitespace-normal',
+          maxLines === 1 && isOverflowing && overflowTextFadeClass
         )}
         {...handlers}
       >

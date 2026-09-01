@@ -93,6 +93,16 @@ export interface PlanPosition {
   y: number
 }
 
+export interface PlanSize {
+  height: number
+  width: number
+}
+
+export const DEFAULT_PLAN_NODE_SIZE: Readonly<PlanSize> = {
+  height: 156,
+  width: 250,
+}
+
 export interface DagDocument {
   schemaVersion: 1
   dependencies: PlanDependency[]
@@ -106,6 +116,7 @@ export interface DagDocument {
   remote: string
   repository: string
   revision: number
+  sizes: Record<string, PlanSize>
 }
 
 export interface DagItemUpdate {
@@ -427,6 +438,15 @@ const dagDocumentSchema = z.object({
   items: z.array(itemSchema).min(1),
   dependencies: z.array(dependencySchema),
   positions: z.record(z.string(), z.object({ x: z.number(), y: z.number() })),
+  sizes: z
+    .record(
+      z.string(),
+      z.object({
+        height: z.number().positive(),
+        width: z.number().positive(),
+      })
+    )
+    .default({}),
 })
 
 export function createDemoDag(dagId: string = DEFAULT_DEMO_DAG_ID): DagDocument {
@@ -443,6 +463,7 @@ export function createDemoDag(dagId: string = DEFAULT_DEMO_DAG_ID): DagDocument 
     items: createDemoPlanItems(),
     dependencies: PLAN_DEPENDENCIES.map((dependency) => ({ ...dependency })),
     positions: structuredClone(INITIAL_PLAN_POSITIONS),
+    sizes: {},
   }
 }
 
@@ -571,7 +592,9 @@ export function updateDagItem(
 export function removeDagItem(document: DagDocument, itemId: string): DagDocument {
   if (!document.items.some((item) => item.id === itemId)) return document
   const positions = { ...document.positions }
+  const sizes = { ...document.sizes }
   delete positions[itemId]
+  delete sizes[itemId]
   return {
     ...document,
     revision: document.revision + 1,
@@ -580,6 +603,7 @@ export function removeDagItem(document: DagDocument, itemId: string): DagDocumen
       (dependency) => dependency.source !== itemId && dependency.target !== itemId
     ),
     positions,
+    sizes,
   }
 }
 

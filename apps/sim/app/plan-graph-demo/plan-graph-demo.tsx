@@ -23,6 +23,7 @@ import {
   addDagItem,
   applyGitHubBindingUpdates,
   type DagItemUpdate,
+  DEFAULT_PLAN_NODE_SIZE,
   getNextDagItemId,
   getNextReadyItem,
   getPlanCounts,
@@ -193,6 +194,30 @@ export function DagDemo({ dagId = DEFAULT_DEMO_DAG_ID, workspaceId }: DagDemoPro
     [updateDag]
   )
 
+  const handleItemResize = useCallback(
+    (
+      itemId: string,
+      position: NonNullable<typeof dag>['positions'][string],
+      size: NonNullable<typeof dag>['sizes'][string]
+    ) => {
+      updateDag((current) => {
+        const currentPosition = current.positions[itemId]
+        const currentSize = current.sizes[itemId] ?? DEFAULT_PLAN_NODE_SIZE
+        const positionChanged =
+          !currentPosition || currentPosition.x !== position.x || currentPosition.y !== position.y
+        const sizeChanged = currentSize.width !== size.width || currentSize.height !== size.height
+        if (!positionChanged && !sizeChanged) return current
+        return {
+          ...current,
+          revision: current.revision + 1,
+          positions: { ...current.positions, [itemId]: position },
+          sizes: { ...current.sizes, [itemId]: size },
+        }
+      })
+    },
+    [updateDag]
+  )
+
   function handleInspectNext() {
     if (nextReadyItem) setSelectedItemId(nextReadyItem.id)
   }
@@ -301,6 +326,7 @@ export function DagDemo({ dagId = DEFAULT_DEMO_DAG_ID, workspaceId }: DagDemoPro
                 dependencies={dag.dependencies}
                 items={dag.items}
                 onConnectItems={handleConnectItems}
+                onItemResize={handleItemResize}
                 onPositionsChange={handlePositionsChange}
                 onRemoveDependency={handleRemoveDependency}
                 onRemoveItem={handleRemoveItem}
@@ -309,6 +335,7 @@ export function DagDemo({ dagId = DEFAULT_DEMO_DAG_ID, workspaceId }: DagDemoPro
                 onSelectItem={setSelectedItemId}
                 positions={dag.positions}
                 repository={dag.repository}
+                sizes={dag.sizes}
               />
             </ReactFlowProvider>
           </div>

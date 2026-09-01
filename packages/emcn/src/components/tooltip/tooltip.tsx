@@ -307,7 +307,7 @@ function unobserveOverflow(element: Element | null) {
 }
 
 /**
- * Tracks whether an element's text is horizontally clipped, re-measuring when
+ * Tracks whether an element's text is horizontally or vertically clipped, re-measuring when
  * `measurementKey` or loaded fonts change and via a shared `ResizeObserver` (or
  * window resizes when the API is unavailable).
  *
@@ -363,9 +363,11 @@ export function useIsOverflowing<T extends HTMLElement = HTMLElement>(
   return { ref, node: nodeRef, isOverflowing }
 }
 
-/** Whether an element's content is wider than its visible box. */
+/** Whether an element's content exceeds its visible box on either axis. */
 export function isTextClipped(element: HTMLElement): boolean {
-  return element.scrollWidth > element.clientWidth + 1
+  return (
+    element.scrollWidth > element.clientWidth + 1 || element.scrollHeight > element.clientHeight + 1
+  )
 }
 
 /**

@@ -47,6 +47,7 @@ describe('plan graph model', () => {
     expect(dag.items).not.toBe(secondDag.items)
     expect(dag.dependencies).not.toBe(secondDag.dependencies)
     expect(dag.positions).not.toBe(secondDag.positions)
+    expect(dag.sizes).not.toBe(secondDag.sizes)
     expect(dag.items.find((item) => item.id === 'PG-01')).toMatchObject({
       primaryPr: { number: null, state: 'Unopened' },
       interfaces: expect.arrayContaining([
@@ -74,6 +75,8 @@ describe('plan graph model', () => {
     const dag = createDemoDag()
 
     expect(parseDagDocument(serializeDagDocument(dag))).toEqual(dag)
+    const { sizes: _sizes, ...legacyDocument } = dag
+    expect(parseDagDocument(JSON.stringify(legacyDocument)).sizes).toEqual({})
     expect(() => parseDagDocument('{"schemaVersion":2}')).toThrow()
   })
 
@@ -129,12 +132,14 @@ describe('plan graph model', () => {
     expect(removed.dependencies.some((candidate) => candidate.id === dependency.id)).toBe(false)
   })
 
-  it('removes a DAG node together with its position and dependencies', () => {
+  it('removes a DAG node together with its position, size, and dependencies', () => {
     const dag = createDemoDag()
+    dag.sizes['PG-02'] = { height: 180, width: 320 }
     const next = removeDagItem(dag, 'PG-02')
 
     expect(next.items.some((item) => item.id === 'PG-02')).toBe(false)
     expect(next.positions['PG-02']).toBeUndefined()
+    expect(next.sizes['PG-02']).toBeUndefined()
     expect(
       next.dependencies.some(
         (dependency) => dependency.source === 'PG-02' || dependency.target === 'PG-02'

@@ -29,9 +29,11 @@ import { CanvasControls } from '@/app/plan-graph-demo/components/canvas-controls
 import { PlanEdge, type PlanEdgeData } from '@/app/plan-graph-demo/components/plan-edge'
 import { PlanNodeCard, type PlanNodeData } from '@/app/plan-graph-demo/components/plan-node-card'
 import {
+  DEFAULT_PLAN_NODE_SIZE,
   type PlanDependency,
   type PlanItem,
   type PlanPosition,
+  type PlanSize,
   type ResolvedPlanItem,
   wouldCreateDagCycle,
 } from '@/app/plan-graph-demo/plan-graph-model'
@@ -50,6 +52,7 @@ interface DagCanvasAdapterProps {
   dependencies: readonly PlanDependency[]
   items: readonly PlanItem[]
   onConnectItems: (sourceId: string, targetId: string) => void
+  onItemResize: (itemId: string, position: PlanPosition, size: PlanSize) => void
   onPositionsChange: (positions: Record<string, PlanPosition>) => void
   onRemoveDependency: (dependencyId: string) => void
   onRemoveItem: (itemId: string) => void
@@ -58,6 +61,7 @@ interface DagCanvasAdapterProps {
   repository: string
   resolvedItems: readonly ResolvedPlanItem[]
   selectedItemId: string
+  sizes: Readonly<Record<string, PlanSize>>
 }
 
 /** Adapts DAG persistence to the complete flat-graph interaction contract used by Workflow. */
@@ -65,6 +69,7 @@ export function DagCanvasAdapter({
   dependencies,
   items,
   onConnectItems,
+  onItemResize,
   onPositionsChange,
   onRemoveDependency,
   onRemoveItem,
@@ -73,6 +78,7 @@ export function DagCanvasAdapter({
   repository,
   resolvedItems,
   selectedItemId,
+  sizes,
 }: DagCanvasAdapterProps) {
   const [canvasMode, setCanvasMode] = useState<CanvasInteractionMode>('hand')
   const [selectedEdgeIds, setSelectedEdgeIds] = useState<ReadonlySet<string>>(() => new Set())
@@ -93,12 +99,14 @@ export function DagCanvasAdapter({
     () =>
       resolvedItems.map((item) => {
         const artifactRepository = item.repository ?? repository
+        const size = sizes[item.id] ?? DEFAULT_PLAN_NODE_SIZE
         return {
           id: item.id,
           type: 'dagNode',
           position: positions[item.id] ?? { x: 0, y: 0 },
           dragHandle: '.workflow-drag-handle',
           draggable: true,
+          style: { height: size.height, width: size.width },
           zIndex: BLOCK_Z_BASE,
           data: {
             canRemove: items.length > 1,
@@ -108,6 +116,7 @@ export function DagCanvasAdapter({
                 ? undefined
                 : `https://github.com/${artifactRepository}/issues/${item.issue.number}`),
             item,
+            onResize: (position, nextSize) => onItemResize(item.id, position, nextSize),
             onRemove: () => onRemoveItem(item.id),
             onSelect: () => onSelectItem(item.id),
             pullRequestUrl:
@@ -117,11 +126,22 @@ export function DagCanvasAdapter({
                 : `https://github.com/${artifactRepository}/pull/${item.primaryPr.number}`),
             wouldCreateConnectionCycle: (source, target) =>
               wouldCreateDagCycle(dependencies, source, target),
+            size,
           },
           selected: false,
         }
       }),
-    [dependencies, items.length, onRemoveItem, onSelectItem, positions, repository, resolvedItems]
+    [
+      dependencies,
+      items.length,
+      onItemResize,
+      onRemoveItem,
+      onSelectItem,
+      positions,
+      repository,
+      resolvedItems,
+      sizes,
+    ]
   )
 
   const [displayNodes, setDisplayNodes] = useState<Node<PlanNodeData>[]>(derivedNodes)
@@ -156,6 +176,10 @@ export function DagCanvasAdapter({
     (changes: NodeChange[]) => {
       setDisplayNodes((currentNodes) => applyNodeChanges(changes, currentNodes))
 
+      const isResizeFrame = changes.some(
+        (change) => change.type === 'dimensions' && change.resizing === true
+      )
+
       const selectedChange = [...changes]
         .reverse()
         .find(
@@ -164,7 +188,7 @@ export function DagCanvasAdapter({
         )
       if (selectedChange) onSelectItem(selectedChange.id)
 
-      if (!dragInProgressRef.current) {
+      if (!dragInProgressRef.current && !isResizeFrame) {
         const keyboardMoves: Pick<Node, 'id' | 'position'>[] = []
         for (const change of changes) {
           if (change.type === 'position' && !change.dragging && change.position) {
