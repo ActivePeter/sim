@@ -1,8 +1,8 @@
 'use client'
 
-import { useCallback, useEffect, useState } from 'react'
+import { type MouseEventHandler, useCallback, useEffect, useRef, useState } from 'react'
 import { cn } from '@sim/emcn'
-import { ConnectionLineType, type ReactFlowProps, SelectionMode } from 'reactflow'
+import { ConnectionLineType, type ReactFlowProps, SelectionMode, useReactFlow } from 'reactflow'
 import type { CanvasInteractionMode } from '@/components/canvas/canvas-action-bar'
 import { CanvasSurface, type CanvasSurfaceProps } from '@/components/canvas/canvas-surface'
 import type { CanvasDocumentKind } from '@/lib/canvas/types'
@@ -25,6 +25,55 @@ interface CanvasSelectionProps {
 interface UseCanvasSelectionResult {
   handleMouseDown: NonNullable<ReactFlowProps['onMouseDown']>
   selectionProps: CanvasSelectionProps
+}
+
+function supportsControlPan(keyCode: ReactFlowProps['panActivationKeyCode']): boolean {
+  return Array.isArray(keyCode) ? keyCode.includes('Control') : keyCode === 'Control'
+}
+
+/** Adds Ctrl-drag panning because d3-zoom intentionally rejects Ctrl-modified mouse drags. */
+function useControlDragPan(enabled: boolean): NonNullable<ReactFlowProps['onMouseDownCapture']> {
+  const reactFlow = useReactFlow()
+  const cleanupRef = useRef<() => void>(() => {})
+
+  useEffect(() => () => cleanupRef.current(), [])
+
+  return useCallback<NonNullable<ReactFlowProps['onMouseDownCapture']>>(
+    (event) => {
+      if (!enabled || event.button !== 0 || !event.ctrlKey || event.metaKey) return
+      const target = event.target as HTMLElement | null
+      if (
+        !target?.closest('.react-flow__pane, .react-flow__selectionpane') ||
+        target.closest('.react-flow__node, .react-flow__edge, .nopan')
+      ) {
+        return
+      }
+
+      cleanupRef.current()
+      const initialViewport = reactFlow.getViewport()
+      const initialPointer = { x: event.clientX, y: event.clientY }
+      const handleMouseMove = (moveEvent: MouseEvent) => {
+        moveEvent.preventDefault()
+        void reactFlow.setViewport({
+          x: initialViewport.x + moveEvent.clientX - initialPointer.x,
+          y: initialViewport.y + moveEvent.clientY - initialPointer.y,
+          zoom: initialViewport.zoom,
+        })
+      }
+      const cleanup = () => {
+        window.removeEventListener('mousemove', handleMouseMove)
+        window.removeEventListener('mouseup', cleanup)
+        cleanupRef.current = () => {}
+      }
+      cleanupRef.current = cleanup
+      window.addEventListener('mousemove', handleMouseMove)
+      window.addEventListener('mouseup', cleanup)
+      event.preventDefault()
+      event.stopPropagation()
+      window.getSelection()?.removeAllRanges()
+    },
+    [enabled, reactFlow]
+  )
 }
 
 /** Preserves Workflow's Shift-selection gesture while sharing it with other graph documents. */
@@ -106,6 +155,7 @@ export function WorkflowCanvas({
   nodesConnectable,
   nodesDraggable,
   onMouseDown,
+  onMouseDownCapture,
   onlyRenderVisibleElements = false,
   panActivationKeyCode = DEFAULT_PAN_ACTIVATION_KEY_CODE,
   panOnDrag,
@@ -118,6 +168,7 @@ export function WorkflowCanvas({
   const isHandMode = embedded || interactionMode === 'hand'
   const { handleMouseDown: handleSelectionMouseDown, selectionProps } =
     useCanvasSelection(isHandMode)
+  const handleControlDragPan = useControlDragPan(supportsControlPan(panActivationKeyCode))
 
   const handleMouseDown = useCallback<NonNullable<ReactFlowProps['onMouseDown']>>(
     (event) => {
@@ -125,6 +176,14 @@ export function WorkflowCanvas({
       onMouseDown?.(event)
     },
     [handleSelectionMouseDown, onMouseDown]
+  )
+
+  const handleMouseDownCapture = useCallback<MouseEventHandler<HTMLDivElement>>(
+    (event) => {
+      onMouseDownCapture?.(event)
+      if (!event.defaultPrevented) handleControlDragPan(event)
+    },
+    [handleControlDragPan, onMouseDownCapture]
   )
 
   return (
@@ -138,6 +197,7 @@ export function WorkflowCanvas({
       connectionLineStyle={connectionLineStyle}
       connectionLineType={connectionLineType}
       onMouseDown={handleMouseDown}
+      onMouseDownCapture={handleMouseDownCapture}
       elementsSelectable={elementsSelectable ?? !embedded}
       selectionOnDrag={selectionOnDrag ?? (embedded ? false : selectionProps.selectionOnDrag)}
       selectionMode={selectionMode}

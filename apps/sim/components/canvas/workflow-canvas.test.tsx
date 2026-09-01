@@ -1,16 +1,33 @@
 /**
  * @vitest-environment jsdom
  */
-import { act } from 'react'
+import { act, type MouseEventHandler } from 'react'
 import { createRoot, type Root } from 'react-dom/client'
+import { ReactFlowProvider } from 'reactflow'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 const canvasSurfaceMock = vi.hoisted(() => vi.fn())
+const reactFlowViewportMock = vi.hoisted(() => ({
+  getViewport: vi.fn(() => ({ x: 10, y: 20, zoom: 1 })),
+  setViewport: vi.fn(() => Promise.resolve(true)),
+}))
+
+vi.mock('reactflow', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('reactflow')>()
+  return { ...actual, useReactFlow: () => reactFlowViewportMock }
+})
 
 vi.mock('@/components/canvas/canvas-surface', () => ({
   CanvasSurface: (props: Record<string, unknown>) => {
     canvasSurfaceMock(props)
-    return <div data-testid='canvas-surface' />
+    const onMouseDownCapture = props.onMouseDownCapture as
+      | MouseEventHandler<HTMLDivElement>
+      | undefined
+    return (
+      <div data-testid='canvas-surface' onMouseDownCapture={onMouseDownCapture}>
+        <div className='react-flow__pane' data-testid='canvas-pane' />
+      </div>
+    )
   },
 }))
 
@@ -21,6 +38,8 @@ let root: Root
 
 beforeEach(() => {
   canvasSurfaceMock.mockClear()
+  reactFlowViewportMock.getViewport.mockClear()
+  reactFlowViewportMock.setViewport.mockClear()
   ;(globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true
   container = document.createElement('div')
   document.body.appendChild(container)
@@ -41,7 +60,11 @@ function renderedSurfaceProps(): Record<string, unknown> {
 describe('WorkflowCanvas interaction modes', () => {
   it('draws a selection by default and pans while Control or Command is held', () => {
     act(() => {
-      root.render(<WorkflowCanvas documentKind='dag' interactionMode='cursor' />)
+      root.render(
+        <ReactFlowProvider>
+          <WorkflowCanvas documentKind='dag' interactionMode='cursor' />
+        </ReactFlowProvider>
+      )
     })
 
     expect(renderedSurfaceProps()).toMatchObject({
@@ -54,7 +77,11 @@ describe('WorkflowCanvas interaction modes', () => {
 
   it('keeps direct left-button panning in the explicit hand mode', () => {
     act(() => {
-      root.render(<WorkflowCanvas documentKind='dag' interactionMode='hand' />)
+      root.render(
+        <ReactFlowProvider>
+          <WorkflowCanvas documentKind='dag' interactionMode='hand' />
+        </ReactFlowProvider>
+      )
     })
 
     expect(renderedSurfaceProps()).toMatchObject({
@@ -63,5 +90,41 @@ describe('WorkflowCanvas interaction modes', () => {
       selectionKeyCode: 'Shift',
       selectionOnDrag: false,
     })
+  })
+
+  it('manually pans Ctrl-modified mouse drags rejected by d3-zoom', () => {
+    act(() => {
+      root.render(
+        <ReactFlowProvider>
+          <WorkflowCanvas documentKind='dag' interactionMode='cursor' />
+        </ReactFlowProvider>
+      )
+    })
+    const pane = container.querySelector<HTMLElement>('[data-testid="canvas-pane"]')
+    if (!pane) throw new Error('Canvas pane did not render')
+
+    const mouseDown = new MouseEvent('mousedown', {
+      bubbles: true,
+      button: 0,
+      cancelable: true,
+      clientX: 100,
+      clientY: 100,
+      ctrlKey: true,
+    })
+    act(() => pane.dispatchEvent(mouseDown))
+    act(() =>
+      window.dispatchEvent(
+        new MouseEvent('mousemove', { bubbles: true, clientX: 130, clientY: 120 })
+      )
+    )
+
+    expect(mouseDown.defaultPrevented).toBe(true)
+    expect(reactFlowViewportMock.setViewport).toHaveBeenLastCalledWith({
+      x: 40,
+      y: 40,
+      zoom: 1,
+    })
+
+    act(() => window.dispatchEvent(new MouseEvent('mouseup', { bubbles: true })))
   })
 })
