@@ -189,7 +189,7 @@ export function usePersistedDag(
     dag,
     error,
     fileId: planFile?.id,
-    isLoading: Boolean(workspaceId) && (!dag || filesQuery.isLoading || contentQuery.isLoading),
+    isLoading: Boolean(workspaceId) && !dag,
     isSaving: pendingWrites > 0,
     reset,
     updateDag,
