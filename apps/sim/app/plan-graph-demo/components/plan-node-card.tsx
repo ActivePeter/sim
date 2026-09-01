@@ -27,7 +27,6 @@ const PLAN_NODE_MAX_WIDTH = 560
 const PLAN_NODE_MAX_HEIGHT = 360
 
 export interface PlanNodeData {
-  canRemove: boolean
   issueUrl?: string
   item: ResolvedPlanItem
   onResize: (position: PlanPosition, size: PlanSize) => void
@@ -138,7 +137,6 @@ function DagNodeActionBar({ data }: { data: PlanNodeData }) {
               variant='ghost'
               aria-label={t('plan.node.deletePr')}
               className={cn(ACTION_BUTTON_STYLES, WORKFLOW_LAST_SWELL_ACTION_BUTTON_CLASSNAME)}
-              disabled={!data.canRemove}
               onPointerDown={(event) => event.stopPropagation()}
               onClick={(event) => {
                 event.stopPropagation()

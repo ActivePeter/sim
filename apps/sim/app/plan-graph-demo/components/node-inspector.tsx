@@ -55,7 +55,6 @@ const GITHUB_STATE_KEYS = {
 >
 
 interface NodeInspectorProps {
-  canRemoveItem: boolean
   dependencies: readonly PlanDependency[]
   item: ResolvedPlanItem
   items: readonly ResolvedPlanItem[]
@@ -64,6 +63,7 @@ interface NodeInspectorProps {
   onUpdateDependencyKind: (dependencyId: string, kind: PlanDependencyKind) => void
   onUpdateItem: (update: DagItemUpdate) => void
   repository: string
+  selectedItemCount: number
 }
 
 interface DetailRowProps {
@@ -133,7 +133,6 @@ function getNextDependencyKind(kind: PlanDependencyKind): PlanDependencyKind {
 }
 
 export function NodeInspector({
-  canRemoveItem,
   dependencies,
   item,
   items,
@@ -142,6 +141,7 @@ export function NodeInspector({
   onUpdateDependencyKind,
   onUpdateItem,
   repository,
+  selectedItemCount,
 }: NodeInspectorProps) {
   const { locale, t } = useI18n()
   const status = STATUS_BADGES[item.resolvedLifecycle]
@@ -541,13 +541,10 @@ export function NodeInspector({
         >
           {getActionLabel(item.resolvedLifecycle, !mergeDependenciesPassed, t)}
         </Badge>
-        <Chip
-          variant='destructive'
-          leftIcon={Trash}
-          disabled={!canRemoveItem}
-          onClick={onRemoveItem}
-        >
-          {t('plan.inspector.delete')}
+        <Chip variant='destructive' leftIcon={Trash} onClick={onRemoveItem}>
+          {selectedItemCount > 1
+            ? t('plan.inspector.deleteSelected', { count: selectedItemCount })
+            : t('plan.inspector.delete')}
         </Chip>
       </div>
     </aside>

@@ -589,22 +589,35 @@ export function updateDagItem(
   }
 }
 
-export function removeDagItem(document: DagDocument, itemId: string): DagDocument {
-  if (!document.items.some((item) => item.id === itemId)) return document
+export function removeDagItems(document: DagDocument, itemIds: readonly string[]): DagDocument {
+  const requestedItemIds = new Set(itemIds)
+  const existingItemIds = new Set(
+    document.items.filter((item) => requestedItemIds.has(item.id)).map((item) => item.id)
+  )
+  if (existingItemIds.size === 0) return document
+
   const positions = { ...document.positions }
   const sizes = { ...document.sizes }
-  delete positions[itemId]
-  delete sizes[itemId]
+  for (const itemId of existingItemIds) {
+    delete positions[itemId]
+    delete sizes[itemId]
+  }
+
   return {
     ...document,
     revision: document.revision + 1,
-    items: document.items.filter((item) => item.id !== itemId),
+    items: document.items.filter((item) => !existingItemIds.has(item.id)),
     dependencies: document.dependencies.filter(
-      (dependency) => dependency.source !== itemId && dependency.target !== itemId
+      (dependency) =>
+        !existingItemIds.has(dependency.source) && !existingItemIds.has(dependency.target)
     ),
     positions,
     sizes,
   }
+}
+
+export function removeDagItem(document: DagDocument, itemId: string): DagDocument {
+  return removeDagItems(document, [itemId])
 }
 
 export function wouldCreateDagCycle(

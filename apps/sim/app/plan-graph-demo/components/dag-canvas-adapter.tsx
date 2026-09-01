@@ -12,6 +12,7 @@ import {
   type NodeChange,
   type NodeMouseHandler,
   type NodeTypes,
+  type OnSelectionChangeFunc,
   type ReactFlowInstance,
   useReactFlow,
 } from 'reactflow'
@@ -31,7 +32,6 @@ import { PlanNodeCard, type PlanNodeData } from '@/app/plan-graph-demo/component
 import {
   DEFAULT_PLAN_NODE_SIZE,
   type PlanDependency,
-  type PlanItem,
   type PlanPosition,
   type PlanSize,
   type ResolvedPlanItem,
@@ -47,16 +47,18 @@ import { useSnapToGridSize } from '@/hooks/queries/general-settings'
 const DAG_NODE_TYPES: NodeTypes = { dagNode: PlanNodeCard }
 const DAG_EDGE_TYPES: EdgeTypes = { dagEdge: PlanEdge }
 const DAG_FIT_VIEW_OPTIONS = { ...reactFlowFitViewOptions, padding: 0.18 } as const
+const TEXT_ENTRY_SELECTOR =
+  'input, textarea, select, [contenteditable="true"], [role="textbox"], .cm-editor'
 
 interface DagCanvasAdapterProps {
   dependencies: readonly PlanDependency[]
-  items: readonly PlanItem[]
   onConnectItems: (sourceId: string, targetId: string) => void
   onItemResize: (itemId: string, position: PlanPosition, size: PlanSize) => void
   onPositionsChange: (positions: Record<string, PlanPosition>) => void
   onRemoveDependency: (dependencyId: string) => void
-  onRemoveItem: (itemId: string) => void
+  onRemoveItems: (itemIds: readonly string[]) => void
   onSelectItem: (itemId: string) => void
+  onSelectedItemsChange: (itemIds: readonly string[]) => void
   positions: Readonly<Record<string, PlanPosition>>
   repository: string
   resolvedItems: readonly ResolvedPlanItem[]
@@ -67,13 +69,13 @@ interface DagCanvasAdapterProps {
 /** Adapts DAG persistence to the complete flat-graph interaction contract used by Workflow. */
 export function DagCanvasAdapter({
   dependencies,
-  items,
   onConnectItems,
   onItemResize,
   onPositionsChange,
   onRemoveDependency,
-  onRemoveItem,
+  onRemoveItems,
   onSelectItem,
+  onSelectedItemsChange,
   positions,
   repository,
   resolvedItems,
@@ -96,6 +98,23 @@ export function DagCanvasAdapter({
     [snapToGridSize]
   )
 
+  const getSelectedItemIds = useCallback(
+    () =>
+      reactFlowInstance
+        .getNodes()
+        .filter((node) => node.selected)
+        .map((node) => node.id),
+    [reactFlowInstance]
+  )
+
+  const handleRemoveItem = useCallback(
+    (itemId: string) => {
+      const selectedItemIds = getSelectedItemIds()
+      onRemoveItems(selectedItemIds.includes(itemId) ? selectedItemIds : [itemId])
+    },
+    [getSelectedItemIds, onRemoveItems]
+  )
+
   const derivedNodes = useMemo<Node<PlanNodeData>[]>(
     () =>
       resolvedItems.map((item) => {
@@ -110,7 +129,6 @@ export function DagCanvasAdapter({
           style: { height: size.height, width: size.width },
           zIndex: BLOCK_Z_BASE,
           data: {
-            canRemove: items.length > 1,
             issueUrl:
               item.issue.url ??
               (item.issue.number === null
@@ -118,7 +136,7 @@ export function DagCanvasAdapter({
                 : `https://github.com/${artifactRepository}/issues/${item.issue.number}`),
             item,
             onResize: (position, nextSize) => onItemResize(item.id, position, nextSize),
-            onRemove: () => onRemoveItem(item.id),
+            onRemove: () => handleRemoveItem(item.id),
             onSelect: () => onSelectItem(item.id),
             pullRequestUrl:
               item.primaryPr.url ??
@@ -134,9 +152,8 @@ export function DagCanvasAdapter({
       }),
     [
       dependencies,
-      items.length,
+      handleRemoveItem,
       onItemResize,
-      onRemoveItem,
       onSelectItem,
       positions,
       repository,
@@ -321,6 +338,32 @@ export function DagCanvasAdapter({
     setSelectedEdgeIds(new Set())
   }, [])
 
+  const handleSelectionChange = useCallback<OnSelectionChangeFunc>(
+    ({ nodes }) => onSelectedItemsChange(nodes.map((node) => node.id)),
+    [onSelectedItemsChange]
+  )
+
+  useEffect(() => {
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (
+        event.defaultPrevented ||
+        event.repeat ||
+        (event.key !== 'Backspace' && event.key !== 'Delete')
+      ) {
+        return
+      }
+      if (event.target instanceof Element && event.target.closest(TEXT_ENTRY_SELECTOR)) return
+
+      const selectedItemIds = getSelectedItemIds()
+      if (selectedItemIds.length === 0) return
+      event.preventDefault()
+      onRemoveItems(selectedItemIds)
+    }
+
+    window.addEventListener('keydown', handleKeyDown, true)
+    return () => window.removeEventListener('keydown', handleKeyDown, true)
+  }, [getSelectedItemIds, onRemoveItems])
+
   const commitConnection = useCallback(
     (connection: { source: string | null; target: string | null }) => {
       if (!connection.source || !connection.target) return false
@@ -385,6 +428,7 @@ export function DagCanvasAdapter({
         onNodeClick={handleNodeClick}
         onEdgeClick={handleEdgeClick}
         onPaneClick={handlePaneClick}
+        onSelectionChange={handleSelectionChange}
         onNodeDragStart={onNodeDragStart}
         onNodeDragStop={onNodeDragStop}
         onSelectionDragStart={onSelectionDragStart}

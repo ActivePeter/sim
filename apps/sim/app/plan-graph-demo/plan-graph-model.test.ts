@@ -14,6 +14,7 @@ import {
   parseDagDocument,
   removeDagDependency,
   removeDagItem,
+  removeDagItems,
   resolvePlanItems,
   serializeDagDocument,
   updateDagDependencyKind,
@@ -143,6 +144,30 @@ describe('plan graph model', () => {
     expect(
       next.dependencies.some(
         (dependency) => dependency.source === 'PG-02' || dependency.target === 'PG-02'
+      )
+    ).toBe(false)
+  })
+
+  it('removes every selected DAG node in one revision', () => {
+    const dag = createDemoDag()
+    dag.sizes['PG-02'] = { height: 180, width: 320 }
+    dag.sizes['PG-03'] = { height: 200, width: 360 }
+
+    const next = removeDagItems(dag, ['PG-02', 'PG-03'])
+
+    expect(next.revision).toBe(dag.revision + 1)
+    expect(next.items.some((item) => item.id === 'PG-02' || item.id === 'PG-03')).toBe(false)
+    expect(next.positions['PG-02']).toBeUndefined()
+    expect(next.positions['PG-03']).toBeUndefined()
+    expect(next.sizes['PG-02']).toBeUndefined()
+    expect(next.sizes['PG-03']).toBeUndefined()
+    expect(
+      next.dependencies.some(
+        (dependency) =>
+          dependency.source === 'PG-02' ||
+          dependency.target === 'PG-02' ||
+          dependency.source === 'PG-03' ||
+          dependency.target === 'PG-03'
       )
     ).toBe(false)
   })

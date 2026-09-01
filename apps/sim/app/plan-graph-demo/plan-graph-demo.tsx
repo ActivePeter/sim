@@ -29,7 +29,7 @@ import {
   getPlanCounts,
   type PlanDependencyKind,
   removeDagDependency,
-  removeDagItem,
+  removeDagItems,
   resolvePlanItems,
   updateDagDependencyKind,
   updateDagItem,
@@ -57,10 +57,9 @@ interface DagDemoProps {
   workspaceId?: string
 }
 
-interface PendingDeletion {
-  id: string
-  kind: 'dependency' | 'item'
-}
+type PendingDeletion =
+  | { id: string; kind: 'dependency' }
+  | { itemIds: readonly string[]; kind: 'items' }
 
 export function DagDemo({ dagId = DEFAULT_DEMO_DAG_ID, workspaceId }: DagDemoProps = {}) {
   const { t } = useI18n()
@@ -70,6 +69,7 @@ export function DagDemo({ dagId = DEFAULT_DEMO_DAG_ID, workspaceId }: DagDemoPro
   )
   const githubSync = useGitHubReconciliation()
   const [selectedItemId, setSelectedItemId] = useState('PG-01')
+  const [selectedItemIds, setSelectedItemIds] = useState<readonly string[]>(['PG-01'])
   const [activities, setActivities] = useState<PlanActivity[]>([...INITIAL_ACTIVITIES])
   const [canvasRevision, setCanvasRevision] = useState(0)
   const [pendingDeletion, setPendingDeletion] = useState<PendingDeletion>()
@@ -81,6 +81,8 @@ export function DagDemo({ dagId = DEFAULT_DEMO_DAG_ID, workspaceId }: DagDemoPro
   const counts = getPlanCounts(resolvedItems)
   const selectedItem = resolvedItems.find((item) => item.id === selectedItemId) ?? resolvedItems[0]
   const nextReadyItem = dag ? getNextReadyItem(dag.items, dag.dependencies) : undefined
+  const pendingItemIds = pendingDeletion?.kind === 'items' ? pendingDeletion.itemIds : []
+  const pendingItemCount = pendingItemIds.length
 
   const prependActivity = useCallback((activity: PlanActivity) => {
     setActivities((current) => [activity, ...current].slice(0, 8))
@@ -91,6 +93,7 @@ export function DagDemo({ dagId = DEFAULT_DEMO_DAG_ID, workspaceId }: DagDemoPro
     const itemId = getNextDagItemId(dag.items)
     if (!updateDag((current) => addDagItem(current, itemId))) return
     setSelectedItemId(itemId)
+    setSelectedItemIds([itemId])
     prependActivity({
       id: generateShortId(),
       title: { key: 'plan.activity.addedTitle', values: { itemId } },
@@ -104,24 +107,54 @@ export function DagDemo({ dagId = DEFAULT_DEMO_DAG_ID, workspaceId }: DagDemoPro
     updateDag((current) => updateDagItem(current, itemId, update))
   }
 
-  function removeItem(itemId: string) {
-    if (!dag || dag.items.length <= 1) return
-    const nextSelectedItemId = dag.items.find((item) => item.id !== itemId)?.id
-    if (!updateDag((current) => removeDagItem(current, itemId))) return
-    setSelectedItemId((current) =>
-      current === itemId && nextSelectedItemId ? nextSelectedItemId : current
-    )
+  function removeItems(itemIds: readonly string[]) {
+    if (!dag) return
+    const requestedItemIds = new Set(itemIds)
+    const removedItemIds = dag.items
+      .filter((item) => requestedItemIds.has(item.id))
+      .map((item) => item.id)
+    if (removedItemIds.length === 0) return
+
+    const removedItemIdSet = new Set(removedItemIds)
+    const remainingItems = dag.items.filter((item) => !removedItemIdSet.has(item.id))
+    if (!updateDag((current) => removeDagItems(current, removedItemIds))) return
+
+    const nextSelectedItemId =
+      remainingItems.find((item) => item.id === selectedItemId)?.id ?? remainingItems[0]?.id ?? ''
+    setSelectedItemId(nextSelectedItemId)
+    setSelectedItemIds(nextSelectedItemId ? [nextSelectedItemId] : [])
     prependActivity({
       id: generateShortId(),
-      title: { key: 'plan.activity.removedTitle', values: { itemId } },
-      detail: { key: 'plan.activity.removedItemDetail' },
+      title: {
+        key: 'plan.activity.removedTitle',
+        values: { itemId: removedItemIds.join(', ') },
+      },
+      detail: {
+        key:
+          removedItemIds.length > 1
+            ? 'plan.activity.removedItemsDetail'
+            : 'plan.activity.removedItemDetail',
+      },
       kind: 'plan',
       time: { key: 'common.now' },
     })
   }
 
-  const handleRemoveItem = useCallback((itemId: string) => {
-    setPendingDeletion({ id: itemId, kind: 'item' })
+  const handleRemoveItems = useCallback((itemIds: readonly string[]) => {
+    const uniqueItemIds = [...new Set(itemIds)]
+    if (uniqueItemIds.length > 0) setPendingDeletion({ itemIds: uniqueItemIds, kind: 'items' })
+  }, [])
+
+  const handleSelectedItemsChange = useCallback((itemIds: readonly string[]) => {
+    setSelectedItemIds((current) => {
+      if (
+        current.length === itemIds.length &&
+        current.every((itemId, index) => itemId === itemIds[index])
+      ) {
+        return current
+      }
+      return [...itemIds]
+    })
   }, [])
 
   const handleConnectItems = useCallback(
@@ -179,7 +212,7 @@ export function DagDemo({ dagId = DEFAULT_DEMO_DAG_ID, workspaceId }: DagDemoPro
 
   function confirmDeletion() {
     if (!pendingDeletion) return
-    if (pendingDeletion.kind === 'item') removeItem(pendingDeletion.id)
+    if (pendingDeletion.kind === 'items') removeItems(pendingDeletion.itemIds)
     else removeDependency(pendingDeletion.id)
     setPendingDeletion(undefined)
   }
@@ -252,11 +285,12 @@ export function DagDemo({ dagId = DEFAULT_DEMO_DAG_ID, workspaceId }: DagDemoPro
   function handleReset() {
     reset()
     setSelectedItemId('PG-01')
+    setSelectedItemIds(['PG-01'])
     setActivities([...INITIAL_ACTIVITIES])
     setCanvasRevision((current) => current + 1)
   }
 
-  if (isLoading || !dag || !selectedItem) {
+  if (isLoading || !dag) {
     return (
       <div className='flex h-full items-center justify-center bg-[var(--bg)] text-[var(--text-muted)] text-sm'>
         {error ?? t('plan.loading')}
@@ -292,17 +326,25 @@ export function DagDemo({ dagId = DEFAULT_DEMO_DAG_ID, workspaceId }: DagDemoPro
         className='min-h-0 flex-1'
         bottomPanel={<ActivityPanel activities={activities} persistent={Boolean(fileId)} />}
         sidePanel={
-          <NodeInspector
-            dependencies={dag.dependencies}
-            item={selectedItem}
-            items={resolvedItems}
-            onRemoveDependency={handleRemoveDependency}
-            onRemoveItem={() => handleRemoveItem(selectedItem.id)}
-            onUpdateDependencyKind={handleUpdateDependencyKind}
-            onUpdateItem={(update) => handleUpdateItem(selectedItem.id, update)}
-            canRemoveItem={dag.items.length > 1}
-            repository={dag.repository}
-          />
+          selectedItem ? (
+            <NodeInspector
+              dependencies={dag.dependencies}
+              item={selectedItem}
+              items={resolvedItems}
+              onRemoveDependency={handleRemoveDependency}
+              onRemoveItem={() =>
+                handleRemoveItems(
+                  selectedItemIds.includes(selectedItem.id) ? selectedItemIds : [selectedItem.id]
+                )
+              }
+              onUpdateDependencyKind={handleUpdateDependencyKind}
+              onUpdateItem={(update) => handleUpdateItem(selectedItem.id, update)}
+              repository={dag.repository}
+              selectedItemCount={
+                selectedItemIds.includes(selectedItem.id) ? selectedItemIds.length : 1
+              }
+            />
+          ) : undefined
         }
       >
         <section className='flex min-h-0 min-w-0 flex-1 flex-col'>
@@ -324,15 +366,15 @@ export function DagDemo({ dagId = DEFAULT_DEMO_DAG_ID, workspaceId }: DagDemoPro
               <DagCanvasAdapter
                 key={canvasRevision}
                 dependencies={dag.dependencies}
-                items={dag.items}
                 onConnectItems={handleConnectItems}
                 onItemResize={handleItemResize}
                 onPositionsChange={handlePositionsChange}
                 onRemoveDependency={handleRemoveDependency}
-                onRemoveItem={handleRemoveItem}
+                onRemoveItems={handleRemoveItems}
                 resolvedItems={resolvedItems}
                 selectedItemId={selectedItemId}
                 onSelectItem={setSelectedItemId}
+                onSelectedItemsChange={handleSelectedItemsChange}
                 positions={dag.positions}
                 repository={dag.repository}
                 sizes={dag.sizes}
@@ -351,26 +393,37 @@ export function DagDemo({ dagId = DEFAULT_DEMO_DAG_ID, workspaceId }: DagDemoPro
         title={
           pendingDeletion?.kind === 'dependency'
             ? t('plan.confirm.removeDependency')
-            : t('plan.confirm.deleteNode')
+            : pendingItemCount > 1
+              ? t('plan.confirm.deleteNodes')
+              : t('plan.confirm.deleteNode')
         }
         text={
           pendingDeletion?.kind === 'dependency'
             ? t('plan.confirm.removeDependencyPrompt')
-            : [
-                t('plan.confirm.deletePrompt'),
-                { text: pendingDeletion?.id ?? t('plan.confirm.deleteNode'), bold: true },
-                '? ',
-                {
-                  text: t('plan.confirm.deleteDetail'),
-                  error: true,
-                },
-              ]
+            : pendingItemCount > 1
+              ? [
+                  t('plan.confirm.deleteSelectionPrompt', { count: pendingItemCount }),
+                  { text: pendingItemIds.join(', '), bold: true },
+                  ' — ',
+                  { text: t('plan.confirm.deleteSelectionDetail'), error: true },
+                ]
+              : [
+                  t('plan.confirm.deletePrompt'),
+                  { text: pendingItemIds[0] ?? t('plan.confirm.deleteNode'), bold: true },
+                  '? ',
+                  {
+                    text: t('plan.confirm.deleteDetail'),
+                    error: true,
+                  },
+                ]
         }
         confirm={{
           label:
             pendingDeletion?.kind === 'dependency'
               ? t('plan.confirm.remove')
-              : t('plan.inspector.delete'),
+              : pendingItemCount > 1
+                ? t('plan.inspector.deleteSelected', { count: pendingItemCount })
+                : t('plan.inspector.delete'),
           onClick: confirmDeletion,
         }}
       />
