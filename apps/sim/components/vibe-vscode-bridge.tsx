@@ -2,6 +2,12 @@
 
 import { useEffect } from 'react'
 import { useI18n } from '@/lib/i18n'
+import {
+  parseVibeVscodeSurface,
+  publicVibeVscodePath,
+  VIBE_VSCODE_SURFACE_PARAM,
+  withVibeVscodeSurface,
+} from '@/lib/vibe-vscode/surface'
 
 const HOST_SOURCE = 'vibe-vscode'
 const SIM_SOURCE = 'sim'
@@ -112,8 +118,9 @@ function isHostContext(value: unknown): value is VibeVscodeHostContext {
   return true
 }
 
-function readBridgeToken(): string | undefined {
+function readBridgeToken(surface: ReturnType<typeof parseVibeVscodeSurface>): string | undefined {
   const url = new URL(window.location.href)
+  const storageKey = `${TOKEN_STORAGE_KEY}:${surface ?? 'default'}`
   let hashToken: string | undefined
   if (url.hash.startsWith(TOKEN_HASH_PREFIX)) {
     try {
@@ -121,14 +128,20 @@ function readBridgeToken(): string | undefined {
     } catch {}
   }
   if (hashToken) {
-    window.sessionStorage.setItem(TOKEN_STORAGE_KEY, hashToken)
+    window.sessionStorage.setItem(storageKey, hashToken)
     return hashToken
   }
-  return window.sessionStorage.getItem(TOKEN_STORAGE_KEY)?.trim() || undefined
+  return window.sessionStorage.getItem(storageKey)?.trim() || undefined
 }
 
 function isSafeNavigationPath(value: unknown): value is string {
   return typeof value === 'string' && value.startsWith('/') && !value.startsWith('//')
+}
+
+function toSameOriginNavigationPath(value: string): string | null {
+  const url = new URL(value, window.location.href)
+  if (url.origin !== window.location.origin || !isSafeNavigationPath(url.pathname)) return null
+  return publicVibeVscodePath(url)
 }
 
 /** Connects the original Sim application surface to its trusted Vibe VS Code editor host. */
@@ -137,7 +150,9 @@ export function VibeVscodeBridge() {
 
   useEffect(() => {
     if (window.parent === window) return
-    const token = readBridgeToken()
+    const initialUrl = new URL(window.location.href)
+    const surface = parseVibeVscodeSurface(initialUrl.searchParams.get(VIBE_VSCODE_SURFACE_PARAM))
+    const token = readBridgeToken(surface)
     if (!token) return
 
     let hostContext: VibeVscodeHostContext | undefined
@@ -147,11 +162,33 @@ export function VibeVscodeBridge() {
       window.parent.postMessage({ source: SIM_SOURCE, token, type, payload }, hostOrigin)
     }
     const publishRoute = () => {
-      const route = new URL(window.location.href)
-      if (route.hash.startsWith(TOKEN_HASH_PREFIX)) route.hash = ''
       postToHost('routeChanged', {
-        path: `${route.pathname}${route.search}${route.hash}`,
+        path: publicVibeVscodePath(new URL(window.location.href)),
+        userInitiated: Date.now() <= userNavigationDeadline,
       })
+    }
+    const preserveSurface = (url: string | URL | null | undefined) => {
+      if (!surface || url === undefined || url === null) return url
+      const target = new URL(url.toString(), window.location.href)
+      if (target.origin !== window.location.origin) return url
+      return withVibeVscodeSurface(`${target.pathname}${target.search}${target.hash}`, surface)
+    }
+    let userNavigationDeadline = 0
+    const clickListener = (event: MouseEvent) => {
+      if (event.button !== 0) return
+      if (surface === 'sidebar') userNavigationDeadline = Date.now() + 1000
+      if (event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return
+      const target = event.target
+      if (!(target instanceof Element)) return
+      const anchor = target.closest<HTMLAnchorElement>('a[href]')
+      if (!anchor || anchor.target === '_blank' || anchor.hasAttribute('download')) return
+      const path = toSameOriginNavigationPath(anchor.href)
+      if (!path) return
+
+      const embeddedHref = new URL(withVibeVscodeSurface(path, surface), window.location.origin)
+      embeddedHref.hash = `_vscodeEmbed=${encodeURIComponent(token)}`
+      anchor.href = embeddedHref.toString()
+      if (surface === 'sidebar') postToHost('openEditor', { path })
     }
     const messageListener = (event: MessageEvent<unknown>) => {
       if (event.source !== window.parent || !isHostBridgeMessage(event.data, token)) return
@@ -167,7 +204,9 @@ export function VibeVscodeBridge() {
       }
       if (event.data.type === 'navigate' && isRecord(event.data.payload)) {
         const path = event.data.payload.path
-        if (isSafeNavigationPath(path)) window.location.assign(path)
+        if (isSafeNavigationPath(path)) {
+          window.location.assign(withVibeVscodeSurface(path, surface))
+        }
         return
       }
       if (event.data.type === 'ping') postToHost('ready', { path: window.location.pathname })
@@ -176,11 +215,11 @@ export function VibeVscodeBridge() {
     const originalPushState = window.history.pushState.bind(window.history)
     const originalReplaceState = window.history.replaceState.bind(window.history)
     window.history.pushState = (...args) => {
-      originalPushState(...args)
+      originalPushState(args[0], args[1], preserveSurface(args[2]))
       publishRoute()
     }
     window.history.replaceState = (...args) => {
-      originalReplaceState(...args)
+      originalReplaceState(args[0], args[1], preserveSurface(args[2]))
       publishRoute()
     }
 
@@ -194,16 +233,25 @@ export function VibeVscodeBridge() {
     }
 
     window.addEventListener('message', messageListener)
+    window.addEventListener('click', clickListener, true)
     window.addEventListener('popstate', publishRoute)
     window.addEventListener('hashchange', publishRoute)
     postToHost('ready', {
       path: window.location.pathname,
-      capabilities: ['context', 'openFile', 'openDiff', 'openTerminal', 'openExternal'],
+      capabilities: [
+        'context',
+        'openEditor',
+        'openFile',
+        'openDiff',
+        'openTerminal',
+        'openExternal',
+      ],
     })
     publishRoute()
 
     return () => {
       window.removeEventListener('message', messageListener)
+      window.removeEventListener('click', clickListener, true)
       window.removeEventListener('popstate', publishRoute)
       window.removeEventListener('hashchange', publishRoute)
       window.history.pushState = originalPushState

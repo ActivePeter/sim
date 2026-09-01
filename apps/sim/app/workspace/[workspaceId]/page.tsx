@@ -1,5 +1,10 @@
 import { redirect } from 'next/navigation'
 import { isChatEnabled } from '@/lib/core/config/env-flags'
+import {
+  parseVibeVscodeSurface,
+  VIBE_VSCODE_SURFACE_PARAM,
+  withVibeVscodeSurface,
+} from '@/lib/vibe-vscode/surface'
 
 /**
  * Resolves the workspace landing route: the chat composer, or `/w`, which
@@ -12,9 +17,16 @@ import { isChatEnabled } from '@/lib/core/config/env-flags'
  */
 export default async function WorkspacePage({
   params,
+  searchParams,
 }: {
   params: Promise<{ workspaceId: string }>
+  searchParams: Promise<Record<string, string | string[] | undefined>>
 }) {
   const { workspaceId } = await params
-  redirect(`/workspace/${workspaceId}/${isChatEnabled ? 'home' : 'w'}`)
+  const query = await searchParams
+  const rawSurface = query[VIBE_VSCODE_SURFACE_PARAM]
+  const surface = parseVibeVscodeSurface(Array.isArray(rawSurface) ? rawSurface[0] : rawSurface)
+  redirect(
+    withVibeVscodeSurface(`/workspace/${workspaceId}/${isChatEnabled ? 'home' : 'w'}`, surface)
+  )
 }

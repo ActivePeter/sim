@@ -3,8 +3,13 @@
 import { useEffect } from 'react'
 import { Chip } from '@sim/emcn'
 import { createLogger } from '@sim/logger'
-import { useParams, useRouter } from 'next/navigation'
+import { useParams, useRouter, useSearchParams } from 'next/navigation'
 import { ReactFlowProvider } from 'reactflow'
+import {
+  parseVibeVscodeSurface,
+  VIBE_VSCODE_SURFACE_PARAM,
+  withVibeVscodeSurface,
+} from '@/lib/vibe-vscode/surface'
 import { useUserPermissionsContext } from '@/app/workspace/[workspaceId]/providers/workspace-permissions-provider'
 import { Panel, Terminal } from '@/app/workspace/[workspaceId]/w/[workflowId]/components'
 import { useWorkflowOperations } from '@/app/workspace/[workspaceId]/w/components/sidebar/hooks'
@@ -30,7 +35,9 @@ function Spinner() {
 export default function WorkflowsPage() {
   const router = useRouter()
   const params = useParams()
+  const searchParams = useSearchParams()
   const workspaceId = params.workspaceId as string
+  const vibeVscodeSurface = parseVibeVscodeSurface(searchParams.get(VIBE_VSCODE_SURFACE_PARAM))
 
   const { data: workflows = [], isLoading, isError, isPlaceholderData } = useWorkflows(workspaceId)
   const { handleCreateWorkflow, isCreatingWorkflow } = useWorkflowOperations({ workspaceId })
@@ -51,9 +58,11 @@ export default function WorkflowsPage() {
     }
 
     if (firstWorkflowId) {
-      router.replace(`/workspace/${workspaceId}/w/${firstWorkflowId}`)
+      router.replace(
+        withVibeVscodeSurface(`/workspace/${workspaceId}/w/${firstWorkflowId}`, vibeVscodeSurface)
+      )
     }
-  }, [isResolving, isError, firstWorkflowId, workspaceId, router])
+  }, [isResolving, isError, firstWorkflowId, workspaceId, router, vibeVscodeSurface])
 
   /**
    * A workspace can legitimately reach zero workflows — deleting the last one,

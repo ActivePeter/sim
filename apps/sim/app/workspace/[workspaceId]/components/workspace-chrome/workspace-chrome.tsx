@@ -3,8 +3,9 @@
 import { useEffect, useLayoutEffect, useRef, useState } from 'react'
 import { cn } from '@sim/emcn'
 import { ArrowLeft, ArrowRight, PanelLeft } from '@sim/emcn/icons'
-import { usePathname } from 'next/navigation'
+import { usePathname, useSearchParams } from 'next/navigation'
 import { getDesktopBridge } from '@/lib/desktop'
+import { parseVibeVscodeSurface, VIBE_VSCODE_SURFACE_PARAM } from '@/lib/vibe-vscode/surface'
 import { applyDesktopTitleBarMode, type DesktopTitleBarMode } from '@/app/_shell/desktop-title-bar'
 import { useSidebarPeek } from '@/app/workspace/[workspaceId]/components/workspace-chrome/use-sidebar-peek'
 import { Sidebar, SidebarTooltip } from '@/app/workspace/[workspaceId]/w/components/sidebar/sidebar'
@@ -179,7 +180,32 @@ function isFullscreenPath(pathname: string | null): boolean {
  * re-points `--sidebar-width` at the restore width. The sidebar is never re-mounted
  * or duplicated for this — see {@link useSidebarPeek}.
  */
-export function WorkspaceChrome({
+export function WorkspaceChrome({ children, initialSidebarCollapsed }: WorkspaceChromeProps) {
+  const searchParams = useSearchParams()
+  const surface = parseVibeVscodeSurface(searchParams.get(VIBE_VSCODE_SURFACE_PARAM))
+
+  if (surface === 'sidebar') {
+    return (
+      <div className='min-h-0 flex-1 overflow-hidden bg-[var(--surface-1)]'>
+        <Sidebar isCollapsed={false} isPeeking fixedExpanded />
+      </div>
+    )
+  }
+
+  if (surface === 'editor') {
+    return (
+      <div className='flex min-h-0 w-full flex-1 overflow-hidden bg-[var(--bg)]'>{children}</div>
+    )
+  }
+
+  return (
+    <DefaultWorkspaceChrome initialSidebarCollapsed={initialSidebarCollapsed}>
+      {children}
+    </DefaultWorkspaceChrome>
+  )
+}
+
+function DefaultWorkspaceChrome({
   children,
   initialSidebarCollapsed = false,
 }: WorkspaceChromeProps) {

@@ -401,14 +401,17 @@ interface SidebarProps {
    * fight the card's width.
    */
   isPeeking?: boolean
+  /** Keeps host-projected sidebars expanded because their container owns collapsing. */
+  fixedExpanded?: boolean
 }
 
 export const Sidebar = memo(function Sidebar({
   isCollapsed: isCollapsedProp,
   isPeeking = false,
+  fixedExpanded = false,
 }: SidebarProps) {
   /** The peek card always renders the expanded layout, whatever the rail's state. */
-  const isCollapsed = isCollapsedProp && !isPeeking
+  const isCollapsed = isCollapsedProp && !isPeeking && !fixedExpanded
   const params = useParams()
   const workspaceId = params.workspaceId as string
   const workflowId = params.workflowId as string | undefined
@@ -1426,7 +1429,9 @@ export const Sidebar = memo(function Sidebar({
                   'flex h-[30px] items-center gap-[1px] overflow-hidden transition-all duration-200 [transition-timing-function:cubic-bezier(0.25,0.1,0.25,1)]',
                   isCollapsed
                     ? 'w-0 opacity-0'
-                    : 'w-[65px] [[data-sim-desktop-title-bar=inset]_&]:w-[32px]'
+                    : fixedExpanded
+                      ? 'w-[32px]'
+                      : 'w-[65px] [[data-sim-desktop-title-bar=inset]_&]:w-[32px]'
                 )}
               >
                 <SidebarTooltip
@@ -1445,23 +1450,25 @@ export const Sidebar = memo(function Sidebar({
                     className={DRAG_EXEMPT_CLASS}
                   />
                 </SidebarTooltip>
-                <SidebarTooltip
-                  label={t('sidebar.collapse')}
-                  enabled={!isCollapsed}
-                  side='bottom'
-                  shortcut={isMac ? '⌘B' : 'Ctrl+B'}
-                >
-                  <Chip
-                    leftIcon={PanelLeft}
-                    aria-label={t('sidebar.collapse')}
-                    onClick={toggleCollapsed}
-                    tabIndex={isCollapsed ? -1 : undefined}
-                    className={cn(
-                      DRAG_EXEMPT_CLASS,
-                      '[[data-sim-desktop-title-bar=inset]_&]:hidden'
-                    )}
-                  />
-                </SidebarTooltip>
+                {!fixedExpanded && (
+                  <SidebarTooltip
+                    label={t('sidebar.collapse')}
+                    enabled={!isCollapsed}
+                    side='bottom'
+                    shortcut={isMac ? '⌘B' : 'Ctrl+B'}
+                  >
+                    <Chip
+                      leftIcon={PanelLeft}
+                      aria-label={t('sidebar.collapse')}
+                      onClick={toggleCollapsed}
+                      tabIndex={isCollapsed ? -1 : undefined}
+                      className={cn(
+                        DRAG_EXEMPT_CLASS,
+                        '[[data-sim-desktop-title-bar=inset]_&]:hidden'
+                      )}
+                    />
+                  </SidebarTooltip>
+                )}
               </div>
             </div>
 
