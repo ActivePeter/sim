@@ -5,7 +5,7 @@ import { useI18n } from '@/lib/i18n'
 
 const HOST_SOURCE = 'vibe-vscode'
 const SIM_SOURCE = 'sim'
-const TOKEN_QUERY_PARAMETER = '_vscodeEmbed'
+const TOKEN_HASH_PREFIX = '#_vscodeEmbed='
 const TOKEN_STORAGE_KEY = 'vibe-vscode-bridge-token'
 
 interface VibeVscodeSelection {
@@ -65,10 +65,16 @@ function isHostContext(value: unknown): value is VibeVscodeHostContext {
 }
 
 function readBridgeToken(): string | undefined {
-  const queryToken = new URL(window.location.href).searchParams.get(TOKEN_QUERY_PARAMETER)?.trim()
-  if (queryToken) {
-    window.sessionStorage.setItem(TOKEN_STORAGE_KEY, queryToken)
-    return queryToken
+  const url = new URL(window.location.href)
+  let hashToken: string | undefined
+  if (url.hash.startsWith(TOKEN_HASH_PREFIX)) {
+    try {
+      hashToken = decodeURIComponent(url.hash.slice(TOKEN_HASH_PREFIX.length)).trim()
+    } catch {}
+  }
+  if (hashToken) {
+    window.sessionStorage.setItem(TOKEN_STORAGE_KEY, hashToken)
+    return hashToken
   }
   return window.sessionStorage.getItem(TOKEN_STORAGE_KEY)?.trim() || undefined
 }
@@ -94,7 +100,7 @@ export function VibeVscodeBridge() {
     }
     const publishRoute = () => {
       const route = new URL(window.location.href)
-      route.searchParams.delete(TOKEN_QUERY_PARAMETER)
+      if (route.hash.startsWith(TOKEN_HASH_PREFIX)) route.hash = ''
       postToHost('routeChanged', {
         path: `${route.pathname}${route.search}${route.hash}`,
       })
