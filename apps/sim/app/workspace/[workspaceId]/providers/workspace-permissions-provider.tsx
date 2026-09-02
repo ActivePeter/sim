@@ -1,11 +1,12 @@
 'use client'
 
 import type React from 'react'
-import { createContext, useCallback, useContext, useEffect, useMemo, useRef } from 'react'
+import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from 'react'
 import { useToast } from '@sim/emcn'
 import { createLogger } from '@sim/logger'
 import { useQueryClient } from '@tanstack/react-query'
 import { useParams } from 'next/navigation'
+import { isVibeVscodeEmbeddedUrl } from '@/lib/vibe-vscode/surface'
 import { useSocket } from '@/app/workspace/providers/socket-provider'
 import {
   useWorkspacePermissionsQuery,
@@ -124,6 +125,11 @@ export function WorkspacePermissionsProvider({ children }: WorkspacePermissionsP
 
   const hasOperationError = useOperationQueueStore((state) => state.hasOperationError)
   const { isReconnecting, isRetryingWorkflowJoin, blockedJoinWorkflowId } = useSocket()
+  const [isVibeVscodeEmbedded, setIsVibeVscodeEmbedded] = useState(false)
+
+  useEffect(() => {
+    setIsVibeVscodeEmbedded(isVibeVscodeEmbeddedUrl(new URL(window.location.href)))
+  }, [])
 
   const isOfflineMode = hasOperationError
   const isJoinBlocked = Boolean(blockedJoinWorkflowId) && blockedJoinWorkflowId === urlWorkflowId
@@ -133,7 +139,7 @@ export function WorkspacePermissionsProvider({ children }: WorkspacePermissionsP
   })
   const realtimeStatusMessage = isOfflineMode
     ? null
-    : showReconnecting
+    : showReconnecting && !isVibeVscodeEmbedded
       ? 'Reconnecting...'
       : isRetryingWorkflowJoin
         ? 'Joining workflow...'

@@ -5,13 +5,13 @@ import { useI18n } from '@/lib/i18n'
 import {
   parseVibeVscodeSurface,
   publicVibeVscodePath,
+  VIBE_VSCODE_EMBED_HASH_PREFIX,
   VIBE_VSCODE_SURFACE_PARAM,
   withVibeVscodeSurface,
 } from '@/lib/vibe-vscode/surface'
 
 const HOST_SOURCE = 'vibe-vscode'
 const SIM_SOURCE = 'sim'
-const TOKEN_HASH_PREFIX = '#_vscodeEmbed='
 const TOKEN_STORAGE_KEY = 'vibe-vscode-bridge-token'
 
 interface VibeVscodeSelection {
@@ -122,9 +122,9 @@ function readBridgeToken(surface: ReturnType<typeof parseVibeVscodeSurface>): st
   const url = new URL(window.location.href)
   const storageKey = `${TOKEN_STORAGE_KEY}:${surface ?? 'default'}`
   let hashToken: string | undefined
-  if (url.hash.startsWith(TOKEN_HASH_PREFIX)) {
+  if (url.hash.startsWith(VIBE_VSCODE_EMBED_HASH_PREFIX)) {
     try {
-      hashToken = decodeURIComponent(url.hash.slice(TOKEN_HASH_PREFIX.length)).trim()
+      hashToken = decodeURIComponent(url.hash.slice(VIBE_VSCODE_EMBED_HASH_PREFIX.length)).trim()
     } catch {}
   }
   if (hashToken) {
@@ -186,7 +186,7 @@ export function VibeVscodeBridge() {
       if (!path) return
 
       const embeddedHref = new URL(withVibeVscodeSurface(path, surface), window.location.origin)
-      embeddedHref.hash = `_vscodeEmbed=${encodeURIComponent(token)}`
+      embeddedHref.hash = `${VIBE_VSCODE_EMBED_HASH_PREFIX.slice(1)}${encodeURIComponent(token)}`
       anchor.href = embeddedHref.toString()
       if (surface === 'sidebar') postToHost('openEditor', { path })
     }
