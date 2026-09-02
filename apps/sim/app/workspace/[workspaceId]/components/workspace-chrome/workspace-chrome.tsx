@@ -186,8 +186,8 @@ export function WorkspaceChrome({ children, initialSidebarCollapsed }: Workspace
 
   if (surface === 'sidebar') {
     return (
-      <div className='min-h-0 flex-1 overflow-hidden bg-[var(--surface-1)]'>
-        <Sidebar isCollapsed={false} isPeeking fixedExpanded />
+      <div className='flex min-h-0 w-full flex-1 overflow-hidden bg-[var(--surface-1)]'>
+        <Sidebar isCollapsed={false} fixedExpanded />
       </div>
     )
   }

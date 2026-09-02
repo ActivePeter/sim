@@ -401,7 +401,7 @@ interface SidebarProps {
    * fight the card's width.
    */
   isPeeking?: boolean
-  /** Keeps host-projected sidebars expanded because their container owns collapsing. */
+  /** Makes a host-projected sidebar fill its container and disables standalone window chrome. */
   fixedExpanded?: boolean
 }
 
@@ -1357,16 +1357,24 @@ export const Sidebar = memo(function Sidebar({
         className='hidden'
         onChange={handleImportFileChange}
       />
-      <div className='relative h-full'>
+      <div
+        className={cn(
+          'relative h-full',
+          fixedExpanded && 'w-full min-w-0 overflow-hidden [--sidebar-width:100%]'
+        )}
+      >
         <aside
-          className='group/rail sidebar-container relative h-full overflow-hidden bg-[var(--surface-1)] [&_.group.cursor-pointer]:duration-0'
+          className={cn(
+            'group/rail sidebar-container relative h-full overflow-hidden bg-[var(--surface-1)] [&_.group.cursor-pointer]:duration-0',
+            fixedExpanded && 'max-w-full'
+          )}
           data-collapsed={isCollapsed || undefined}
           aria-label={t('sidebar.workspaceAria')}
           onClick={handleSidebarClick}
         >
           <div className='flex h-full flex-col'>
-            {/* The peek card already sits below the lane; reserving it again doubles the offset. */}
-            {!isPeeking && (
+            {/* Floating and host-projected sidebars already sit below their owner's chrome. */}
+            {!isPeeking && !fixedExpanded && (
               <div
                 aria-hidden
                 className='desktop-window-drag-region desktop-workspace-window-drag-region h-[var(--desktop-title-bar-height)]'
@@ -1376,6 +1384,7 @@ export const Sidebar = memo(function Sidebar({
               className={cn(
                 'relative flex flex-shrink-0 items-center px-2 pt-3',
                 !isPeeking &&
+                  !fixedExpanded &&
                   '[[data-sim-desktop-title-bar=inset]_&]:pt-[var(--desktop-title-bar-height)]'
               )}
             >
@@ -1916,9 +1925,8 @@ export const Sidebar = memo(function Sidebar({
           </div>
         </aside>
 
-        {/* Not on the peek card: the resize hook writes an inline `--sidebar-width` that
-            out-specifies the `[data-peek]` rule, stranding the card at a stale width. */}
-        {!isPeeking && (
+        {/* Floating and host-projected sidebars are sized by their outer container. */}
+        {!isPeeking && !fixedExpanded && (
           <div
             className={cn(
               'absolute top-0 right-0 bottom-0 z-20 w-[8px] translate-x-1/2',
