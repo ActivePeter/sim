@@ -259,6 +259,26 @@ export function NodeInspector({
               />
             </div>
             <div>
+              <label
+                className='mb-1 flex items-center gap-1.5 text-[10px] text-[var(--text-muted)]'
+                htmlFor={`${item.id}-local-repository-path`}
+              >
+                <FolderCode className='size-3 text-[var(--text-icon)]' />
+                {t('plan.inspector.localRepositoryPath')}
+              </label>
+              <ChipInput
+                key={`${item.id}-local-repository-path-${item.localRepositoryPath ?? ''}`}
+                id={`${item.id}-local-repository-path`}
+                inputClassName='font-mono'
+                placeholder={t('plan.inspector.localRepositoryPathPlaceholder')}
+                defaultValue={item.localRepositoryPath ?? ''}
+                onBlur={(event) => {
+                  const localRepositoryPath = event.currentTarget.value.trim()
+                  onUpdateItem({ localRepositoryPath: localRepositoryPath || null })
+                }}
+              />
+            </div>
+            <div>
               <div className='mb-1 flex items-center justify-between gap-2'>
                 <label
                   className='flex items-center gap-1.5 text-[10px] text-[var(--text-muted)]'

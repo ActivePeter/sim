@@ -29,11 +29,15 @@ Read the selected node's objective, dependencies, interfaces, expected paths, an
 
 ## Claim and provision
 
-From the canonical repository checkout, atomically claim a node and create its worktree:
+Atomically claim a node and create its worktree. The script uses the node's configured local
+repository path, falling back to the current checkout when it is not set:
 
 ```bash
 bun .agents/skills/plan-node/scripts/plan-node.ts claim --node PG-02 --agent codex-02
 ```
+
+Use `--repo-root <path>` only to explicitly override the configured path for this attempt. A
+successful claim records the resolved repository root and the provisioned worktree on the node.
 
 To bind a worktree and branch that already exist:
 

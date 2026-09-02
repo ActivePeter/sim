@@ -42,6 +42,7 @@ interface PlanItem {
   execution?: PlanExecution
   id: string
   lifecycle: 'active' | 'done' | 'planned' | 'review'
+  localRepositoryPath?: string
   repository?: string
   primaryPr: {
     checks: 'Failed' | 'Passed' | 'Pending' | 'Running'
@@ -284,7 +285,9 @@ async function claimNode(args: {
     fail(`Plan node ${nodeId} is not ready; inspect its dependencies or active lease`)
   }
 
-  const repositoryRoot = resolve(stringOption(args.options, 'repo-root') ?? process.cwd())
+  const repositoryRoot = resolve(
+    stringOption(args.options, 'repo-root') ?? node.localRepositoryPath ?? process.cwd()
+  )
   runGit(repositoryRoot, ['rev-parse', '--show-toplevel'])
   runGit(repositoryRoot, ['fetch', args.document.remote, args.document.defaultBranch])
   const baseSha = runGit(repositoryRoot, [
@@ -315,6 +318,7 @@ async function claimNode(args: {
   if (!claimedNode) fail(`Plan node ${nodeId} disappeared during claim preparation`)
   claimedNode.lifecycle = 'active'
   claimedNode.agent = agent
+  claimedNode.localRepositoryPath = repositoryRoot
   claimedNode.execution = {
     attemptId,
     sessionId,
@@ -370,6 +374,7 @@ async function claimNode(args: {
       `Attempt: ${attemptId}`,
       `Session: ${sessionId}`,
       `Fencing token: ${fencingToken}`,
+      `Repository root: ${repositoryRoot}`,
       `Worktree: ${worktree}`,
       `Branch: ${branch}`,
       `Base: ${baseSha}`,

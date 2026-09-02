@@ -30,6 +30,7 @@ const CLAIM: PlanClaimInput = {
   baseSha: 'abc1234',
   claimedAt: '2026-08-31T00:00:00.000Z',
   expiresAt: '2026-08-31T01:00:00.000Z',
+  repositoryRoot: '/repos/sim',
 }
 
 describe('plan graph model', () => {
@@ -87,10 +88,12 @@ describe('plan graph model', () => {
     const withItem = addDagItem(dag, itemId)
     const updated = updateDagItem(withItem, itemId, {
       title: 'Editable DAG node',
+      localRepositoryPath: '/repos/editable-dag-node',
       issueNumber: 42,
       primaryPrNumber: 84,
     })
     const cleared = updateDagItem(updated, itemId, {
+      localRepositoryPath: null,
       issueNumber: null,
       primaryPrNumber: null,
     })
@@ -98,6 +101,7 @@ describe('plan graph model', () => {
     expect(itemId).toBe('PG-08')
     expect(updated.items.find((item) => item.id === itemId)).toMatchObject({
       title: 'Editable DAG node',
+      localRepositoryPath: '/repos/editable-dag-node',
       issue: { number: 42 },
       primaryPr: { number: 84, state: 'Draft' },
     })
@@ -106,6 +110,7 @@ describe('plan graph model', () => {
       issue: { number: null, state: 'Unknown' },
       primaryPr: { number: null, state: 'Unopened' },
     })
+    expect(cleared.items.find((item) => item.id === itemId)?.localRepositoryPath).toBeUndefined()
   })
 
   it('adds editable dependencies while preserving the DAG invariant', () => {
@@ -193,6 +198,7 @@ describe('plan graph model', () => {
     expect(claimed.items.find((item) => item.id === 'PG-01')).toMatchObject({
       lifecycle: 'active',
       agent: 'Codex local',
+      localRepositoryPath: '/repos/sim',
       execution: {
         attemptId: 'attempt-pg-01-a',
         status: 'running',

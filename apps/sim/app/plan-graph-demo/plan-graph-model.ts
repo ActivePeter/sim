@@ -58,6 +58,7 @@ export interface PlanItem {
   wave: number
   lifecycle: StoredPlanLifecycle
   humanOwner: string
+  localRepositoryPath?: string
   repository?: string
   interfaces: PlanInterface[]
   expectedPaths: string[]
@@ -99,7 +100,7 @@ export interface PlanSize {
 }
 
 export const DEFAULT_PLAN_NODE_SIZE: Readonly<PlanSize> = {
-  height: 184,
+  height: 212,
   width: 250,
 }
 
@@ -124,6 +125,7 @@ export interface DagItemUpdate {
   executionWorktree?: string
   humanOwner?: string
   issueNumber?: number | null
+  localRepositoryPath?: string | null
   primaryPrNumber?: number | null
   repository?: string
   summary?: string
@@ -137,6 +139,7 @@ export interface PlanClaimInput {
   branch: string
   claimedAt: string
   expiresAt: string
+  repositoryRoot?: string
   sessionId: string
   worktree: string
 }
@@ -408,6 +411,7 @@ const itemSchema = z.object({
   wave: z.number().int().nonnegative(),
   lifecycle: z.enum(['planned', 'active', 'review', 'done']),
   humanOwner: z.string(),
+  localRepositoryPath: z.string().min(1).optional(),
   repository: z
     .string()
     .regex(/^[^/]+\/[^/]+$/)
@@ -570,6 +574,10 @@ export function updateDagItem(
     title: update.title ?? currentItem.title,
     summary: update.summary ?? currentItem.summary,
     humanOwner: update.humanOwner ?? currentItem.humanOwner,
+    localRepositoryPath:
+      update.localRepositoryPath === undefined
+        ? currentItem.localRepositoryPath
+        : (update.localRepositoryPath ?? undefined),
     repository,
     issue,
     primaryPr,
@@ -795,6 +803,7 @@ export function claimDagItem(
             ...candidate,
             lifecycle: 'active',
             agent: claim.agent,
+            localRepositoryPath: claim.repositoryRoot ?? candidate.localRepositoryPath,
             execution: {
               attemptId: claim.attemptId,
               sessionId: claim.sessionId,

@@ -8,6 +8,7 @@ interface TestPlanNode {
   execution?: { lease: { fencingToken: number; state: string } }
   id: string
   lifecycle: string
+  localRepositoryPath?: string
   primaryPr: { checks: string; number: number | null; review: string; state: string }
   summary: string
   title: string
@@ -93,6 +94,7 @@ describe('plan-node skill script', () => {
           title: 'First node',
           summary: 'Deliver the first node.',
           lifecycle: 'planned',
+          localRepositoryPath: repository,
           primaryPr: { number: null, state: 'Unopened', checks: 'Pending', review: 'Pending' },
         },
       ],
@@ -141,7 +143,7 @@ describe('plan-node skill script', () => {
     })
 
     try {
-      const claimed = await runPlanNode(repository, server, [
+      const claimed = await runPlanNode(root, server, [
         'claim',
         '--node',
         'PG-01',
@@ -154,6 +156,7 @@ describe('plan-node skill script', () => {
       expect(plan.items[0]).toMatchObject({
         lifecycle: 'active',
         agent: 'codex-test',
+        localRepositoryPath: repository,
         execution: { lease: { state: 'active', fencingToken: 1 } },
       })
 

@@ -158,6 +158,8 @@ function DagNodeActionBar({ data }: { data: PlanNodeData }) {
 export function PlanNodeCard({ data, selected }: NodeProps<PlanNodeData>) {
   const { t } = useI18n()
   const { item } = data
+  const localPath = item.execution?.worktree ?? item.localRepositoryPath
+  const localPathLabel = item.execution ? t('plan.node.worktree') : t('plan.node.localRepository')
   const ringStyles = getRingStyles(item, selected)
   const handleResizeEnd = useCallback<NonNullable<NodeResizerProps['onResizeEnd']>>(
     (_event, { height, width, x, y }) => {
@@ -217,6 +219,11 @@ export function PlanNodeCard({ data, selected }: NodeProps<PlanNodeData>) {
               title={t('plan.node.repository')}
               displayValue={data.repository}
               isMonospace
+            />
+            <SubBlockRowView
+              title={localPathLabel}
+              displayValue={localPath ?? t('plan.node.localPathNotConfigured')}
+              isMonospace={Boolean(localPath)}
             />
             <SubBlockRowView
               title={t('plan.node.issue')}
