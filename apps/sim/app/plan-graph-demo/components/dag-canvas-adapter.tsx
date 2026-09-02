@@ -119,7 +119,11 @@ export function DagCanvasAdapter({
     () =>
       resolvedItems.map((item) => {
         const artifactRepository = item.repository ?? repository
-        const size = sizes[item.id] ?? DEFAULT_PLAN_NODE_SIZE
+        const persistedSize = sizes[item.id] ?? DEFAULT_PLAN_NODE_SIZE
+        const size = {
+          ...persistedSize,
+          height: Math.max(persistedSize.height, DEFAULT_PLAN_NODE_SIZE.height),
+        }
         return {
           id: item.id,
           type: 'dagNode',
@@ -129,6 +133,7 @@ export function DagCanvasAdapter({
           style: { height: size.height, width: size.width },
           zIndex: BLOCK_Z_BASE,
           data: {
+            repository: artifactRepository,
             issueUrl:
               item.issue.url ??
               (item.issue.number === null

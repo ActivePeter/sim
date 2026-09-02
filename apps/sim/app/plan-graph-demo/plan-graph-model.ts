@@ -99,7 +99,7 @@ export interface PlanSize {
 }
 
 export const DEFAULT_PLAN_NODE_SIZE: Readonly<PlanSize> = {
-  height: 156,
+  height: 184,
   width: 250,
 }
 

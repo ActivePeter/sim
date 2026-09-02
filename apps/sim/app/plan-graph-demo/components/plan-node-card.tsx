@@ -14,15 +14,16 @@ import {
 } from '@sim/workflow-renderer'
 import { type NodeProps, NodeResizer, type NodeResizerProps } from 'reactflow'
 import { type TranslationFunction, type TranslationKey, useI18n } from '@/lib/i18n'
-import type {
-  PlanLifecycle,
-  PlanPosition,
-  PlanSize,
-  ResolvedPlanItem,
+import {
+  DEFAULT_PLAN_NODE_SIZE,
+  type PlanLifecycle,
+  type PlanPosition,
+  type PlanSize,
+  type ResolvedPlanItem,
 } from '@/app/plan-graph-demo/plan-graph-model'
 
 const PLAN_NODE_MIN_WIDTH = 220
-const PLAN_NODE_MIN_HEIGHT = 156
+const PLAN_NODE_MIN_HEIGHT = DEFAULT_PLAN_NODE_SIZE.height
 const PLAN_NODE_MAX_WIDTH = 560
 const PLAN_NODE_MAX_HEIGHT = 360
 
@@ -33,6 +34,7 @@ export interface PlanNodeData {
   onRemove: () => void
   onSelect: () => void
   pullRequestUrl?: string
+  repository: string
   size: PlanSize
   wouldCreateConnectionCycle: (source: string, target: string) => boolean
 }
@@ -211,6 +213,11 @@ export function PlanNodeCard({ data, selected }: NodeProps<PlanNodeData>) {
         typeLabel={t('plan.node.type')}
         rows={
           <>
+            <SubBlockRowView
+              title={t('plan.node.repository')}
+              displayValue={data.repository}
+              isMonospace
+            />
             <SubBlockRowView
               title={t('plan.node.issue')}
               displayValue={
