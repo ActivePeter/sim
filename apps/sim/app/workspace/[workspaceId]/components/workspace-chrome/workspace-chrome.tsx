@@ -3,13 +3,13 @@
 import { useEffect, useLayoutEffect, useRef, useState } from 'react'
 import { cn } from '@sim/emcn'
 import { ArrowLeft, ArrowRight, PanelLeft } from '@sim/emcn/icons'
-import { usePathname, useSearchParams } from 'next/navigation'
+import { usePathname } from 'next/navigation'
 import { getDesktopBridge } from '@/lib/desktop'
-import { parseVibeVscodeSurface, VIBE_VSCODE_SURFACE_PARAM } from '@/lib/vibe-vscode/surface'
 import { applyDesktopTitleBarMode, type DesktopTitleBarMode } from '@/app/_shell/desktop-title-bar'
 import { AgentSidebar } from '@/app/workspace/[workspaceId]/agents/components/agent-sidebar'
 import { useSidebarPeek } from '@/app/workspace/[workspaceId]/components/workspace-chrome/use-sidebar-peek'
 import { Sidebar, SidebarTooltip } from '@/app/workspace/[workspaceId]/w/components/sidebar/sidebar'
+import { useVscodeSurface } from '@/hooks/use-vscode-surface'
 import { useFullscreenOriginStore } from '@/stores/fullscreen-origin'
 import { useSearchModalStore } from '@/stores/modals/search/store'
 import { useSidebarStore } from '@/stores/sidebar/store'
@@ -182,8 +182,7 @@ function isFullscreenPath(pathname: string | null): boolean {
  * or duplicated for this — see {@link useSidebarPeek}.
  */
 export function WorkspaceChrome({ children, initialSidebarCollapsed }: WorkspaceChromeProps) {
-  const searchParams = useSearchParams()
-  const surface = parseVibeVscodeSurface(searchParams.get(VIBE_VSCODE_SURFACE_PARAM))
+  const surface = useVscodeSurface()
 
   if (surface === 'sidebar') {
     return (

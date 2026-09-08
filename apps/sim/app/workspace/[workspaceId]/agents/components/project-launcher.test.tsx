@@ -14,6 +14,7 @@ const mocks = vi.hoisted(() => ({
 vi.mock('next/navigation', () => ({
   useParams: () => ({ workspaceId: 'workspace-1' }),
   useRouter: () => ({ push: mocks.push }),
+  useSearchParams: () => new URLSearchParams('_vscodeSurface=sidebar'),
 }))
 vi.mock('nuqs', async (importOriginal) => ({
   ...(await importOriginal<typeof import('nuqs')>()),
@@ -74,6 +75,7 @@ function deferred<T>() {
   return { promise, resolve }
 }
 beforeEach(() => {
+  ;(globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true
   vi.clearAllMocks()
   mocks.host = {
     id: 'host-1',
@@ -123,7 +125,9 @@ describe('project Agent launch intent', () => {
       logicalWorkspaceId: 'logical-1',
     })
     await act(async () => pending.resolve({ id: 'native-chat', workspaceId: 'workspace-1' }))
-    expect(mocks.push).toHaveBeenCalledWith('/workspace/workspace-1/chat/native-chat')
+    expect(mocks.push).toHaveBeenCalledWith(
+      '/workspace/workspace-1/chat/native-chat?_vscodeSurface=sidebar'
+    )
   })
 
   it('does not navigate back to a stale project after selection changes while creating', async () => {
@@ -144,7 +148,9 @@ describe('project Agent launch intent', () => {
     await act(async () => createButton().click())
     await act(async () => createButton().click())
     expect(mocks.create.mock.calls[0][0].requestId).toBe(mocks.create.mock.calls[1][0].requestId)
-    expect(mocks.push).toHaveBeenCalledWith('/workspace/workspace-1/chat/same-chat')
+    expect(mocks.push).toHaveBeenCalledWith(
+      '/workspace/workspace-1/chat/same-chat?_vscodeSurface=sidebar'
+    )
   })
 
   it('waits for authoritative host context instead of launching the first cached project', () => {

@@ -16,7 +16,7 @@ import { Button, cn, toast } from '@sim/emcn'
 import { PanelLeft } from '@sim/emcn/icons'
 import { createLogger } from '@sim/logger'
 import { useQueryClient } from '@tanstack/react-query'
-import { useParams, useRouter, useSearchParams } from 'next/navigation'
+import { useParams, useRouter } from 'next/navigation'
 import { useQueryState } from 'nuqs'
 import { usePostHog } from 'posthog-js/react'
 import { requestJson } from '@/lib/api/client/request'
@@ -33,7 +33,6 @@ import {
   type MothershipSendMessageDetail,
 } from '@/lib/mothership/events'
 import { captureEvent } from '@/lib/posthog/client'
-import { VIBE_VSCODE_SURFACE_PARAM } from '@/lib/vibe-vscode/surface'
 import type { VscodeSessionOrigin } from '@/lib/vibe-vscode/types'
 import { persistImportedWorkflow } from '@/lib/workflows/operations/import-export'
 import { RESOURCE_HEADER_CLASSES } from '@/app/workspace/[workspaceId]/home/components/mothership-view/components/resource-tabs/resource-tab-controls'
@@ -48,6 +47,7 @@ import { useMarkMothershipChatRead } from '@/hooks/queries/mothership-chats'
 import { useWorkflows } from '@/hooks/queries/workflows'
 import { getWorkspaceFilesQueryOptions, useWorkspaceFiles } from '@/hooks/queries/workspace-files'
 import { useOAuthReturnRouter } from '@/hooks/use-oauth-return'
+import { useVscodeSurface } from '@/hooks/use-vscode-surface'
 import type { ChatContext } from '@/stores/panel'
 import {
   ChatSurfaceProvider,
@@ -96,7 +96,7 @@ export function Home({ chatId, userName, userId, projectOrigin }: HomeProps) {
   useOAuthReturnRouter()
   const { workspaceId } = useParams<{ workspaceId: string }>()
   const router = useRouter()
-  const compact = useSearchParams().get(VIBE_VSCODE_SURFACE_PARAM) === 'sidebar'
+  const compact = useVscodeSurface() === 'sidebar'
   const resourceSurfaceEnabled = !compact && !projectOrigin
   const queryClient = useQueryClient()
   /**

@@ -13,6 +13,12 @@ vi.mock('next/navigation', () => ({
   useSearchParams: () => navigation.searchParams,
 }))
 
+vi.mock('@/app/workspace/[workspaceId]/agents/components/agent-sidebar', () => ({
+  AgentSidebar: ({ children }: { children: React.ReactNode }) => (
+    <aside data-testid='agent-sidebar'>{children}</aside>
+  ),
+}))
+
 vi.mock('@/app/workspace/[workspaceId]/w/components/sidebar/sidebar', () => ({
   Sidebar: ({ fixedExpanded, isPeeking }: { fixedExpanded?: boolean; isPeeking?: boolean }) => (
     <div
@@ -41,7 +47,7 @@ afterEach(() => {
 })
 
 describe('WorkspaceChrome host surfaces', () => {
-  it('projects only a fixed sidebar that fills the host container', () => {
+  it('delegates native chat to the project sidebar without mounting the full Sim navigation', () => {
     act(() => {
       root.render(
         <WorkspaceChrome>
@@ -50,14 +56,14 @@ describe('WorkspaceChrome host surfaces', () => {
       )
     })
 
-    const sidebar = container.querySelector<HTMLElement>('[data-testid="sidebar"]')
+    const sidebar = container.querySelector<HTMLElement>('[data-testid="agent-sidebar"]')
     const host = sidebar?.parentElement
 
-    expect(sidebar?.dataset.fixedExpanded).toBe('true')
-    expect(sidebar?.dataset.peeking).toBeUndefined()
+    expect(sidebar).not.toBeNull()
+    expect(container.querySelector('[data-testid="sidebar"]')).toBeNull()
     expect(host?.classList).toContain('flex')
     expect(host?.classList).toContain('w-full')
     expect(host?.classList).toContain('overflow-hidden')
-    expect(container.querySelector('[data-testid="canvas"]')).toBeNull()
+    expect(sidebar?.querySelector('[data-testid="canvas"]')).not.toBeNull()
   })
 })

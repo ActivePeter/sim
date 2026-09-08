@@ -17,6 +17,7 @@ const TOKEN_STORAGE_KEY = 'vibe-vscode-bridge-token'
 
 interface VibeVscodeBridgeApi {
   getContext: () => VibeVscodeHostContext | undefined
+  getSurface: () => ReturnType<typeof parseVibeVscodeSurface>
   openEditor: (path: string) => void
   openMonitor: () => void
   openFile: (uri: string, line?: number, character?: number) => void
@@ -217,6 +218,7 @@ export function VibeVscodeBridge() {
 
     window.vibeVscode = {
       getContext: () => (hostContext ? structuredClone(hostContext) : undefined),
+      getSurface: () => surface,
       openEditor: (path) => {
         if (isSafeNavigationPath(path)) postToHost('openEditor', { path })
       },
@@ -227,6 +229,7 @@ export function VibeVscodeBridge() {
       openTerminal: (uri) => postToHost('openTerminal', { uri }),
       openExternal: (uri) => postToHost('openExternal', { uri }),
     }
+    window.dispatchEvent(new Event('vibe-vscode-context'))
 
     window.addEventListener('message', messageListener)
     window.addEventListener('click', clickListener, true)
@@ -253,6 +256,7 @@ export function VibeVscodeBridge() {
       window.history.pushState = originalPushState
       window.history.replaceState = originalReplaceState
       window.vibeVscode = undefined
+      window.dispatchEvent(new Event('vibe-vscode-context'))
     }
   }, [setLocale])
 

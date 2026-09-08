@@ -5,6 +5,7 @@ import { Chip, ChipLink, OverflowText } from '@sim/emcn'
 import Link from 'next/link'
 import { useParams, usePathname } from 'next/navigation'
 import { visibleProjectSessions } from '@/lib/vibe-vscode/session-view'
+import { withVibeVscodeSurface } from '@/lib/vibe-vscode/surface'
 import { ProjectLauncher } from '@/app/workspace/[workspaceId]/agents/components/project-launcher'
 import { SessionStatus } from '@/app/workspace/[workspaceId]/agents/components/session-status'
 import { useProjectSessions } from '@/hooks/queries/vscode-agents'
@@ -21,6 +22,9 @@ export function AgentSidebar({ children }: AgentSidebarProps) {
   const [expanded, setExpanded] = useState(false)
   const current = visible.find((session) => session.id === chatId)
   const showChat = !!chatId && pathname.includes('/chat/')
+  const editorPath = showChat
+    ? `/workspace/${workspaceId}/chat/${chatId}`
+    : `/workspace/${workspaceId}/agents`
   return (
     <aside
       data-vscode-agent-sidebar
@@ -34,11 +38,11 @@ export function AgentSidebar({ children }: AgentSidebarProps) {
           </Chip>
           <Chip onClick={() => window.vibeVscode?.openMonitor()}>全局监控</Chip>
           <ChipLink
-            href={`/workspace/${workspaceId}/agents`}
+            href={editorPath}
             onClick={(event) => {
               if (window.vibeVscode) {
                 event.preventDefault()
-                window.vibeVscode.openEditor(`/workspace/${workspaceId}/agents`)
+                window.vibeVscode.openEditor(editorPath)
               }
             }}
           >
@@ -76,7 +80,10 @@ export function AgentSidebar({ children }: AgentSidebarProps) {
           {visible.map((session) => (
             <Link
               key={session.id}
-              href={`/workspace/${session.workspaceId}/chat/${session.id}`}
+              href={withVibeVscodeSurface(
+                `/workspace/${session.workspaceId}/chat/${session.id}`,
+                'sidebar'
+              )}
               aria-current={chatId === session.id ? 'page' : undefined}
               className='flex min-w-0 flex-col gap-1 rounded-lg p-2 transition-colors hover:bg-[var(--surface-active)] aria-[current=page]:bg-[var(--surface-active)]'
             >

@@ -6,10 +6,12 @@ import { Plus } from '@sim/emcn/icons'
 import { generateId } from '@sim/utils/id'
 import { useParams, useRouter } from 'next/navigation'
 import { useQueryState } from 'nuqs'
+import { withVibeVscodeSurface } from '@/lib/vibe-vscode/surface'
 import { projectSelectionParam } from '@/app/workspace/[workspaceId]/agents/search-params'
 import { useCreateProjectSession, useVscodeHosts } from '@/hooks/queries/vscode-agents'
 import { useVscodeCatalogProjection } from '@/hooks/use-vscode-catalog-projection'
 import { useVscodeHostContext } from '@/hooks/use-vscode-host-context'
+import { useVscodeSurface } from '@/hooks/use-vscode-surface'
 
 interface ProjectLauncherProps {
   compact?: boolean
@@ -26,6 +28,7 @@ export function ProjectLauncher({ compact = false }: ProjectLauncherProps) {
     }
   }, [])
   const router = useRouter()
+  const surface = useVscodeSurface()
   const { workspaceId } = useParams<{ workspaceId: string }>()
   const [selection, setSelection] = useQueryState(
     projectSelectionParam.key,
@@ -84,7 +87,9 @@ export function ProjectLauncher({ compact = false }: ProjectLauncherProps) {
       })
       requests.current.delete(identity)
       if (mounted.current && latestIdentity.current === identity) {
-        router.push(`/workspace/${result.workspaceId}/chat/${result.id}`)
+        router.push(
+          withVibeVscodeSurface(`/workspace/${result.workspaceId}/chat/${result.id}`, surface)
+        )
       }
     } catch {
       // Keep the request ID after an unknown outcome: retry opens the same native chat.
@@ -100,6 +105,7 @@ export function ProjectLauncher({ compact = false }: ProjectLauncherProps) {
     workspaceId,
     mutateAsync,
     router,
+    surface,
   ])
 
   return (

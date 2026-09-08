@@ -19,6 +19,11 @@ project/logical workspace and creates the native chat plus binding in one
 transaction. A hashed user/workspace/request key makes retries return the same
 chat. Browser input never selects a runtime thread or filesystem working directory.
 
+The mounted iframe bridge owns sidebar/editor presentation identity. Route query
+state is only its initial projection: native Next router transitions must not turn
+a sidebar chat into the full application shell. Both workspace chrome and Home
+read the same bridge surface, and project launch passes that surface into navigation.
+
 The native per-chat stream lock claims a turn before its user message is appended.
 The local adapter translates Codex JSONL into Sim's versioned stream envelopes;
 native transcript/finalization code saves the assistant before emitting successful
