@@ -1,16 +1,27 @@
 /**
  * @vitest-environment jsdom
  */
-import { act } from 'react'
+import { act, useEffect } from 'react'
 import { createRoot, type Root } from 'react-dom/client'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { WorkspaceChrome } from '@/app/workspace/[workspaceId]/components/workspace-chrome/workspace-chrome'
 
 const navigation = vi.hoisted(() => ({ searchParams: new URLSearchParams() }))
+const chatEvents = vi.hoisted(() => ({ subscribe: vi.fn(), unsubscribe: vi.fn() }))
 
 vi.mock('next/navigation', () => ({
+  useParams: () => ({ workspaceId: 'workspace-1' }),
   usePathname: () => '/workspace/workspace-1',
   useSearchParams: () => navigation.searchParams,
+}))
+
+vi.mock('@/hooks/use-mothership-chat-events', () => ({
+  useMothershipChatEvents: (workspaceId: string) => {
+    useEffect(() => {
+      chatEvents.subscribe(workspaceId)
+      return () => chatEvents.unsubscribe(workspaceId)
+    }, [workspaceId])
+  },
 }))
 
 vi.mock('@/app/workspace/[workspaceId]/agents/components/agent-sidebar', () => ({
@@ -35,6 +46,7 @@ let root: Root
 
 beforeEach(() => {
   ;(globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true
+  vi.clearAllMocks()
   navigation.searchParams = new URLSearchParams('_vscodeSurface=sidebar')
   container = document.createElement('div')
   document.body.appendChild(container)
@@ -65,5 +77,14 @@ describe('WorkspaceChrome host surfaces', () => {
     expect(host?.classList).toContain('w-full')
     expect(host?.classList).toContain('overflow-hidden')
     expect(sidebar?.querySelector('[data-testid="canvas"]')).not.toBeNull()
+  })
+
+  it('keeps one native chat event subscription when embedded presentation changes', () => {
+    for (const query of ['_vscodeSurface=sidebar', '_vscodeSurface=editor', '']) {
+      navigation.searchParams = new URLSearchParams(query)
+      act(() => root.render(<WorkspaceChrome>chat</WorkspaceChrome>))
+    }
+    expect(chatEvents.subscribe).toHaveBeenCalledExactlyOnceWith('workspace-1')
+    expect(chatEvents.unsubscribe).not.toHaveBeenCalled()
   })
 })

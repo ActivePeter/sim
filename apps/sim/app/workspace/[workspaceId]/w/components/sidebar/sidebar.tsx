@@ -119,7 +119,6 @@ import {
 import { useUpdateWorkflow } from '@/hooks/queries/workflows'
 import type { Workspace } from '@/hooks/queries/workspace'
 import { useContextMenu } from '@/hooks/use-context-menu'
-import { useMothershipChatEvents } from '@/hooks/use-mothership-chat-events'
 import { usePermissionConfig } from '@/hooks/use-permission-config'
 import { useSettingsNavigation } from '@/hooks/use-settings-navigation'
 import { SIDEBAR_WIDTH } from '@/stores/constants'
@@ -887,8 +886,6 @@ export const Sidebar = memo(function Sidebar({
     workspaceId,
     { enabled: isChatEnabled }
   )
-
-  useMothershipChatEvents(workspaceId)
 
   /**
    * Stays empty when Chat is disabled, which also drops the command palette's

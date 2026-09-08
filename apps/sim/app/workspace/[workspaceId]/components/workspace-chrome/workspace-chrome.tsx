@@ -3,12 +3,13 @@
 import { useEffect, useLayoutEffect, useRef, useState } from 'react'
 import { cn } from '@sim/emcn'
 import { ArrowLeft, ArrowRight, PanelLeft } from '@sim/emcn/icons'
-import { usePathname } from 'next/navigation'
+import { useParams, usePathname } from 'next/navigation'
 import { getDesktopBridge } from '@/lib/desktop'
 import { applyDesktopTitleBarMode, type DesktopTitleBarMode } from '@/app/_shell/desktop-title-bar'
 import { AgentSidebar } from '@/app/workspace/[workspaceId]/agents/components/agent-sidebar'
 import { useSidebarPeek } from '@/app/workspace/[workspaceId]/components/workspace-chrome/use-sidebar-peek'
 import { Sidebar, SidebarTooltip } from '@/app/workspace/[workspaceId]/w/components/sidebar/sidebar'
+import { useMothershipChatEvents } from '@/hooks/use-mothership-chat-events'
 import { useVscodeSurface } from '@/hooks/use-vscode-surface'
 import { useFullscreenOriginStore } from '@/stores/fullscreen-origin'
 import { useSearchModalStore } from '@/stores/modals/search/store'
@@ -182,6 +183,8 @@ function isFullscreenPath(pathname: string | null): boolean {
  * or duplicated for this — see {@link useSidebarPeek}.
  */
 export function WorkspaceChrome({ children, initialSidebarCollapsed }: WorkspaceChromeProps) {
+  const { workspaceId } = useParams<{ workspaceId: string }>()
+  useMothershipChatEvents(workspaceId)
   const surface = useVscodeSurface()
 
   if (surface === 'sidebar') {

@@ -4,6 +4,7 @@ import { copilotChats, vscodeProjectSessions, vscodeWorkspaceHosts } from '@sim/
 import { getPostgresErrorCode } from '@sim/utils/errors'
 import { generateId } from '@sim/utils/id'
 import { and, desc, eq, isNull, sql } from 'drizzle-orm'
+import { getLatestRunsForChats } from '@/lib/copilot/async-runs/repository'
 import { reconcileChatStreamMarkers } from '@/lib/copilot/chat/stream-liveness'
 import { OrchestrationError } from '@/lib/core/orchestration/types'
 import {
@@ -220,21 +221,36 @@ export async function listProjectSessions(
     )
     .orderBy(desc(copilotChats.updatedAt))
     .limit(500)
-  const markers = await reconcileChatStreamMarkers(
-    rows.map(({ chat }) => ({ chatId: chat.id, streamId: chat.conversationId }))
-  )
+  const [markers, latestRuns] = await Promise.all([
+    reconcileChatStreamMarkers(
+      rows.map(({ chat }) => ({ chatId: chat.id, streamId: chat.conversationId }))
+    ),
+    getLatestRunsForChats(
+      rows.map(({ chat }) => chat.id),
+      userId
+    ),
+  ])
+  const runsByChat = new Map(latestRuns.map((run) => [run.chatId, run]))
   return rows.map(({ chat, binding }) => {
     const marker = markers.get(chat.id)
+    const run = runsByChat.get(chat.id)
+    const turnId = binding?.lastTurnId ?? chat.conversationId
+    const terminalStatus = run
+      ? !turnId || run.streamId === turnId
+        ? run.status
+        : null
+      : binding?.lastOutcome
+    /** lastOutcome is read-only compatibility for project turns created before native run records. */
     let status: ProjectSessionStatus = 'idle'
     if (marker?.status === 'active') status = 'running'
     else if (marker?.status === 'unknown') status = 'unknown'
     else if (
-      binding?.lastOutcome === 'complete' ||
-      binding?.lastOutcome === 'cancelled' ||
-      binding?.lastOutcome === 'error'
+      terminalStatus === 'complete' ||
+      terminalStatus === 'cancelled' ||
+      terminalStatus === 'error'
     )
-      status = binding.lastOutcome
-    else if (binding?.lastTurnId || chat.conversationId) status = 'interrupted'
+      status = terminalStatus
+    else if (turnId || run) status = 'interrupted'
     return {
       id: chat.id,
       workspaceId,

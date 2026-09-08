@@ -1,6 +1,6 @@
 # VS Code project agents in Sim
 
-Project agents use native `copilot_chats`, `copilot_messages`, Home, `useChat`,
+Project agents use native `copilot_chats`, `copilot_messages`, `copilot_runs`, Home, `useChat`,
 stream envelopes, replay outbox, Stop and terminal finalization. There is no second
 message store or forked chat component. A project agent's native chat ID is the same
 in the VS Code sidebar, Sim's chat list and `/workspace/<workspaceId>/agents`.
@@ -24,17 +24,27 @@ The mounted iframe bridge owns sidebar/editor presentation identity. Route query
 state is only its initial projection: native Next router transitions must not turn
 a sidebar chat into the full application shell. Both workspace chrome and Home
 read the same bridge surface, and project launch passes that surface into navigation.
+Native chat-status subscription belongs to this shared workspace chrome, not to its
+optional large navigation sidebar, so all embedded surfaces receive completion and
+cross-view transcript invalidations.
 
-The native per-chat stream lock claims a turn before its user message is appended.
+The native per-chat stream lock claims a turn; its `copilot_runs` replay identity,
+chat marker and user message commit in one transaction. A failed run registration
+cannot start the runner or publish an orphan input. Native replay retains its
+existing authenticated-user/run lookup; embedded sessions do not bypass that gate.
 The local adapter translates Codex JSONL into Sim's versioned stream envelopes;
-native transcript/finalization code saves the assistant before emitting successful
-completion. Stream IDs and native user-message IDs are identical. Closing a tab
+native transcript/finalization code saves the assistant and flushes buffered content
+before recording a terminal run and emitting successful completion. Setup failures,
+execution errors and explicit cancellation close the same native run. Stream IDs and
+native user-message IDs are identical. Closing a tab
 does not stop the runner. Explicit native Stop, ownership loss and the bounded
 turn timeout terminate its process group. The finalizer's marker comparison
 prevents an obsolete runner from overwriting a newer turn.
 
 The global monitor queries each accessible workspace under current authorization,
-shows its latest 500 native chats, and refreshes every four seconds. Network failure
+shows its latest 500 native chats, and refreshes every four seconds. Terminal status
+comes from the latest native run for each chat; the binding's old `lastOutcome` is
+read-only compatibility for pre-run-record sessions. Network failure
 is unknown state, not idle; permission loss hides the cached workspace. Stop carries
 the observed stream ID. A process crash may interrupt a task: it is not silently
 re-executed. Persisted messages survive and a new turn may be started after lock

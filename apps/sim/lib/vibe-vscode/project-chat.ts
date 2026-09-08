@@ -4,6 +4,7 @@ import { createLogger } from '@sim/logger'
 import { getErrorMessage } from '@sim/utils/errors'
 import { generateId } from '@sim/utils/id'
 import { and, desc, eq, isNull } from 'drizzle-orm'
+import { createRunSegment, updateRunStatus } from '@/lib/copilot/async-runs/repository'
 import { buildEffectiveChatTranscript } from '@/lib/copilot/chat/effective-transcript'
 import { appendCopilotChatMessages } from '@/lib/copilot/chat/messages-store'
 import type { PersistedMessage } from '@/lib/copilot/chat/persisted-message'
@@ -51,7 +52,7 @@ export class ProjectChatBusyError extends OrchestrationError {
   }
 }
 
-/** Claims one native chat turn and appends its input in the same transaction. */
+/** Claims a native chat turn, registers its replay identity and appends its input atomically. */
 export async function startProjectChat(
   userId: string,
   input: StartProjectChatInput,
@@ -68,6 +69,7 @@ export async function startProjectChat(
     content: input.message,
     timestamp: new Date().toISOString(),
   }
+  const runId = generateId()
   let turn: { threadId?: string; prompt: string }
   let claimedTurn = false
   try {
@@ -121,13 +123,29 @@ export async function startProjectChat(
             })
             .join('\n\n')
             .slice(-96_000)
+      const run = await createRunSegment(
+        {
+          id: runId,
+          executionId: streamId,
+          chatId,
+          userId,
+          workspaceId: input.workspaceId,
+          streamId,
+          agent: 'local-codex',
+          model: 'local-codex',
+          provider: 'local-codex',
+          requestContext: { requestId: streamId },
+        },
+        tx
+      )
+      if (!run) throw new Error('The project agent run could not be registered.')
       await tx
         .update(copilotChats)
         .set({ conversationId: streamId, updatedAt: new Date() })
         .where(eq(copilotChats.id, chatId))
       await tx
         .update(vscodeProjectSessions)
-        .set({ lastTurnId: streamId, lastOutcome: null })
+        .set({ lastTurnId: streamId })
         .where(eq(vscodeProjectSessions.chatId, chatId))
       await appendCopilotChatMessages(
         chatId,
@@ -160,16 +178,10 @@ export async function startProjectChat(
           timestamp: new Date().toISOString(),
         },
       }).catch(() => {})
-      await db
-        .update(vscodeProjectSessions)
-        .set({ lastOutcome: 'error' })
-        .where(
-          and(
-            eq(vscodeProjectSessions.chatId, chatId),
-            eq(vscodeProjectSessions.lastTurnId, streamId)
-          )
-        )
-        .catch(() => {})
+      await updateRunStatus(runId, 'error', {
+        completedAt: new Date(),
+        error: 'The project agent stream could not start.',
+      }).catch(() => logger.error('Failed to close unstarted project run', { chatId, streamId }))
     }
     await releasePendingChatStream(chatId, streamId)
     throw error
@@ -223,6 +235,7 @@ export async function startProjectChat(
 
   const execute = async () => {
     let outcome: 'complete' | 'error' | 'cancelled' = 'complete'
+    let runError: string | null = null
     const totals = createCodexTotals()
     try {
       publish({ type: 'session', payload: { kind: 'chat', chatId } })
@@ -306,13 +319,13 @@ export async function startProjectChat(
           ? 'cancelled'
           : 'error'
       if (outcome === 'error') {
-        const message =
+        runError =
           controller.signal.aborted && typeof controller.signal.reason === 'string'
             ? controller.signal.reason
             : getErrorMessage(error, 'The project agent failed.')
         publish({
           type: 'error',
-          payload: { message, code: 'local_agent_error', provider: 'local-codex' },
+          payload: { message: runError, code: 'local_agent_error', provider: 'local-codex' },
         })
       }
     } finally {
@@ -351,25 +364,27 @@ export async function startProjectChat(
           },
         })
         const assistant = transcript.find((message) => message.role === 'assistant')
-        await finalizeAssistantTurn({
+        const finalized = await finalizeAssistantTurn({
           chatId,
           userId,
           userMessageId: streamId,
           assistantMessage: assistant ? { ...assistant, id: generateId() } : undefined,
         })
-        await db
-          .update(vscodeProjectSessions)
-          .set({ lastOutcome: outcome })
-          .where(
-            and(
-              eq(vscodeProjectSessions.chatId, chatId),
-              eq(vscodeProjectSessions.lastTurnId, streamId)
-            )
-          )
-        // A successful terminal event is only observable after the native transcript is durable.
+        if (!finalized.updated) {
+          // biome-ignore lint/correctness/noUnsafeFinally: The inner catch converts stale ownership into a terminal error.
+          throw new Error('The project agent no longer owns the chat turn.')
+        }
+        /** Replay must see all buffered content before it can observe a terminal run. */
+        await writer.flush()
+        await updateRunStatus(runId, outcome, { completedAt: new Date(), error: runError })
+        /** A successful terminal event is only observable after the native transcript is durable. */
         publish(completion)
       } catch {
         logger.error('Failed to finalize project agent transcript', { chatId, streamId })
+        await updateRunStatus(runId, 'error', {
+          completedAt: new Date(),
+          error: 'The response could not be saved. Reopen this session before retrying.',
+        }).catch(() => logger.error('Failed to close project run', { chatId, streamId }))
         publish({
           type: 'error',
           payload: {

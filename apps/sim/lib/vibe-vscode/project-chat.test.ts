@@ -20,6 +20,12 @@ const mocks = vi.hoisted(() => ({
   finalize: vi.fn(),
   events: vi.fn(),
   status: vi.fn(),
+  createRun: vi.fn(),
+  updateRun: vi.fn(),
+}))
+vi.mock('@/lib/copilot/async-runs/repository', () => ({
+  createRunSegment: mocks.createRun,
+  updateRunStatus: mocks.updateRun,
 }))
 vi.mock('@/lib/vibe-vscode/local-codex', () => ({ runLocalCodex: mocks.run }))
 vi.mock('@/lib/copilot/chat/messages-store', () => ({ appendCopilotChatMessages: mocks.append }))
@@ -101,6 +107,8 @@ beforeEach(() => {
   mocks.events.mockResolvedValue(undefined)
   mocks.append.mockResolvedValue(undefined)
   mocks.finalize.mockResolvedValue({ found: true, updated: true, appendedAssistant: true })
+  mocks.createRun.mockImplementation(async (run) => ({ id: run.id, status: 'active' }))
+  mocks.updateRun.mockImplementation(async (id, status) => ({ id, status }))
   mocks.run.mockImplementation(complete)
 })
 afterEach(() => vi.useRealTimers())
@@ -110,6 +118,19 @@ describe('project agent uses the native chat lifecycle', () => {
     prepareTurn()
     const response = await startProjectChat('user-1', input, '/projects/a')
     const body = await response.text()
+    const run = mocks.createRun.mock.calls[0][0]
+    expect(run).toMatchObject({
+      executionId: 'turn-1',
+      streamId: 'turn-1',
+      chatId: input.chatId,
+      userId: 'user-1',
+      workspaceId: input.workspaceId,
+      requestContext: { requestId: 'turn-1' },
+    })
+    expect(mocks.createRun.mock.calls[0][1]).toBe(mocks.append.mock.calls[0][3])
+    expect(mocks.createRun.mock.invocationCallOrder[0]).toBeLessThan(
+      mocks.run.mock.invocationCallOrder[0]
+    )
     expect(mocks.append).toHaveBeenCalledWith(
       input.chatId,
       [expect.objectContaining({ id: 'turn-1', role: 'user', content: input.message })],
@@ -132,8 +153,15 @@ describe('project agent uses the native chat lifecycle', () => {
       events.some((event: { type: string }) => event.type === 'complete')
     )
     expect(mocks.finalize.mock.invocationCallOrder[0]).toBeLessThan(
+      mocks.updateRun.mock.invocationCallOrder[0]
+    )
+    expect(mocks.updateRun.mock.invocationCallOrder[0]).toBeLessThan(
       mocks.events.mock.invocationCallOrder[completionBatch]
     )
+    expect(mocks.updateRun).toHaveBeenCalledWith(run.id, 'complete', {
+      completedAt: expect.any(Date),
+      error: null,
+    })
     await vi.waitFor(() => expect(mocks.release).toHaveBeenCalledWith(input.chatId, 'turn-1'))
   })
 
@@ -155,6 +183,7 @@ describe('project agent uses the native chat lifecycle', () => {
     })
     expect(dbChainMockFns.transaction).not.toHaveBeenCalled()
     expect(mocks.finalize).not.toHaveBeenCalled()
+    expect(mocks.createRun).not.toHaveBeenCalled()
     expect(mocks.release).not.toHaveBeenCalled()
   })
 
@@ -167,6 +196,7 @@ describe('project agent uses the native chat lifecycle', () => {
       activeStreamId: null,
     })
     expect(mocks.append).not.toHaveBeenCalled()
+    expect(mocks.createRun).not.toHaveBeenCalled()
     expect(mocks.finalize).not.toHaveBeenCalled()
     expect(mocks.run).not.toHaveBeenCalled()
     expect(mocks.release).toHaveBeenCalledWith(input.chatId, 'turn-1')
@@ -193,6 +223,11 @@ describe('project agent uses the native chat lifecycle', () => {
         .flatMap(([events]) => events)
         .some((event) => event.type === 'complete')
     ).toBe(true)
+    expect(mocks.updateRun).toHaveBeenCalledWith(
+      mocks.createRun.mock.calls[0][0].id,
+      'complete',
+      expect.anything()
+    )
   })
 
   it('cancels the runner through the native active-stream controller and saves partial output', async () => {
@@ -213,6 +248,10 @@ describe('project agent uses the native chat lifecycle', () => {
     controller.abort(AbortReason.UserStop)
     const body = await response.text()
     expect(body).toContain('"status":"cancelled"')
+    expect(mocks.updateRun).toHaveBeenCalledWith(mocks.createRun.mock.calls[0][0].id, 'cancelled', {
+      completedAt: expect.any(Date),
+      error: null,
+    })
     expect(JSON.stringify(mocks.finalize.mock.calls[0][0])).toContain('Partial response.')
     await vi.waitFor(() => expect(mocks.unregister).toHaveBeenCalledWith('turn-1'))
   })
@@ -248,6 +287,11 @@ describe('project agent uses the native chat lifecycle', () => {
     expect(body).not.toContain('"status":"complete"')
     expect(body).toContain('local_agent_persistence_error')
     expect(body).toContain('"status":"error"')
+    expect(mocks.updateRun).toHaveBeenCalledWith(
+      mocks.createRun.mock.calls[0][0].id,
+      'error',
+      expect.objectContaining({ completedAt: expect.any(Date), error: expect.any(String) })
+    )
     await vi.waitFor(() => expect(mocks.release).toHaveBeenCalled())
   })
 
@@ -264,6 +308,54 @@ describe('project agent uses the native chat lifecycle', () => {
       })
     )
     expect(mocks.run).not.toHaveBeenCalled()
+    expect(mocks.updateRun).toHaveBeenCalledWith(
+      mocks.createRun.mock.calls[0][0].id,
+      'error',
+      expect.objectContaining({ completedAt: expect.any(Date) })
+    )
     expect(mocks.release).toHaveBeenCalledWith(input.chatId, 'turn-1')
+  })
+
+  it('does not start or append input if native replay registration fails', async () => {
+    prepareTurn()
+    mocks.createRun.mockRejectedValueOnce(new Error('run registration unavailable'))
+    await expect(startProjectChat('user-1', input, '/projects/a')).rejects.toThrow(
+      'run registration unavailable'
+    )
+    expect(mocks.append).not.toHaveBeenCalled()
+    expect(mocks.finalize).not.toHaveBeenCalled()
+    expect(mocks.updateRun).not.toHaveBeenCalled()
+    expect(mocks.run).not.toHaveBeenCalled()
+    expect(mocks.release).toHaveBeenCalledWith(input.chatId, 'turn-1')
+  })
+
+  it('records a native error run when execution fails', async () => {
+    prepareTurn()
+    mocks.run.mockRejectedValueOnce(new Error('runner unavailable'))
+    const body = await (await startProjectChat('user-1', input, '/projects/a')).text()
+    expect(body).toContain('"status":"error"')
+    expect(mocks.updateRun).toHaveBeenCalledWith(mocks.createRun.mock.calls[0][0].id, 'error', {
+      completedAt: expect.any(Date),
+      error: 'runner unavailable',
+    })
+  })
+
+  it('does not mark a stale finalizer as a successful native run', async () => {
+    prepareTurn()
+    mocks.finalize.mockResolvedValueOnce({ found: true, updated: false, appendedAssistant: false })
+    const body = await (await startProjectChat('user-1', input, '/projects/a')).text()
+    expect(body).not.toContain('"status":"complete"')
+    expect(mocks.updateRun.mock.calls.map(([, status]) => status)).toEqual(['error'])
+  })
+
+  it('releases resources when both transcript and run persistence fail', async () => {
+    prepareTurn()
+    mocks.finalize.mockRejectedValueOnce(new Error('database unavailable'))
+    mocks.updateRun.mockRejectedValueOnce(new Error('database unavailable'))
+    const body = await (await startProjectChat('user-1', input, '/projects/a')).text()
+    expect(body).not.toContain('"status":"complete"')
+    expect(body).toContain('"status":"error"')
+    await vi.waitFor(() => expect(mocks.release).toHaveBeenCalledWith(input.chatId, 'turn-1'))
+    expect(mocks.unregister).toHaveBeenCalledWith('turn-1')
   })
 })

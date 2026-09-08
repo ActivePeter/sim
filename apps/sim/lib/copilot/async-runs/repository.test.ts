@@ -2,21 +2,75 @@
  * @vitest-environment node
  */
 
-import { dbChainMockFns, resetDbChainMock } from '@sim/testing'
+import { dbChainMock, dbChainMockFns, resetDbChainMock } from '@sim/testing'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import {
   claimCompletedAsyncToolCall,
   claimPendingAsyncToolCall,
   claimWorkflowToolExecution,
   completeAsyncToolCall,
+  createRunSegment,
   detachAsyncToolCall,
   getClaimedWorkflowExecutionId,
+  getLatestRunsForChats,
   markAsyncToolRunning,
   recordToolPermissionDecision,
   releaseWorkflowToolExecutionClaim,
   replaceTerminalAsyncToolCallResult,
   upsertAsyncToolCall,
-} from './repository'
+} from '@/lib/copilot/async-runs/repository'
+
+describe('native chat run registration', () => {
+  beforeEach(() => {
+    vi.clearAllMocks()
+    resetDbChainMock()
+  })
+
+  it('uses the caller transaction when a run and its user message must commit together', async () => {
+    const insert = vi.fn(dbChainMock.db.insert)
+    const row = { id: 'run-1', streamId: 'turn-1', status: 'active' }
+    dbChainMockFns.returning.mockResolvedValueOnce([row])
+    const result = await createRunSegment(
+      {
+        id: 'run-1',
+        executionId: 'turn-1',
+        streamId: 'turn-1',
+        chatId: 'chat-1',
+        userId: 'user-1',
+        workspaceId: 'workspace-1',
+      },
+      { insert }
+    )
+    expect(result).toEqual(row)
+    expect(insert).toHaveBeenCalledOnce()
+    expect(dbChainMockFns.values).toHaveBeenCalledWith(
+      expect.objectContaining({
+        id: 'run-1',
+        streamId: 'turn-1',
+        status: 'active',
+        userId: 'user-1',
+        workspaceId: 'workspace-1',
+      })
+    )
+  })
+
+  it('keeps the native default executor and surfaces failed registrations', async () => {
+    dbChainMockFns.returning.mockRejectedValueOnce(new Error('insert failed'))
+    await expect(
+      createRunSegment({
+        executionId: 'turn-1',
+        streamId: 'turn-1',
+        chatId: 'chat-1',
+        userId: 'user-1',
+      })
+    ).rejects.toThrow('insert failed')
+  })
+
+  it('does not query native runs for an empty authorized chat catalog', async () => {
+    expect(await getLatestRunsForChats([], 'user-1')).toEqual([])
+    expect(dbChainMockFns.selectDistinctOn).not.toHaveBeenCalled()
+  })
+})
 
 describe('async tool repository single-row semantics', () => {
   beforeEach(() => {

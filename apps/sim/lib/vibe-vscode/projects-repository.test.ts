@@ -6,7 +6,10 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 vi.mock('@sim/db', () => dbChainMock)
 vi.unmock('@sim/db/schema')
 vi.unmock('drizzle-orm')
-const mocks = vi.hoisted(() => ({ reconcile: vi.fn() }))
+const mocks = vi.hoisted(() => ({ reconcile: vi.fn(), latestRuns: vi.fn() }))
+vi.mock('@/lib/copilot/async-runs/repository', () => ({
+  getLatestRunsForChats: mocks.latestRuns,
+}))
 vi.mock('@/lib/copilot/chat/stream-liveness', () => ({
   reconcileChatStreamMarkers: mocks.reconcile,
 }))
@@ -14,6 +17,7 @@ vi.mock('@/lib/copilot/chat/stream-liveness', () => ({
 import { copilotChats, vscodeProjectSessions } from '@sim/db/schema'
 import {
   createProjectSession,
+  listProjectSessions,
   loadOwnedChat,
   syncHost,
 } from '@/lib/vibe-vscode/projects-repository'
@@ -52,6 +56,8 @@ const input = {
 beforeEach(() => {
   vi.clearAllMocks()
   resetDbChainMock()
+  mocks.reconcile.mockResolvedValue(new Map())
+  mocks.latestRuns.mockResolvedValue([])
 })
 describe('native project session repository', () => {
   it('does not publish duplicate project identities', () => {
@@ -133,5 +139,62 @@ describe('native project session repository', () => {
     const query = dialect.sqlToQuery(dbChainMockFns.where.mock.calls[0][0])
     expect(query.params).toEqual(['00000000-0000-4000-8000-000000000001', 'user-1'])
     expect(query.sql).toContain('"copilot_chats"."deleted_at" is null')
+  })
+
+  it('projects native terminal runs for project and Sim chats, with legacy outcomes read-only', async () => {
+    const origin = {
+      physicalWorkspace: catalog.physicalWorkspace,
+      project: catalog.physicalWorkspace.folders[0],
+    }
+    const rows = [
+      { id: 'project', binding: { origin, lastTurnId: 'turn-1', lastOutcome: 'error' } },
+      { id: 'native', binding: null },
+      { id: 'legacy', binding: { origin, lastTurnId: 'legacy-turn', lastOutcome: 'cancelled' } },
+    ].map(({ id, binding }) => ({
+      chat: { id, title: id, conversationId: null, updatedAt: new Date() },
+      binding,
+    }))
+    dbChainMockFns.limit.mockResolvedValueOnce(rows)
+    mocks.latestRuns.mockResolvedValueOnce([
+      { chatId: 'project', streamId: 'turn-1', status: 'complete' },
+      { chatId: 'native', streamId: 'turn-2', status: 'error' },
+    ])
+    const sessions = await listProjectSessions('user-1', 'workspace-1')
+    expect(sessions.map(({ id, status }) => ({ id, status }))).toEqual([
+      { id: 'project', status: 'complete' },
+      { id: 'native', status: 'error' },
+      { id: 'legacy', status: 'cancelled' },
+    ])
+    expect(mocks.latestRuns).toHaveBeenCalledWith(['project', 'native', 'legacy'], 'user-1')
+  })
+
+  it('keeps unknown liveness and new interrupted turns from inheriting an older completion', async () => {
+    const ids = ['running', 'unknown', 'new-interrupted', 'crashed']
+    dbChainMockFns.limit.mockResolvedValueOnce(
+      ids.map((id) => ({
+        chat: { id, title: id, conversationId: 'new-turn', updatedAt: new Date() },
+        binding: null,
+      }))
+    )
+    mocks.reconcile.mockResolvedValueOnce(
+      new Map([
+        ['running', { status: 'active', streamId: 'new-turn' }],
+        ['unknown', { status: 'unknown', streamId: 'new-turn' }],
+      ])
+    )
+    mocks.latestRuns.mockResolvedValueOnce(
+      ids.map((id) => ({
+        chatId: id,
+        streamId: id === 'crashed' ? 'new-turn' : 'old-turn',
+        status: id === 'crashed' ? 'active' : 'complete',
+      }))
+    )
+    const sessions = await listProjectSessions('user-1', 'workspace-1')
+    expect(sessions.map(({ status }) => status)).toEqual([
+      'running',
+      'unknown',
+      'interrupted',
+      'interrupted',
+    ])
   })
 })
