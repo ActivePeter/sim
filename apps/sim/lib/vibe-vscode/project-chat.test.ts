@@ -46,6 +46,7 @@ vi.mock('@/lib/copilot/request/session', async (importOriginal) => ({
   startAbortPoller: () => setInterval(() => {}, 250),
 }))
 
+import { CopilotChatFinalizeOutcome } from '@/lib/copilot/generated/trace-attribute-values-v1'
 import { AbortReason } from '@/lib/copilot/request/session/abort-reason'
 import type { runLocalCodex } from '@/lib/vibe-vscode/local-codex'
 import { startProjectChat } from '@/lib/vibe-vscode/project-chat'
@@ -143,6 +144,7 @@ describe('project agent uses the native chat lifecycle', () => {
       userId: 'user-1',
       userMessageId: 'turn-1',
       assistantMessage: { role: 'assistant' },
+      streamMarkerPolicy: 'active-only',
     })
     expect(JSON.stringify(finalization.assistantMessage)).toContain('Project A is ready.')
     expect(finalization.assistantMessage.id).not.toContain('live-assistant:')
@@ -253,7 +255,55 @@ describe('project agent uses the native chat lifecycle', () => {
       error: null,
     })
     expect(JSON.stringify(mocks.finalize.mock.calls[0][0])).toContain('Partial response.')
+    expect(mocks.finalize.mock.calls[0][0].streamMarkerPolicy).toBe('active-or-cleared')
     await vi.waitFor(() => expect(mocks.unregister).toHaveBeenCalledWith('turn-1'))
+  })
+
+  it.each([
+    {
+      name: 'preserves cancellation when native Stop already persisted the response',
+      finalizeOutcome: CopilotChatFinalizeOutcome.AssistantAlreadyPersisted,
+      status: 'cancelled',
+    },
+    {
+      name: 'rejects a stopped finalizer when a newer turn owns the chat marker',
+      finalizeOutcome: CopilotChatFinalizeOutcome.StaleUserMessage,
+      status: 'error',
+    },
+  ])('$name', async ({ finalizeOutcome, status }) => {
+    prepareTurn()
+    const entered = deferred()
+    mocks.finalize.mockResolvedValueOnce({
+      found: true,
+      updated: false,
+      appendedAssistant: false,
+      outcome: finalizeOutcome,
+    })
+    mocks.run.mockImplementation(async (options: RunOptions) => {
+      await options.onEvent({ type: 'text', text: 'Partial response.' })
+      entered.resolve()
+      await new Promise<void>((_, reject) =>
+        options.signal.addEventListener('abort', () => reject(new Error('cancelled')), {
+          once: true,
+        })
+      )
+    })
+    const response = await startProjectChat('user-1', input, '/projects/a')
+    await entered.promise
+    const controller: AbortController = mocks.register.mock.calls[0][1]
+    controller.abort(AbortReason.UserStop)
+    const body = await response.text()
+    expect(mocks.finalize).toHaveBeenCalledTimes(1)
+    expect(mocks.finalize.mock.calls[0][0]).toMatchObject({
+      chatId: input.chatId,
+      userId: 'user-1',
+      userMessageId: 'turn-1',
+      streamMarkerPolicy: 'active-or-cleared',
+    })
+    expect(mocks.updateRun.mock.calls.map(([, value]) => value)).toEqual([status])
+    expect(body).toContain(`"status":"${status}"`)
+    expect(body).not.toContain('"status":"complete"')
+    await vi.waitFor(() => expect(mocks.release).toHaveBeenCalledWith(input.chatId, 'turn-1'))
   })
 
   it('fails closed when the runtime can no longer verify session ownership', async () => {
@@ -340,9 +390,17 @@ describe('project agent uses the native chat lifecycle', () => {
     })
   })
 
-  it('does not mark a stale finalizer as a successful native run', async () => {
+  it.each([
+    CopilotChatFinalizeOutcome.StaleUserMessage,
+    CopilotChatFinalizeOutcome.AssistantAlreadyPersisted,
+  ])('does not promote an unchanged %s finalizer to a successful native run', async (outcome) => {
     prepareTurn()
-    mocks.finalize.mockResolvedValueOnce({ found: true, updated: false, appendedAssistant: false })
+    mocks.finalize.mockResolvedValueOnce({
+      found: true,
+      updated: false,
+      appendedAssistant: false,
+      outcome,
+    })
     const body = await (await startProjectChat('user-1', input, '/projects/a')).text()
     expect(body).not.toContain('"status":"complete"')
     expect(mocks.updateRun.mock.calls.map(([, status]) => status)).toEqual(['error'])

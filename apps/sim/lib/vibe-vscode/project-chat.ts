@@ -10,6 +10,7 @@ import { appendCopilotChatMessages } from '@/lib/copilot/chat/messages-store'
 import type { PersistedMessage } from '@/lib/copilot/chat/persisted-message'
 import { finalizeAssistantTurn } from '@/lib/copilot/chat/terminal-state'
 import { chatPubSub } from '@/lib/copilot/chat-status'
+import { CopilotChatFinalizeOutcome } from '@/lib/copilot/generated/trace-attribute-values-v1'
 import {
   acquirePendingChatStream,
   cleanupAbortMarker,
@@ -369,8 +370,13 @@ export async function startProjectChat(
           userId,
           userMessageId: streamId,
           assistantMessage: assistant ? { ...assistant, id: generateId() } : undefined,
+          streamMarkerPolicy: outcome === 'cancelled' ? 'active-or-cleared' : 'active-only',
         })
-        if (!finalized.updated) {
+        /** Native Stop may persist the response and clear the marker before the runner unwinds. */
+        const alreadyFinalizedStop =
+          outcome === 'cancelled' &&
+          finalized.outcome === CopilotChatFinalizeOutcome.AssistantAlreadyPersisted
+        if (!finalized.updated && !alreadyFinalizedStop) {
           // biome-ignore lint/correctness/noUnsafeFinally: The inner catch converts stale ownership into a terminal error.
           throw new Error('The project agent no longer owns the chat turn.')
         }
