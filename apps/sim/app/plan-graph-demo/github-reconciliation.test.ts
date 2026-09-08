@@ -1,10 +1,10 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
+import { createTestDag } from '@/lib/dags/model.test-fixtures'
 import {
   reconcileDagWithGitHub,
   resolveCheckState,
   resolveReviewState,
 } from '@/app/plan-graph-demo/github-reconciliation'
-import { createDemoDag } from '@/app/plan-graph-demo/plan-graph-model'
 
 afterEach(() => {
   vi.unstubAllGlobals()
@@ -92,7 +92,7 @@ describe('GitHub plan reconciliation', () => {
       return new Response(null, { status: 404 })
     })
     vi.stubGlobal('fetch', fetchMock)
-    const dag = createDemoDag()
+    const dag = createTestDag()
     const codexItem = dag.items.find((item) => item.id === 'PG-07')
     expect(codexItem).toBeDefined()
 

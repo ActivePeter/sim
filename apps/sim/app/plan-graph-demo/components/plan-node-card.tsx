@@ -13,14 +13,14 @@ import {
   WorkflowBlockView,
 } from '@sim/workflow-renderer'
 import { type NodeProps, NodeResizer, type NodeResizerProps } from 'reactflow'
-import { type TranslationFunction, type TranslationKey, useI18n } from '@/lib/i18n'
 import {
   DEFAULT_PLAN_NODE_SIZE,
   type PlanLifecycle,
   type PlanPosition,
   type PlanSize,
   type ResolvedPlanItem,
-} from '@/app/plan-graph-demo/plan-graph-model'
+} from '@/lib/dags/model'
+import { type TranslationFunction, type TranslationKey, useI18n } from '@/lib/i18n'
 
 const PLAN_NODE_MIN_WIDTH = 220
 const PLAN_NODE_MIN_HEIGHT = DEFAULT_PLAN_NODE_SIZE.height

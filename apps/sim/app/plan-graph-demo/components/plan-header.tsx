@@ -1,13 +1,13 @@
 'use client'
 
-import { Badge, Chip, ChipLink } from '@sim/emcn'
-import { Plus, RefreshCw, Split, SquareArrowUpRight, Workflow } from '@sim/emcn/icons'
+import { Badge, Chip } from '@sim/emcn'
+import { Plus, RefreshCw, Split, Workflow } from '@sim/emcn/icons'
+import type { PlanCounts } from '@/lib/dags/model'
 import { useI18n } from '@/lib/i18n'
-import type { PlanCounts } from '@/app/plan-graph-demo/plan-graph-model'
 
 interface PlanHeaderProps {
   counts: PlanCounts
-  fileId?: string
+  hasError: boolean
   isSaving: boolean
   isSyncing: boolean
   lastGithubSyncAt?: string
@@ -15,7 +15,6 @@ interface PlanHeaderProps {
   nextReadyItemId?: string
   onAddNode: () => void
   onInspectNext: () => void
-  onReset: () => void
   onSyncGithub: () => void
   repository: string
   revision: number
@@ -23,7 +22,7 @@ interface PlanHeaderProps {
 
 export function PlanHeader({
   counts,
-  fileId,
+  hasError,
   isSaving,
   isSyncing,
   lastGithubSyncAt,
@@ -31,17 +30,16 @@ export function PlanHeader({
   nextReadyItemId,
   onAddNode,
   onInspectNext,
-  onReset,
   onSyncGithub,
   repository,
   revision,
 }: PlanHeaderProps) {
   const { locale, t } = useI18n()
-  const persistenceLabel = isSaving
-    ? t('plan.header.saving')
-    : fileId
-      ? t('plan.header.saved')
-      : t('plan.header.localPreview')
+  const persistenceLabel = hasError
+    ? t('plan.header.saveFailed')
+    : isSaving
+      ? t('plan.header.saving')
+      : t('plan.header.saved')
   return (
     <header className='flex h-[58px] shrink-0 items-center justify-between gap-4 border-[var(--border)] border-b bg-[var(--surface-1)] px-4'>
       <div className='flex min-w-0 items-center gap-3'>
@@ -80,23 +78,11 @@ export function PlanHeader({
       </div>
 
       <div className='flex shrink-0 items-center gap-1.5'>
-        <ChipLink
-          href='https://github.com/ActivePeter/sim/issues/1'
-          target='_blank'
-          rel='noreferrer'
-          leftIcon={SquareArrowUpRight}
-          className='hidden 2xl:inline-flex'
-        >
-          {t('plan.header.epic', { number: 1 })}
-        </ChipLink>
         <Chip leftIcon={RefreshCw} disabled={isSyncing || isSaving} onClick={onSyncGithub}>
           {isSyncing ? t('plan.header.syncing') : t('plan.header.syncGithub')}
         </Chip>
         <Chip leftIcon={Plus} disabled={isSaving} onClick={onAddNode}>
           {t('plan.header.addNode')}
-        </Chip>
-        <Chip leftIcon={RefreshCw} disabled={isSaving} onClick={onReset}>
-          {t('plan.header.reset')}
         </Chip>
         <Chip
           variant='primary'

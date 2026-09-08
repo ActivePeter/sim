@@ -2244,6 +2244,30 @@ export const workspaceFiles = pgTable(
 export const workspaceFileColumns = omit(getTableColumns(workspaceFiles), ['size'])
 export type WorkspaceFileRow = Omit<typeof workspaceFiles.$inferSelect, 'size'>
 
+/** Development DAG documents and their revision live in one atomic database value. */
+export const workspaceDag = pgTable(
+  'workspace_dag',
+  {
+    workspaceId: text('workspace_id')
+      .notNull()
+      .references(() => workspace.id, { onDelete: 'cascade' }),
+    id: text('id').notNull(),
+    document: jsonb('document').notNull(),
+    legacyFileId: text('legacy_file_id')
+      .unique()
+      .references(() => workspaceFiles.id, { onDelete: 'set null' }),
+    createdAt: timestamp('created_at').notNull().defaultNow(),
+    updatedAt: timestamp('updated_at').notNull().defaultNow(),
+  },
+  (table) => ({
+    pk: primaryKey({ columns: [table.workspaceId, table.id] }),
+    documentIdentity: check(
+      'workspace_dag_document_identity',
+      sql`(${table.document}->>'id' = ${table.id} AND ${table.document}->>'kind' = 'dag') IS TRUE`
+    ),
+  })
+)
+
 export const uploadSessionStatusEnum = pgEnum('upload_session_status', [
   'uploading',
   'completing',

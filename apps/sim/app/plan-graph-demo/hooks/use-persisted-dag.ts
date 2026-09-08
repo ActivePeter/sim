@@ -4,184 +4,96 @@ import { useCallback, useEffect, useRef, useState } from 'react'
 import { toast } from '@sim/emcn'
 import { getErrorMessage } from '@sim/utils/errors'
 import { useQueryClient } from '@tanstack/react-query'
-import type { WorkspaceFileRecord } from '@/lib/uploads/contexts/workspace'
-import { useDagDocument } from '@/app/plan-graph-demo/hooks/use-dag-document'
-import {
-  createDemoDag,
-  type DagDocument,
-  getPlanFileName,
-  serializeDagDocument,
-} from '@/app/plan-graph-demo/plan-graph-model'
-import {
-  useCreateWorkspaceFile,
-  useUpdateWorkspaceFileContent,
-  workspaceFilesKeys,
-} from '@/hooks/queries/workspace-files'
+import { ApiClientError } from '@/lib/api/client/errors'
+import type { DagResponse } from '@/lib/api/contracts/dags'
+import type { DagDocument } from '@/lib/dags/model'
+import { dagKeys, useDag, useUpdateDag } from '@/hooks/queries/dags'
 
 export type DagMutation = (document: DagDocument) => DagDocument
-
-interface UsePersistedDagResult {
-  dag?: DagDocument
-  error?: string
-  fileId?: string
-  isLoading: boolean
-  isSaving: boolean
-  reset: () => void
-  updateDag: (mutation: DagMutation) => boolean
+interface PendingEdit {
+  scope: string
+  document: DagDocument
+  count: number
 }
 
-function contentVersion(file: WorkspaceFileRecord | undefined): string | undefined {
-  return (file?.contentUpdatedAt ?? file?.updatedAt)?.toISOString()
-}
-
-/** Persists a DAG in one workspace file and serializes local writes behind its content CAS token. */
-export function usePersistedDag(
-  workspaceId: string | undefined,
-  dagId: string
-): UsePersistedDagResult {
+/** React Query owns durable data; this hook owns only the editor's uncommitted FIFO and draft. */
+export function usePersistedDag(workspaceId: string, dagId: string) {
   const queryClient = useQueryClient()
-  const { mutate: createWorkspaceFile } = useCreateWorkspaceFile()
-  const { mutateAsync: updateWorkspaceFileContent } = useUpdateWorkspaceFileContent()
-  const [dag, setDag] = useState<DagDocument | undefined>(() =>
-    workspaceId ? undefined : createDemoDag(dagId)
-  )
-  const [error, setError] = useState<string>()
-  const [pendingWrites, setPendingWrites] = useState(0)
-  const creatingRef = useRef(false)
-  const optimisticRef = useRef<DagDocument | undefined>(dag)
-  const persistedRef = useRef<DagDocument | undefined>(dag)
-  const fileRef = useRef<WorkspaceFileRecord | undefined>(undefined)
-  const saveTailRef = useRef<Promise<void>>(Promise.resolve())
-  const saveGenerationRef = useRef(0)
+  const query = useDag(workspaceId, dagId)
+  const { mutateAsync: saveDag } = useUpdateDag()
+  const scope = JSON.stringify([workspaceId, dagId])
+  const [pendingEdit, setPendingEdit] = useState<PendingEdit>()
+  const [writeError, setWriteError] = useState<{ scope: string; message: string }>()
+  const pendingRef = useRef<PendingEdit | undefined>(undefined)
+  const tailRef = useRef<Promise<void>>(Promise.resolve())
+  const generationRef = useRef(0)
 
-  const planFileName = getPlanFileName(dagId)
-  const {
-    dag: storedDag,
-    error: readError,
-    file: planFile,
-    isMissing,
-  } = useDagDocument(workspaceId, dagId)
-
-  useEffect(() => {
-    if (!planFile) return
-    const currentVersion = contentVersion(fileRef.current)
-    const nextVersion = contentVersion(planFile)
-    if (!currentVersion || !nextVersion || nextVersion >= currentVersion) fileRef.current = planFile
-  }, [planFile])
-
-  useEffect(() => {
-    if (!workspaceId || !isMissing || creatingRef.current) return
-    creatingRef.current = true
-    const initial = createDemoDag(dagId)
-    createWorkspaceFile(
-      {
-        workspaceId,
-        name: planFileName,
-        contentType: 'application/json',
-        content: serializeDagDocument(initial),
-        encoding: 'utf-8',
-      },
-      {
-        onError: (cause) => {
-          creatingRef.current = false
-          setError(getErrorMessage(cause, 'Failed to create the plan document'))
-        },
-      }
-    )
-  }, [createWorkspaceFile, dagId, isMissing, planFileName, workspaceId])
-
-  useEffect(() => {
-    if (pendingWrites > 0) return
-    if (readError) {
-      setError(readError)
-      return
-    }
-    if (!storedDag) return
-    const currentRevision = persistedRef.current?.revision ?? -1
-    if (storedDag.revision >= currentRevision) {
-      persistedRef.current = storedDag
-      optimisticRef.current = storedDag
-      setDag(storedDag)
-    }
-    setError(undefined)
-  }, [pendingWrites, readError, storedDag])
-
-  const recoverFromWriteFailure = useCallback(
-    (cause: unknown, generation: number) => {
-      if (generation !== saveGenerationRef.current) return
-      saveGenerationRef.current += 1
-      const persisted = persistedRef.current
-      optimisticRef.current = persisted
-      setDag(persisted)
-      setPendingWrites(0)
-      const message = getErrorMessage(cause, 'Failed to save the plan document')
-      setError(message)
-      toast.error(`${message}. Reloaded the latest durable revision.`)
-      if (workspaceId) {
-        void queryClient.invalidateQueries({
-          queryKey: workspaceFilesKeys.workspaceLists(workspaceId),
-        })
-      }
+  useEffect(
+    () => () => {
+      generationRef.current += 1
+      pendingRef.current = undefined
     },
-    [queryClient, workspaceId]
+    [scope]
   )
 
   const updateDag = useCallback(
     (mutation: DagMutation): boolean => {
-      const current = optimisticRef.current
+      if (query.isError || !workspaceId) return false
+      const pending = pendingRef.current?.scope === scope ? pendingRef.current : undefined
+      const current =
+        pending?.document ??
+        queryClient.getQueryData<DagResponse>(dagKeys.detail(workspaceId, dagId))?.dag
       if (!current) return false
       const next = mutation(current)
       if (next === current) return false
-
-      optimisticRef.current = next
-      setDag(next)
-      if (!workspaceId) {
-        persistedRef.current = next
-        return true
-      }
-
-      const generation = saveGenerationRef.current
-      setPendingWrites((count) => count + 1)
-      const save = saveTailRef.current
+      const edit = { scope, document: next, count: (pending?.count ?? 0) + 1 }
+      pendingRef.current = edit
+      setPendingEdit(edit)
+      setWriteError(undefined)
+      const generation = generationRef.current
+      const save = tailRef.current
         .catch(() => undefined)
         .then(async () => {
-          if (generation !== saveGenerationRef.current) return
-          const file = fileRef.current
-          const expectedContentUpdatedAt = contentVersion(file)
-          if (!file || !expectedContentUpdatedAt) {
-            throw new Error('Plan file content version is not available')
-          }
-          const response = await updateWorkspaceFileContent({
-            workspaceId,
-            fileId: file.id,
-            content: serializeDagDocument(next),
-            encoding: 'utf-8',
-            expectedContentUpdatedAt,
-          })
-          if (generation !== saveGenerationRef.current) return
-          fileRef.current = response.file
-          persistedRef.current = next
-          setPendingWrites((count) => Math.max(0, count - 1))
-          setError(undefined)
+          if (generation !== generationRef.current) return
+          await saveDag({ workspaceId, dagId, document: next, expectedRevision: current.revision })
+          if (generation !== generationRef.current) return
+          const latest = pendingRef.current
+          const remaining =
+            latest && latest.count > 1 ? { ...latest, count: latest.count - 1 } : undefined
+          pendingRef.current = remaining
+          setPendingEdit(remaining)
         })
-      saveTailRef.current = save
-      void save.catch((cause) => recoverFromWriteFailure(cause, generation))
+        .catch((cause: unknown) => {
+          if (generation !== generationRef.current) return
+          generationRef.current += 1
+          pendingRef.current = undefined
+          setPendingEdit(undefined)
+          const message = getErrorMessage(cause, 'Failed to save the DAG')
+          setWriteError({ scope, message })
+          toast.error(message)
+          void queryClient.invalidateQueries({ queryKey: dagKeys.detail(workspaceId, dagId) })
+        })
+      tailRef.current = save
       return true
     },
-    [recoverFromWriteFailure, updateWorkspaceFileContent, workspaceId]
+    [dagId, query.isError, queryClient, saveDag, scope, workspaceId]
   )
 
-  const reset = useCallback(() => {
-    updateDag((current) => ({ ...createDemoDag(dagId), revision: current.revision + 1 }))
-  }, [dagId, updateDag])
-
+  const isMissing = query.error instanceof ApiClientError && query.error.status === 404
+  const isInaccessible =
+    query.error instanceof ApiClientError && [401, 403, 404].includes(query.error.status)
+  const persistedDag = isInaccessible ? undefined : query.data?.dag
   return {
-    dag,
-    error,
-    fileId: planFile?.id,
-    isLoading: Boolean(workspaceId) && !dag,
-    isSaving: pendingWrites > 0,
-    reset,
+    dag: isInaccessible
+      ? undefined
+      : pendingEdit?.scope === scope
+        ? pendingEdit.document
+        : persistedDag,
+    persistedDag,
+    error: writeError?.scope === scope ? writeError.message : query.error?.message,
+    isLoading: query.isPending && Boolean(workspaceId),
+    isMissing,
+    isSaving: Boolean(pendingEdit?.scope === scope && pendingEdit.count > 0),
     updateDag,
   }
 }

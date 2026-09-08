@@ -5,7 +5,7 @@ import type {
   PlanIssueBinding,
   PlanPullRequestBinding,
   ReviewState,
-} from '@/app/plan-graph-demo/plan-graph-model'
+} from '@/lib/dags/model'
 
 interface GitHubIssueResponse {
   html_url: string

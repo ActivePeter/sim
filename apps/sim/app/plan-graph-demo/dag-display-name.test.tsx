@@ -4,15 +4,19 @@
 import { act, type ReactNode } from 'react'
 import { createRoot, type Root } from 'react-dom/client'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import type { DagDocument } from '@/lib/dags/model'
 
 const mocks = vi.hoisted(() => ({
-  content: undefined as string | undefined,
-  files: [] as { id: string; key: string; name: string; workspaceId: string }[],
-  placeholder: false,
-  create: vi.fn(),
+  documents: new Map<string, DagDocument>(),
+  draft: undefined as DagDocument | undefined,
+  lists: new Map<
+    string,
+    { dags: { id: string; name: string; repository: string; revision: number }[] }
+  >(),
+  error: null as Error | null,
+  loading: false,
   update: vi.fn(),
 }))
-
 vi.mock('@sim/emcn', () => ({
   Badge: ({ children }: { children: ReactNode }) => children,
   ChipConfirmModal: () => null,
@@ -20,39 +24,55 @@ vi.mock('@sim/emcn', () => ({
   toast: { error: vi.fn() },
 }))
 vi.mock('@sim/emcn/icons', () => ({ Split: () => null, Trash: () => null }))
-vi.mock('@tanstack/react-query', () => ({
-  useQueryClient: () => ({ invalidateQueries: vi.fn() }),
-}))
 vi.mock('reactflow', () => ({
   ReactFlowProvider: ({ children }: { children: ReactNode }) => children,
 }))
-vi.mock('@/lib/i18n', () => ({
-  useI18n: () => ({
-    t: (key: string) => (key === 'plan.demo.name' ? 'Sim self-hosting roadmap' : key),
-  }),
+vi.mock('@/lib/i18n', () => ({ useI18n: () => ({ t: (key: string) => key }) }))
+vi.mock('@/components/canvas', () => ({
+  CanvasEditorFrame: ({
+    children,
+    bottomPanel,
+  }: {
+    children: ReactNode
+    bottomPanel: ReactNode
+  }) => (
+    <>
+      {children}
+      {bottomPanel}
+    </>
+  ),
 }))
-vi.mock('@/components/canvas', () => ({ CanvasEditorFrame: () => null }))
 vi.mock('@/app/plan-graph-demo/components', () => ({
-  ActivityPanel: () => null,
-  DagCanvasAdapter: () => null,
+  ActivityPanel: ({ document }: { document: DagDocument }) => (
+    <div data-activity-name={document.name} />
+  ),
+  DagCanvasAdapter: ({ selectedItemId }: { selectedItemId: string }) => (
+    <div data-selected={selectedItemId} />
+  ),
   NodeInspector: () => null,
   PlanHeader: ({ name }: { name: string }) => <h1>{name}</h1>,
 }))
 vi.mock('@/app/plan-graph-demo/hooks/use-github-reconciliation', () => ({
   useGitHubReconciliation: () => ({ isPending: false }),
 }))
-vi.mock('@/hooks/queries/workspace-files', () => ({
-  useWorkspaceFiles: () => ({
-    data: mocks.files,
-    isSuccess: true,
-    isLoading: false,
-    isPlaceholderData: mocks.placeholder,
-    error: null,
+vi.mock('@/app/plan-graph-demo/hooks/use-persisted-dag', () => ({
+  usePersistedDag: (workspaceId: string, dagId: string) => ({
+    dag: mocks.draft ?? mocks.documents.get(JSON.stringify([workspaceId, dagId])),
+    persistedDag: mocks.documents.get(JSON.stringify([workspaceId, dagId])),
+    error: mocks.error?.message,
+    isLoading: mocks.loading,
+    isSaving: false,
+    isMissing: !mocks.loading && !mocks.documents.has(JSON.stringify([workspaceId, dagId])),
+    updateDag: mocks.update,
   }),
-  useWorkspaceFileContent: () => ({ data: mocks.content, isLoading: false, error: null }),
-  useCreateWorkspaceFile: () => ({ mutate: mocks.create }),
-  useUpdateWorkspaceFileContent: () => ({ mutateAsync: mocks.update }),
-  workspaceFilesKeys: { workspaceLists: (workspaceId: string) => ['workspaceFiles', workspaceId] },
+}))
+vi.mock('@/hooks/queries/dags', () => ({
+  useDags: (workspaceId: string) => ({
+    data: mocks.lists.get(workspaceId),
+    isPending: mocks.loading,
+    isError: Boolean(mocks.error),
+    error: mocks.error,
+  }),
 }))
 vi.mock('@/app/workspace/[workspaceId]/w/components/sidebar/hooks', () => ({
   useHoverMenu: () => ({}),
@@ -66,46 +86,50 @@ vi.mock(
   '@/app/workspace/[workspaceId]/w/components/sidebar/components/collapsed-sidebar-menu',
   () => ({
     CollapsedSidebarMenu: ({ children }: { children: ReactNode }) => children,
-    CollapsedResourceFlyout: ({ entries }: { entries: { href: string; name: string }[] }) => (
-      <>
-        {entries.map((entry) => (
-          <a key={entry.href} href={entry.href}>
-            {entry.name}
-          </a>
-        ))}
-      </>
-    ),
+    CollapsedResourceFlyout: ({
+      entries,
+      emptyLabel,
+    }: {
+      entries: { href: string; name: string }[]
+      emptyLabel: string
+    }) =>
+      entries.length ? (
+        <>
+          {entries.map((entry) => (
+            <a key={entry.href} href={entry.href}>
+              {entry.name}
+            </a>
+          ))}
+        </>
+      ) : (
+        <p>{emptyLabel}</p>
+      ),
   })
 )
 
-import { DEFAULT_DEMO_DAG_ID } from '@/lib/dags/demo-catalog'
-import { DagDemo } from '@/app/plan-graph-demo/plan-graph-demo'
-import {
-  createDemoDag,
-  getPlanFileName,
-  serializeDagDocument,
-} from '@/app/plan-graph-demo/plan-graph-model'
+import { createTestDag } from '@/lib/dags/model.test-fixtures'
+import { DagEditor } from '@/app/plan-graph-demo/plan-graph-demo'
+import DagPage from '@/app/workspace/[workspaceId]/d/[dagId]/page'
 import { DagList } from '@/app/workspace/[workspaceId]/w/components/sidebar/components/dag-list/dag-list'
 
 const WORKSPACE_ID = 'workspace-1'
+const DAG_ID = 'database-only-dag'
 const CUSTOM_NAME = 'vscode x sim agent工作台'
 let container: HTMLDivElement
 let root: Root
 
-function setDocumentName(name: string, revision = 2) {
-  mocks.content = serializeDagDocument({ ...createDemoDag(), name, revision })
+function setDocument(name: string, revision = 2) {
+  const dag = { ...createTestDag(DAG_ID), name, revision }
+  mocks.documents.set(JSON.stringify([WORKSPACE_ID, DAG_ID]), dag)
+  mocks.lists.set(WORKSPACE_ID, { dags: [dag] })
 }
 
-function renderSurfaces(isCollapsed: boolean, workspaceId = WORKSPACE_ID, includeEditor = true) {
+function renderSurfaces(isCollapsed: boolean, workspaceId = WORKSPACE_ID) {
   act(() =>
     root.render(
       <>
-        <DagList
-          currentDagId={DEFAULT_DEMO_DAG_ID}
-          isCollapsed={isCollapsed}
-          workspaceId={workspaceId}
-        />
-        {includeEditor && <DagDemo workspaceId={workspaceId} />}
+        <DagList currentDagId={DAG_ID} isCollapsed={isCollapsed} workspaceId={workspaceId} />
+        <DagEditor workspaceId={workspaceId} dagId={DAG_ID} />
       </>
     )
   )
@@ -114,77 +138,114 @@ function renderSurfaces(isCollapsed: boolean, workspaceId = WORKSPACE_ID, includ
 beforeEach(() => {
   vi.clearAllMocks()
   ;(globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true
-  mocks.placeholder = false
-  mocks.files = [
-    {
-      id: 'file-1',
-      key: 'workspace/workspace-1/plan.json',
-      name: getPlanFileName(DEFAULT_DEMO_DAG_ID),
-      workspaceId: WORKSPACE_ID,
-    },
-  ]
-  setDocumentName(CUSTOM_NAME)
+  mocks.documents.clear()
+  mocks.draft = undefined
+  mocks.lists.clear()
+  mocks.loading = false
+  mocks.error = null
+  setDocument(CUSTOM_NAME)
   container = document.createElement('div')
   document.body.appendChild(container)
   root = createRoot(container)
 })
-
 afterEach(() => {
   act(() => root.unmount())
   container.remove()
 })
 
-describe('DAG document display name', () => {
+describe('database-backed DAG surfaces', () => {
   it.each([false, true])(
-    'uses the persisted name in the header and sidebar (collapsed: %s)',
+    'renders the persisted name in both surfaces (collapsed: %s)',
     (collapsed) => {
       renderSurfaces(collapsed)
-
-      expect({
-        header: container.querySelector('h1')?.textContent,
-        navigation: container.querySelector('a')?.textContent,
-        creates: mocks.create.mock.calls.length,
-        writes: mocks.update.mock.calls.length,
-      }).toEqual({ header: CUSTOM_NAME, navigation: CUSTOM_NAME, creates: 0, writes: 0 })
+      expect(container.querySelector('h1')?.textContent).toBe(CUSTOM_NAME)
+      expect(container.querySelector('a')?.textContent).toBe(CUSTOM_NAME)
+      expect(container.querySelector('a')?.getAttribute('href')).toBe(
+        `/workspace/${WORKSPACE_ID}/d/${DAG_ID}`
+      )
+      expect(mocks.update).not.toHaveBeenCalled()
       expect(container.textContent).not.toContain('Sim self-hosting roadmap')
     }
   )
-
-  it('updates both surfaces when the persisted name changes', () => {
+  it('updates both surfaces when the stored name changes', () => {
     renderSurfaces(false)
-    setDocumentName('下一轮协作', 3)
+    setDocument('下一轮协作', 3)
     renderSurfaces(false)
-
-    expect({
-      header: container.querySelector('h1')?.textContent,
-      navigation: container.querySelector('a')?.textContent,
-    }).toEqual({ header: '下一轮协作', navigation: '下一轮协作' })
+    expect(container.querySelector('h1')?.textContent).toBe('下一轮协作')
+    expect(container.querySelector('a')?.textContent).toBe('下一轮协作')
   })
-
-  it('does not display the previous workspace document while its listing is a placeholder', () => {
-    renderSurfaces(false, WORKSPACE_ID, false)
-    mocks.placeholder = true
-    renderSurfaces(false, 'workspace-2', false)
-
-    expect(container.querySelector('a')?.textContent).toBe('plan.loading')
+  it('projects recorded activities from the saved document, not an uncommitted draft', () => {
+    mocks.draft = { ...createTestDag(DAG_ID), name: 'Uncommitted edit' }
+    renderSurfaces(false)
+    expect(container.querySelector('h1')?.textContent).toBe('Uncommitted edit')
+    expect(
+      container.querySelector('[data-activity-name]')?.getAttribute('data-activity-name')
+    ).toBe(CUSTOM_NAME)
+  })
+  it.each([false, true])(
+    'discovers additional persisted DAGs without a source registry (collapsed: %s)',
+    (collapsed) => {
+      const list = mocks.lists.get(WORKSPACE_ID)
+      list?.dags.push({
+        id: 'a-new-dag',
+        name: 'Another graph',
+        repository: 'example/another',
+        revision: 8,
+      })
+      renderSurfaces(collapsed)
+      expect([...container.querySelectorAll('a')].map((a) => a.textContent)).toEqual([
+        CUSTOM_NAME,
+        'Another graph',
+      ])
+    }
+  )
+  it('does not carry the old workspace list or document into a new workspace', () => {
+    renderSurfaces(false)
+    mocks.loading = true
+    renderSurfaces(false, 'workspace-2')
+    expect(container.querySelector('a')).toBeNull()
+    expect(container.querySelector('h1')).toBeNull()
     expect(container.textContent).not.toContain(CUSTOM_NAME)
-    expect(mocks.create).not.toHaveBeenCalled()
   })
-
-  it('does not create a missing DAG merely by rendering sidebar navigation', () => {
-    mocks.files = []
-    mocks.content = undefined
-    renderSurfaces(false, WORKSPACE_ID, false)
-
-    expect(mocks.create).not.toHaveBeenCalled()
-    expect(mocks.update).not.toHaveBeenCalled()
+  it.each([false, true])(
+    'has an empty list and a missing-document state without seeding (collapsed: %s)',
+    (collapsed) => {
+      mocks.lists.set(WORKSPACE_ID, { dags: [] })
+      mocks.documents.clear()
+      renderSurfaces(collapsed)
+      expect(container.querySelector('a')).toBeNull()
+      expect(container.textContent).toContain('sidebar.noDags')
+      expect(container.textContent).toContain('plan.notFound')
+      expect(mocks.update).not.toHaveBeenCalled()
+    }
+  )
+  it('reports listing errors instead of fabricating a default entry', () => {
+    mocks.error = new Error('Database unavailable')
+    renderSurfaces(false)
+    expect(container.querySelector('a')).toBeNull()
+    expect(container.querySelector('[role=alert]')?.textContent).toBe('Database unavailable')
   })
-
-  it('does not use a name from a document with a mismatched DAG identity', () => {
-    mocks.content = serializeDagDocument({ ...createDemoDag('other-dag'), name: 'Other graph' })
-    renderSurfaces(false, WORKSPACE_ID, false)
-
-    expect(container.querySelector('a')?.textContent).toBe('plan.loading')
-    expect(container.textContent).not.toContain('Other graph')
+  it('derives the initial selection from the stored nodes, not PG-01', () => {
+    const dag = mocks.documents.get(JSON.stringify([WORKSPACE_ID, DAG_ID]))
+    if (!dag) throw new Error('Missing fixture')
+    dag.items = [{ ...dag.items[0], id: 'custom-first-node' }]
+    dag.dependencies = []
+    renderSurfaces(false)
+    expect(container.querySelector('[data-selected]')?.getAttribute('data-selected')).toBe(
+      'custom-first-node'
+    )
+  })
+  it('allows the dynamic page to open a DAG not registered in source', async () => {
+    const page = await DagPage({
+      params: Promise.resolve({ workspaceId: WORKSPACE_ID, dagId: DAG_ID }),
+    })
+    act(() => root.render(page))
+    expect(container.querySelector('h1')?.textContent).toBe(CUSTOM_NAME)
+  })
+  it('renders hostile stored names as text', () => {
+    setDocument('<img src=x onerror=alert(1)>')
+    renderSurfaces(false)
+    expect(container.querySelector('h1')?.textContent).toBe('<img src=x onerror=alert(1)>')
+    expect(container.querySelector('img')).toBeNull()
   })
 })

@@ -15,7 +15,6 @@ import {
   User,
   Workflow,
 } from '@sim/emcn/icons'
-import { type TranslationFunction, type TranslationKey, useI18n } from '@/lib/i18n'
 import {
   type DagItemUpdate,
   getMergeBlockingItemIds,
@@ -23,7 +22,8 @@ import {
   type PlanDependencyKind,
   type PlanLifecycle,
   type ResolvedPlanItem,
-} from '@/app/plan-graph-demo/plan-graph-model'
+} from '@/lib/dags/model'
+import { type TranslationFunction, type TranslationKey, useI18n } from '@/lib/i18n'
 
 const DEPENDENCY_KINDS: readonly PlanDependencyKind[] = ['requires', 'contract', 'integrate-with']
 

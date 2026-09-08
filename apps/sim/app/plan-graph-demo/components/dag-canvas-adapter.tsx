@@ -26,9 +26,6 @@ import {
   WORKFLOW_CONNECTION_LINE_CONTAINER_STYLE,
   WorkflowCanvas,
 } from '@/components/canvas'
-import { CanvasControls } from '@/app/plan-graph-demo/components/canvas-controls'
-import { PlanEdge, type PlanEdgeData } from '@/app/plan-graph-demo/components/plan-edge'
-import { PlanNodeCard, type PlanNodeData } from '@/app/plan-graph-demo/components/plan-node-card'
 import {
   DEFAULT_PLAN_NODE_SIZE,
   type PlanDependency,
@@ -36,7 +33,10 @@ import {
   type PlanSize,
   type ResolvedPlanItem,
   wouldCreateDagCycle,
-} from '@/app/plan-graph-demo/plan-graph-model'
+} from '@/lib/dags/model'
+import { CanvasControls } from '@/app/plan-graph-demo/components/canvas-controls'
+import { PlanEdge, type PlanEdgeData } from '@/app/plan-graph-demo/components/plan-edge'
+import { PlanNodeCard, type PlanNodeData } from '@/app/plan-graph-demo/components/plan-node-card'
 import {
   reactFlowFitViewOptions,
   reactFlowProOptions,

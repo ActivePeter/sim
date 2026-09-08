@@ -17,7 +17,7 @@ export SIM_API_KEY='<workspace-api-key>'
 export SIM_WORKSPACE_ID='<workspace-id>'
 ```
 
-The optional `SIM_PLAN_ID` defaults to `agent-session-prs`. Never commit these values.
+Set `SIM_PLAN_ID='<dag-id>'` to select a persisted DAG. When omitted, the tool selects the workspace's only DAG; zero or multiple DAGs require an explicit selection. Never commit these values.
 
 ## Inspect ready work
 
@@ -46,7 +46,9 @@ bun .agents/skills/plan-node/scripts/plan-node.ts claim --node PG-01 --agent cod
   --existing-worktree "$PWD" --branch "$(git branch --show-current)"
 ```
 
-The script uses the workspace file's content-version CAS token. A racing claim must fail with `409`; do not retry blindly. It assigns a monotonic fencing token, resolves the declared base SHA, and rolls the lease back if worktree provisioning fails.
+The script reads and writes the database-backed `/api/v2/dags` resource, shared with the UI. It passes the last read `expectedRevision` for every write. A racing claim must fail with `409`; do not retry blindly. It assigns a monotonic fencing token, resolves the declared base SHA, and rolls the lease back if worktree provisioning fails.
+
+Legacy JSON plans require an explicit import by a signed-in workspace writer through `POST /api/workspaces/<workspace-id>/dag-imports` with `{ "fileId": "<legacy-file-id>" }`. This session-only operation preserves the document and archives the source atomically; a workspace API key cannot perform the migration. Opening a DAG never creates sample data, and the tool does not fall back to archived plan files.
 
 Keep a long-running attempt alive with its immutable attempt ID:
 

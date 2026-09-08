@@ -4,7 +4,7 @@ import {
   addDagItem,
   applyGitHubBindingUpdates,
   claimDagItem,
-  createDemoDag,
+  createDagDocument,
   getBlockingItemIds,
   getMergeBlockingItemIds,
   getNextDagItemId,
@@ -19,7 +19,8 @@ import {
   serializeDagDocument,
   updateDagDependencyKind,
   updateDagItem,
-} from '@/app/plan-graph-demo/plan-graph-model'
+} from '@/lib/dags/model'
+import { createTestDag } from '@/lib/dags/model.test-fixtures'
 
 const CLAIM: PlanClaimInput = {
   agent: 'Codex local',
@@ -34,9 +35,72 @@ const CLAIM: PlanClaimInput = {
 }
 
 describe('plan graph model', () => {
+  it('allows an explicitly created empty graph and round-trips deleting its final node', () => {
+    const empty = createDagDocument({
+      id: 'empty-dag',
+      name: 'Empty',
+      repository: 'example/repo',
+      remote: 'origin',
+      defaultBranch: 'trunk',
+    })
+    expect(parseDagDocument(serializeDagDocument(empty))).toEqual(empty)
+    const withItem = addDagItem(empty, 'custom-node', 'A node')
+    expect(
+      parseDagDocument(serializeDagDocument(removeDagItem(withItem, 'custom-node'))).items
+    ).toEqual([])
+  })
+
+  it('derives dependencies only from the supplied graph', () => {
+    const dag = createTestDag()
+    expect(getBlockingItemIds('PG-02', dag.items, [])).toEqual([])
+    expect(
+      resolvePlanItems(dag.items, []).find((item) => item.id === 'PG-02')?.resolvedLifecycle
+    ).toBe('ready')
+  })
+
+  it('rejects cycles, duplicate nodes and edges, and unknown endpoints at the persistence boundary', () => {
+    const dag = createTestDag()
+    const firstEdge = dag.dependencies[0]
+    const invalid = [
+      { ...dag, items: [...dag.items, dag.items[0]] },
+      { ...dag, dependencies: [...dag.dependencies, firstEdge] },
+      { ...dag, dependencies: [...dag.dependencies, { ...firstEdge, id: 'duplicate-pair' }] },
+      { ...dag, dependencies: [{ ...firstEdge, target: 'unknown-node' }] },
+      { ...dag, dependencies: [{ ...firstEdge, target: firstEdge.source }] },
+      {
+        ...dag,
+        dependencies: [
+          firstEdge,
+          { ...firstEdge, id: 'cycle', source: firstEdge.target, target: firstEdge.source },
+        ],
+      },
+    ]
+    for (const document of invalid)
+      expect(() => parseDagDocument(JSON.stringify(document))).toThrow()
+  })
+
+  it('validates long dependency chains regardless of edge order', () => {
+    const dag = createTestDag()
+    const items = Array.from({ length: 2_000 }, (_, index) => ({
+      ...dag.items[0],
+      id: `node-${index}`,
+    }))
+    const dependencies = items
+      .slice(1)
+      .map((item, index) => ({
+        id: `edge-${index}`,
+        source: items[index].id,
+        target: item.id,
+        kind: 'requires' as const,
+      }))
+      .reverse()
+    const document = { ...dag, items, dependencies, positions: {}, sizes: {} }
+    expect(parseDagDocument(JSON.stringify(document))).toEqual(document)
+  })
+
   it('models Sim self-hosting as an isolated persisted DAG document', () => {
-    const dag = createDemoDag()
-    const secondDag = createDemoDag()
+    const dag = createTestDag()
+    const secondDag = createTestDag()
 
     expect(dag).toMatchObject({
       schemaVersion: 1,
@@ -74,7 +138,7 @@ describe('plan graph model', () => {
   })
 
   it('round-trips the durable document through its runtime validator', () => {
-    const dag = createDemoDag()
+    const dag = createTestDag()
 
     expect(parseDagDocument(serializeDagDocument(dag))).toEqual(dag)
     const { sizes: _sizes, ...legacyDocument } = dag
@@ -83,9 +147,9 @@ describe('plan graph model', () => {
   })
 
   it('adds and edits a DAG node with optional artifact bindings', () => {
-    const dag = createDemoDag()
+    const dag = createTestDag()
     const itemId = getNextDagItemId(dag.items)
-    const withItem = addDagItem(dag, itemId)
+    const withItem = addDagItem(dag, itemId, 'New node')
     const updated = updateDagItem(withItem, itemId, {
       title: 'Editable DAG node',
       localRepositoryPath: '/repos/editable-dag-node',
@@ -114,7 +178,7 @@ describe('plan graph model', () => {
   })
 
   it('adds editable dependencies while preserving the DAG invariant', () => {
-    const dag = createDemoDag()
+    const dag = createTestDag()
     const dependency: PlanDependency = {
       id: 'edge-new',
       source: 'PG-02',
@@ -139,7 +203,7 @@ describe('plan graph model', () => {
   })
 
   it('removes a DAG node together with its position, size, and dependencies', () => {
-    const dag = createDemoDag()
+    const dag = createTestDag()
     dag.sizes['PG-02'] = { height: 180, width: 320 }
     const next = removeDagItem(dag, 'PG-02')
 
@@ -154,7 +218,7 @@ describe('plan graph model', () => {
   })
 
   it('removes every selected DAG node in one revision', () => {
-    const dag = createDemoDag()
+    const dag = createTestDag()
     dag.sizes['PG-02'] = { height: 180, width: 320 }
     dag.sizes['PG-03'] = { height: 200, width: 360 }
 
@@ -178,7 +242,7 @@ describe('plan graph model', () => {
   })
 
   it('derives ready and blocked states from completed prerequisites', () => {
-    const dag = createDemoDag()
+    const dag = createTestDag()
     const resolved = resolvePlanItems(dag.items, dag.dependencies, new Date(CLAIM.claimedAt))
 
     expect(resolved.find((item) => item.id === 'PG-01')?.resolvedLifecycle).toBe('ready')
@@ -190,7 +254,7 @@ describe('plan graph model', () => {
   })
 
   it('claims a ready node once with a fencing token', () => {
-    const dag = createDemoDag()
+    const dag = createTestDag()
     const claimed = claimDagItem(dag, 'PG-01', CLAIM)
     const racingClaim = claimDagItem(claimed, 'PG-01', { ...CLAIM, agent: 'Claude local' })
 
@@ -209,7 +273,7 @@ describe('plan graph model', () => {
   })
 
   it('allows takeover after lease expiry and advances the fencing token', () => {
-    const dag = claimDagItem(createDemoDag(), 'PG-01', CLAIM)
+    const dag = claimDagItem(createTestDag(), 'PG-01', CLAIM)
     const takeover = claimDagItem(dag, 'PG-01', {
       ...CLAIM,
       agent: 'Claude local',
@@ -225,13 +289,13 @@ describe('plan graph model', () => {
   })
 
   it('does not claim a blocked node', () => {
-    const dag = createDemoDag()
+    const dag = createTestDag()
 
     expect(claimDagItem(dag, 'PG-02', CLAIM)).toBe(dag)
   })
 
   it('projects a real merged PR and unlocks all fan-out children', () => {
-    const claimed = claimDagItem(createDemoDag(), 'PG-01', CLAIM)
+    const claimed = claimDagItem(createTestDag(), 'PG-01', CLAIM)
     const syncedAt = '2026-08-31T02:00:00.000Z'
     const merged = applyGitHubBindingUpdates(
       claimed,
@@ -263,7 +327,7 @@ describe('plan graph model', () => {
   })
 
   it('lets integrate-with start independently but keeps the merge barrier', () => {
-    const dag = createDemoDag()
+    const dag = createTestDag()
     const doneItems = dag.items.map((item) =>
       ['PG-01', 'PG-02', 'PG-03', 'PG-04'].includes(item.id)
         ? { ...item, lifecycle: 'done' as const }

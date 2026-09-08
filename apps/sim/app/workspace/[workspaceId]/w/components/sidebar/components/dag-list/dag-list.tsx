@@ -2,9 +2,7 @@
 
 import { cn } from '@sim/emcn'
 import { Split } from '@sim/emcn/icons'
-import { type DagCatalogItem, DEMO_DAGS } from '@/lib/dags/demo-catalog'
 import { useI18n } from '@/lib/i18n'
-import { useDagDocument } from '@/app/plan-graph-demo/hooks/use-dag-document'
 import {
   CollapsedResourceFlyout,
   CollapsedSidebarMenu,
@@ -12,6 +10,7 @@ import {
 import { SidebarNavChip } from '@/app/workspace/[workspaceId]/w/components/sidebar/components/sidebar-nav-chip'
 import { SIDEBAR_ITEM_GAP_CLASS } from '@/app/workspace/[workspaceId]/w/components/sidebar/constants'
 import { useHoverMenu } from '@/app/workspace/[workspaceId]/w/components/sidebar/hooks'
+import { useDags } from '@/hooks/queries/dags'
 
 interface DagListProps {
   currentDagId?: string
@@ -19,22 +18,19 @@ interface DagListProps {
   workspaceId: string
 }
 
-interface DagListEntryProps extends DagListProps {
-  dag: DagCatalogItem
-}
-
 export function DagList({ currentDagId, isCollapsed, workspaceId }: DagListProps) {
   const hover = useHoverMenu()
   const { t } = useI18n()
-  const entries = DEMO_DAGS.map((dag) => (
-    <DagListEntry
-      key={dag.id}
-      dag={dag}
-      currentDagId={currentDagId}
-      isCollapsed={isCollapsed}
-      workspaceId={workspaceId}
-    />
-  ))
+  const query = useDags(workspaceId)
+  const entries = (query.isError ? [] : (query.data?.dags ?? [])).map((dag) => ({
+    kind: 'item' as const,
+    id: dag.id,
+    name: dag.name,
+    pinned: false,
+    href: `/workspace/${encodeURIComponent(workspaceId)}/d/${encodeURIComponent(dag.id)}`,
+  }))
+  const emptyLabel =
+    query.error?.message ?? (query.isPending ? t('plan.loading') : t('sidebar.noDags'))
 
   if (isCollapsed) {
     return (
@@ -44,36 +40,33 @@ export function DagList({ currentDagId, isCollapsed, workspaceId }: DagListProps
           hover={hover}
           ariaLabel={t('sidebar.dags')}
         >
-          {entries}
+          <CollapsedResourceFlyout
+            entries={entries}
+            icon={Split}
+            currentItemId={currentDagId}
+            emptyLabel={emptyLabel}
+          />
         </CollapsedSidebarMenu>
       </div>
     )
   }
-
-  return <div className={cn(SIDEBAR_ITEM_GAP_CLASS, 'flex flex-col px-2')}>{entries}</div>
-}
-
-function DagListEntry({ dag, currentDagId, isCollapsed, workspaceId }: DagListEntryProps) {
-  const { t } = useI18n()
-  const document = useDagDocument(workspaceId, dag.id)
-  const name = document.dag?.name ?? (document.isMissing ? dag.name : t('plan.loading'))
-  const href = `/workspace/${workspaceId}/d/${dag.id}`
-
-  if (isCollapsed) {
-    return (
-      <CollapsedResourceFlyout
-        entries={[{ kind: 'item', id: dag.id, name, pinned: false, href }]}
-        icon={Split}
-        currentItemId={currentDagId}
-        emptyLabel={t('sidebar.noDags')}
-      />
-    )
-  }
-
   return (
-    <SidebarNavChip
-      item={{ id: dag.id, label: name, icon: Split, href }}
-      active={dag.id === currentDagId}
-    />
+    <div className={cn(SIDEBAR_ITEM_GAP_CLASS, 'flex flex-col px-2')}>
+      {entries.map((entry) => (
+        <SidebarNavChip
+          key={entry.id}
+          item={{ id: entry.id, label: entry.name, icon: Split, href: entry.href }}
+          active={entry.id === currentDagId}
+        />
+      ))}
+      {entries.length === 0 && (
+        <p
+          role={query.isError ? 'alert' : 'status'}
+          className='px-2 py-1 text-[var(--text-muted)] text-xs'
+        >
+          {emptyLabel}
+        </p>
+      )}
+    </div>
   )
 }

@@ -1,23 +1,12 @@
 'use client'
 
 import { useCallback, useMemo, useState } from 'react'
-import { Badge, ChipConfirmModal } from '@sim/emcn'
+import { Badge, ChipConfirmModal, toast } from '@sim/emcn'
 import { Trash } from '@sim/emcn/icons'
 import { getErrorMessage } from '@sim/utils/errors'
 import { generateShortId } from '@sim/utils/id'
 import { ReactFlowProvider } from 'reactflow'
 import { CanvasEditorFrame } from '@/components/canvas'
-import { DEFAULT_DEMO_DAG_ID } from '@/lib/dags/demo-catalog'
-import { useI18n } from '@/lib/i18n'
-import {
-  ActivityPanel,
-  DagCanvasAdapter,
-  NodeInspector,
-  type PlanActivity,
-  PlanHeader,
-} from '@/app/plan-graph-demo/components'
-import { useGitHubReconciliation } from '@/app/plan-graph-demo/hooks/use-github-reconciliation'
-import { usePersistedDag } from '@/app/plan-graph-demo/hooks/use-persisted-dag'
 import {
   addDagDependency,
   addDagItem,
@@ -33,45 +22,35 @@ import {
   resolvePlanItems,
   updateDagDependencyKind,
   updateDagItem,
-} from '@/app/plan-graph-demo/plan-graph-model'
+} from '@/lib/dags/model'
+import { useI18n } from '@/lib/i18n'
+import {
+  ActivityPanel,
+  DagCanvasAdapter,
+  NodeInspector,
+  PlanHeader,
+} from '@/app/plan-graph-demo/components'
+import { useGitHubReconciliation } from '@/app/plan-graph-demo/hooks/use-github-reconciliation'
+import { usePersistedDag } from '@/app/plan-graph-demo/hooks/use-persisted-dag'
 
-const INITIAL_ACTIVITIES: readonly PlanActivity[] = [
-  {
-    id: 'activity-self-hosting',
-    title: { key: 'plan.activity.initializedTitle' },
-    detail: { key: 'plan.activity.initializedDetail' },
-    kind: 'plan',
-    time: { key: 'common.now' },
-  },
-  {
-    id: 'activity-ready',
-    title: { key: 'plan.activity.readyTitle' },
-    detail: { key: 'plan.activity.readyDetail' },
-    kind: 'agent',
-    time: { key: 'common.now' },
-  },
-]
-
-interface DagDemoProps {
-  dagId?: string
-  workspaceId?: string
+interface DagEditorProps {
+  dagId: string
+  workspaceId: string
 }
 
 type PendingDeletion =
   | { id: string; kind: 'dependency' }
   | { itemIds: readonly string[]; kind: 'items' }
 
-export function DagDemo({ dagId = DEFAULT_DEMO_DAG_ID, workspaceId }: DagDemoProps = {}) {
+export function DagEditor({ dagId, workspaceId }: DagEditorProps) {
   const { t } = useI18n()
-  const { dag, error, fileId, isLoading, isSaving, reset, updateDag } = usePersistedDag(
+  const { dag, persistedDag, error, isLoading, isMissing, isSaving, updateDag } = usePersistedDag(
     workspaceId,
     dagId
   )
   const githubSync = useGitHubReconciliation()
-  const [selectedItemId, setSelectedItemId] = useState('PG-01')
-  const [selectedItemIds, setSelectedItemIds] = useState<readonly string[]>(['PG-01'])
-  const [activities, setActivities] = useState<PlanActivity[]>([...INITIAL_ACTIVITIES])
-  const [canvasRevision, setCanvasRevision] = useState(0)
+  const [selectedItemId, setSelectedItemId] = useState<string>()
+  const [selectedItemIds, setSelectedItemIds] = useState<readonly string[]>([])
   const [pendingDeletion, setPendingDeletion] = useState<PendingDeletion>()
 
   const resolvedItems = useMemo(
@@ -84,23 +63,12 @@ export function DagDemo({ dagId = DEFAULT_DEMO_DAG_ID, workspaceId }: DagDemoPro
   const pendingItemIds = pendingDeletion?.kind === 'items' ? pendingDeletion.itemIds : []
   const pendingItemCount = pendingItemIds.length
 
-  const prependActivity = useCallback((activity: PlanActivity) => {
-    setActivities((current) => [activity, ...current].slice(0, 8))
-  }, [])
-
   function handleAddItem() {
     if (!dag) return
     const itemId = getNextDagItemId(dag.items)
-    if (!updateDag((current) => addDagItem(current, itemId))) return
+    if (!updateDag((current) => addDagItem(current, itemId, t('plan.node.untitled')))) return
     setSelectedItemId(itemId)
     setSelectedItemIds([itemId])
-    prependActivity({
-      id: generateShortId(),
-      title: { key: 'plan.activity.addedTitle', values: { itemId } },
-      detail: { key: 'plan.activity.addedDetail' },
-      kind: 'plan',
-      time: { key: 'common.now' },
-    })
   }
 
   function handleUpdateItem(itemId: string, update: DagItemUpdate) {
@@ -123,21 +91,6 @@ export function DagDemo({ dagId = DEFAULT_DEMO_DAG_ID, workspaceId }: DagDemoPro
       remainingItems.find((item) => item.id === selectedItemId)?.id ?? remainingItems[0]?.id ?? ''
     setSelectedItemId(nextSelectedItemId)
     setSelectedItemIds(nextSelectedItemId ? [nextSelectedItemId] : [])
-    prependActivity({
-      id: generateShortId(),
-      title: {
-        key: 'plan.activity.removedTitle',
-        values: { itemId: removedItemIds.join(', ') },
-      },
-      detail: {
-        key:
-          removedItemIds.length > 1
-            ? 'plan.activity.removedItemsDetail'
-            : 'plan.activity.removedItemDetail',
-      },
-      kind: 'plan',
-      time: { key: 'common.now' },
-    })
   }
 
   const handleRemoveItems = useCallback((itemIds: readonly string[]) => {
@@ -169,22 +122,9 @@ export function DagDemo({ dagId = DEFAULT_DEMO_DAG_ID, workspaceId }: DagDemoPro
       const next = addDagDependency(dag, dependency)
       const accepted = next !== dag
       if (accepted) updateDag(() => next)
-      prependActivity({
-        id: generateShortId(),
-        title: accepted
-          ? {
-              key: 'plan.activity.connectedTitle',
-              values: { sourceId, targetId },
-            }
-          : { key: 'plan.activity.dependencyRejectedTitle' },
-        detail: accepted
-          ? { key: 'plan.activity.connectedDetail' }
-          : { key: 'plan.activity.dependencyRejectedDetail' },
-        kind: 'plan',
-        time: { key: 'common.now' },
-      })
+      else toast.error(t('plan.activity.dependencyRejectedDetail'))
     },
-    [dag, prependActivity, updateDag]
+    [dag, t, updateDag]
   )
 
   function handleUpdateDependencyKind(dependencyId: string, kind: PlanDependencyKind) {
@@ -198,16 +138,6 @@ export function DagDemo({ dagId = DEFAULT_DEMO_DAG_ID, workspaceId }: DagDemoPro
   function removeDependency(dependencyId: string) {
     const dependency = dag?.dependencies.find((candidate) => candidate.id === dependencyId)
     if (!dependency || !updateDag((current) => removeDagDependency(current, dependencyId))) return
-    prependActivity({
-      id: generateShortId(),
-      title: {
-        key: 'plan.activity.removedTitle',
-        values: { itemId: `${dependency.source} → ${dependency.target}` },
-      },
-      detail: { key: 'plan.activity.removedDependencyDetail' },
-      kind: 'plan',
-      time: { key: 'common.now' },
-    })
   }
 
   function confirmDeletion() {
@@ -259,41 +189,16 @@ export function DagDemo({ dagId = DEFAULT_DEMO_DAG_ID, workspaceId }: DagDemoPro
     if (!dag) return
     try {
       const result = await githubSync.mutateAsync({ document: dag })
-      const changed = updateDag((current) =>
-        applyGitHubBindingUpdates(current, result.updates, result.syncedAt)
-      )
-      prependActivity({
-        id: generateShortId(),
-        title: { key: 'plan.activity.githubReconciledTitle' },
-        detail: changed
-          ? { key: 'plan.activity.githubChangedDetail' }
-          : { key: 'plan.activity.githubUnchangedDetail' },
-        kind: 'review',
-        time: { key: 'common.now' },
-      })
+      updateDag((current) => applyGitHubBindingUpdates(current, result.updates, result.syncedAt))
     } catch (cause) {
-      prependActivity({
-        id: generateShortId(),
-        title: { key: 'plan.activity.githubSyncFailedTitle' },
-        detail: getErrorMessage(cause, t('plan.activity.unknownGithubError')),
-        kind: 'review',
-        time: { key: 'common.now' },
-      })
+      toast.error(getErrorMessage(cause, t('plan.activity.unknownGithubError')))
     }
-  }
-
-  function handleReset() {
-    reset()
-    setSelectedItemId('PG-01')
-    setSelectedItemIds(['PG-01'])
-    setActivities([...INITIAL_ACTIVITIES])
-    setCanvasRevision((current) => current + 1)
   }
 
   if (isLoading || !dag) {
     return (
       <div className='flex h-full items-center justify-center bg-[var(--bg)] text-[var(--text-muted)] text-sm'>
-        {error ?? t('plan.loading')}
+        {isMissing ? t('plan.notFound') : (error ?? t('plan.loading'))}
       </div>
     )
   }
@@ -302,7 +207,7 @@ export function DagDemo({ dagId = DEFAULT_DEMO_DAG_ID, workspaceId }: DagDemoPro
     <div className='flex h-full min-h-0 w-full flex-col overflow-hidden bg-[var(--bg)]'>
       <PlanHeader
         counts={counts}
-        fileId={fileId}
+        hasError={Boolean(error)}
         isSaving={isSaving}
         isSyncing={githubSync.isPending}
         lastGithubSyncAt={dag.lastGithubSyncAt}
@@ -310,7 +215,6 @@ export function DagDemo({ dagId = DEFAULT_DEMO_DAG_ID, workspaceId }: DagDemoPro
         nextReadyItemId={nextReadyItem?.id}
         onAddNode={handleAddItem}
         onInspectNext={handleInspectNext}
-        onReset={handleReset}
         onSyncGithub={() => void handleGithubSync()}
         repository={dag.repository}
         revision={dag.revision}
@@ -324,7 +228,7 @@ export function DagDemo({ dagId = DEFAULT_DEMO_DAG_ID, workspaceId }: DagDemoPro
 
       <CanvasEditorFrame
         className='min-h-0 flex-1'
-        bottomPanel={<ActivityPanel activities={activities} persistent={Boolean(fileId)} />}
+        bottomPanel={persistedDag ? <ActivityPanel document={persistedDag} /> : undefined}
         sidePanel={
           selectedItem ? (
             <NodeInspector
@@ -364,7 +268,6 @@ export function DagDemo({ dagId = DEFAULT_DEMO_DAG_ID, workspaceId }: DagDemoPro
           <div className='min-h-0 flex-1'>
             <ReactFlowProvider>
               <DagCanvasAdapter
-                key={canvasRevision}
                 dependencies={dag.dependencies}
                 onConnectItems={handleConnectItems}
                 onItemResize={handleItemResize}
@@ -372,7 +275,7 @@ export function DagDemo({ dagId = DEFAULT_DEMO_DAG_ID, workspaceId }: DagDemoPro
                 onRemoveDependency={handleRemoveDependency}
                 onRemoveItems={handleRemoveItems}
                 resolvedItems={resolvedItems}
-                selectedItemId={selectedItemId}
+                selectedItemId={selectedItem?.id ?? ''}
                 onSelectItem={setSelectedItemId}
                 onSelectedItemsChange={handleSelectedItemsChange}
                 positions={dag.positions}
