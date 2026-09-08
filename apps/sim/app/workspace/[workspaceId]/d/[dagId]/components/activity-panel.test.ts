@@ -12,7 +12,7 @@ vi.mock('@sim/emcn/icons', () => ({
 vi.mock('@/lib/i18n', () => ({ useI18n: vi.fn() }))
 
 import { createTestDag } from '@/lib/dags/model.test-fixtures'
-import { getPersistedPlanActivities } from '@/app/plan-graph-demo/components/activity-panel'
+import { getPersistedPlanActivities } from '@/app/workspace/[workspaceId]/d/[dagId]/components/activity-panel'
 
 describe('persisted DAG activity projection', () => {
   it('does not invent ready, initialization, or execution events for planned nodes', () => {

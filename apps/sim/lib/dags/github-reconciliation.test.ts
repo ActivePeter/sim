@@ -1,10 +1,10 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import { createTestDag } from '@/lib/dags/model.test-fixtures'
 import {
   reconcileDagWithGitHub,
   resolveCheckState,
   resolveReviewState,
-} from '@/app/plan-graph-demo/github-reconciliation'
+} from '@/lib/dags/github-reconciliation'
+import { createTestDag } from '@/lib/dags/model.test-fixtures'
 
 afterEach(() => {
   vi.unstubAllGlobals()

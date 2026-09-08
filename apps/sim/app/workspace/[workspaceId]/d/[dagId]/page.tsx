@@ -1,5 +1,5 @@
 import type { Metadata } from 'next'
-import { DagEditor } from '@/app/plan-graph-demo/plan-graph-demo'
+import { DagEditor } from '@/app/workspace/[workspaceId]/d/[dagId]/dag'
 
 export const metadata: Metadata = {
   title: 'PR 依赖 DAG | Sim',

@@ -14,7 +14,7 @@ vi.mock('@/lib/api/client/request', () => ({ requestJson: mocks.request }))
 
 import { ApiClientError } from '@/lib/api/client/errors'
 import { createTestDag } from '@/lib/dags/model.test-fixtures'
-import { usePersistedDag } from '@/app/plan-graph-demo/hooks/use-persisted-dag'
+import { usePersistedDag } from '@/app/workspace/[workspaceId]/d/[dagId]/hooks/use-persisted-dag'
 import { dagKeys } from '@/hooks/queries/dags'
 
 const WORKSPACE_ID = 'workspace-1'

@@ -5,6 +5,7 @@ import { act, type MouseEventHandler } from 'react'
 import { createRoot, type Root } from 'react-dom/client'
 import { ReactFlowProvider } from 'reactflow'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import { CANVAS_DOCUMENT_KINDS } from '@/lib/canvas/types'
 
 const canvasSurfaceMock = vi.hoisted(() => vi.fn())
 const reactFlowViewportMock = vi.hoisted(() => ({
@@ -57,17 +58,18 @@ function renderedSurfaceProps(): Record<string, unknown> {
   return call[0]
 }
 
-describe('WorkflowCanvas interaction modes', () => {
+describe.each(CANVAS_DOCUMENT_KINDS)('WorkflowCanvas (%s) interaction modes', (documentKind) => {
   it('draws a selection by default and pans while Control or Command is held', () => {
     act(() => {
       root.render(
         <ReactFlowProvider>
-          <WorkflowCanvas documentKind='dag' interactionMode='cursor' />
+          <WorkflowCanvas documentKind={documentKind} interactionMode='cursor' />
         </ReactFlowProvider>
       )
     })
 
     expect(renderedSurfaceProps()).toMatchObject({
+      documentKind,
       panActivationKeyCode: ['Control', 'Meta'],
       panOnDrag: [1],
       selectionKeyCode: 'Shift',
@@ -79,7 +81,7 @@ describe('WorkflowCanvas interaction modes', () => {
     act(() => {
       root.render(
         <ReactFlowProvider>
-          <WorkflowCanvas documentKind='dag' interactionMode='hand' />
+          <WorkflowCanvas documentKind={documentKind} interactionMode='hand' />
         </ReactFlowProvider>
       )
     })
@@ -96,7 +98,7 @@ describe('WorkflowCanvas interaction modes', () => {
     act(() => {
       root.render(
         <ReactFlowProvider>
-          <WorkflowCanvas documentKind='dag' interactionMode='cursor' />
+          <WorkflowCanvas documentKind={documentKind} interactionMode='cursor' />
         </ReactFlowProvider>
       )
     })
@@ -126,5 +128,46 @@ describe('WorkflowCanvas interaction modes', () => {
     })
 
     act(() => window.dispatchEvent(new MouseEvent('mouseup', { bubbles: true })))
+  })
+
+  it('preserves inspection but disables graph editing for read-only documents', () => {
+    act(() => {
+      root.render(
+        <ReactFlowProvider>
+          <WorkflowCanvas documentKind={documentKind} interactionMode='cursor' editable={false} />
+        </ReactFlowProvider>
+      )
+    })
+
+    expect(renderedSurfaceProps()).toMatchObject({
+      elementsSelectable: true,
+      nodesConnectable: false,
+      nodesDraggable: false,
+      edgesUpdatable: false,
+      autoPanOnConnect: false,
+      autoPanOnNodeDrag: false,
+      deleteKeyCode: null,
+    })
+  })
+
+  it('uses the same non-editable panning contract for embedded documents', () => {
+    act(() => {
+      root.render(
+        <ReactFlowProvider>
+          <WorkflowCanvas documentKind={documentKind} interactionMode='cursor' embedded />
+        </ReactFlowProvider>
+      )
+    })
+
+    expect(renderedSurfaceProps()).toMatchObject({
+      elementsSelectable: false,
+      selectionOnDrag: false,
+      selectionKeyCode: null,
+      multiSelectionKeyCode: null,
+      nodesConnectable: false,
+      nodesDraggable: false,
+      edgesUpdatable: false,
+      panOnDrag: true,
+    })
   })
 })

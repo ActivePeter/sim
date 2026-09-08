@@ -2,6 +2,7 @@ export {
   CanvasActionBar,
   type CanvasInteractionMode,
 } from '@/components/canvas/canvas-action-bar'
+export { CANVAS_FIT_VIEW_OPTIONS } from '@/components/canvas/canvas-constants'
 export { CanvasEditorFrame } from '@/components/canvas/canvas-editor-frame'
 export {
   useWorkflowConnectionGesture,

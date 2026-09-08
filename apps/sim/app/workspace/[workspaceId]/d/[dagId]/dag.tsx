@@ -29,9 +29,9 @@ import {
   DagCanvasAdapter,
   NodeInspector,
   PlanHeader,
-} from '@/app/plan-graph-demo/components'
-import { useGitHubReconciliation } from '@/app/plan-graph-demo/hooks/use-github-reconciliation'
-import { usePersistedDag } from '@/app/plan-graph-demo/hooks/use-persisted-dag'
+} from '@/app/workspace/[workspaceId]/d/[dagId]/components'
+import { usePersistedDag } from '@/app/workspace/[workspaceId]/d/[dagId]/hooks/use-persisted-dag'
+import { useReconcileDagWithGitHub } from '@/hooks/queries/dags'
 
 interface DagEditorProps {
   dagId: string
@@ -48,7 +48,7 @@ export function DagEditor({ dagId, workspaceId }: DagEditorProps) {
     workspaceId,
     dagId
   )
-  const githubSync = useGitHubReconciliation()
+  const githubSync = useReconcileDagWithGitHub()
   const [selectedItemId, setSelectedItemId] = useState<string>()
   const [selectedItemIds, setSelectedItemIds] = useState<readonly string[]>([])
   const [pendingDeletion, setPendingDeletion] = useState<PendingDeletion>()

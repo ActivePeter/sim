@@ -42,7 +42,7 @@ vi.mock('@/components/canvas', () => ({
     </>
   ),
 }))
-vi.mock('@/app/plan-graph-demo/components', () => ({
+vi.mock('@/app/workspace/[workspaceId]/d/[dagId]/components', () => ({
   ActivityPanel: ({ document }: { document: DagDocument }) => (
     <div data-activity-name={document.name} />
   ),
@@ -52,10 +52,7 @@ vi.mock('@/app/plan-graph-demo/components', () => ({
   NodeInspector: () => null,
   PlanHeader: ({ name }: { name: string }) => <h1>{name}</h1>,
 }))
-vi.mock('@/app/plan-graph-demo/hooks/use-github-reconciliation', () => ({
-  useGitHubReconciliation: () => ({ isPending: false }),
-}))
-vi.mock('@/app/plan-graph-demo/hooks/use-persisted-dag', () => ({
+vi.mock('@/app/workspace/[workspaceId]/d/[dagId]/hooks/use-persisted-dag', () => ({
   usePersistedDag: (workspaceId: string, dagId: string) => ({
     dag: mocks.draft ?? mocks.documents.get(JSON.stringify([workspaceId, dagId])),
     persistedDag: mocks.documents.get(JSON.stringify([workspaceId, dagId])),
@@ -67,6 +64,7 @@ vi.mock('@/app/plan-graph-demo/hooks/use-persisted-dag', () => ({
   }),
 }))
 vi.mock('@/hooks/queries/dags', () => ({
+  useReconcileDagWithGitHub: () => ({ isPending: false }),
   useDags: (workspaceId: string) => ({
     data: mocks.lists.get(workspaceId),
     isPending: mocks.loading,
@@ -108,7 +106,7 @@ vi.mock(
 )
 
 import { createTestDag } from '@/lib/dags/model.test-fixtures'
-import { DagEditor } from '@/app/plan-graph-demo/plan-graph-demo'
+import { DagEditor } from '@/app/workspace/[workspaceId]/d/[dagId]/dag'
 import DagPage from '@/app/workspace/[workspaceId]/d/[dagId]/page'
 import { DagList } from '@/app/workspace/[workspaceId]/w/components/sidebar/components/dag-list/dag-list'
 

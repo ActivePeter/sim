@@ -37,7 +37,7 @@ import {
   type PlanPullRequestBinding,
   resolvePlanItems,
 } from '@/lib/dags/model'
-import { NodeInspector } from '@/app/plan-graph-demo/components/node-inspector'
+import { NodeInspector } from '@/app/workspace/[workspaceId]/d/[dagId]/components/node-inspector'
 
 function renderGateResults(primaryPr: Partial<PlanPullRequestBinding>) {
   const document = addDagItem(

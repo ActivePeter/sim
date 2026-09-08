@@ -17,6 +17,8 @@ import {
   useReactFlow,
 } from 'reactflow'
 import {
+  CANVAS_FIT_VIEW_OPTIONS,
+  CanvasActionBar,
   type CanvasInteractionMode,
   reconcileCanvasEdges,
   reconcileCanvasNodes,
@@ -34,19 +36,19 @@ import {
   type ResolvedPlanItem,
   wouldCreateDagCycle,
 } from '@/lib/dags/model'
-import { CanvasControls } from '@/app/plan-graph-demo/components/canvas-controls'
-import { PlanEdge, type PlanEdgeData } from '@/app/plan-graph-demo/components/plan-edge'
-import { PlanNodeCard, type PlanNodeData } from '@/app/plan-graph-demo/components/plan-node-card'
 import {
-  reactFlowFitViewOptions,
-  reactFlowProOptions,
-  reactFlowStyles,
-} from '@/app/workspace/[workspaceId]/w/[workflowId]/workflow-constants'
+  PlanEdge,
+  type PlanEdgeData,
+} from '@/app/workspace/[workspaceId]/d/[dagId]/components/plan-edge'
+import {
+  PlanNodeCard,
+  type PlanNodeData,
+} from '@/app/workspace/[workspaceId]/d/[dagId]/components/plan-node-card'
 import { useSnapToGridSize } from '@/hooks/queries/general-settings'
 
 const DAG_NODE_TYPES: NodeTypes = { dagNode: PlanNodeCard }
 const DAG_EDGE_TYPES: EdgeTypes = { dagEdge: PlanEdge }
-const DAG_FIT_VIEW_OPTIONS = { ...reactFlowFitViewOptions, padding: 0.18 } as const
+const DAG_FIT_VIEW_OPTIONS = { ...CANVAS_FIT_VIEW_OPTIONS, padding: 0.18 } as const
 const TEXT_ENTRY_SELECTOR =
   'input, textarea, select, [contenteditable="true"], [role="textbox"], .cm-editor'
 
@@ -398,6 +400,10 @@ export function DagCanvasAdapter({
       setNodes: setDisplayNodes,
     })
 
+  const handleFitView = useCallback(() => {
+    void reactFlowInstance.fitView({ ...DAG_FIT_VIEW_OPTIONS, duration: 250 })
+  }, [reactFlowInstance])
+
   const handleInit = useCallback((instance: ReactFlowInstance) => {
     if (initializedRef.current) return
     initializedRef.current = true
@@ -440,13 +446,11 @@ export function DagCanvasAdapter({
         onSelectionDragStop={onSelectionDragStop}
         onInit={handleInit}
         fitViewOptions={DAG_FIT_VIEW_OPTIONS}
-        proOptions={reactFlowProOptions}
         connectionLineContainerStyle={WORKFLOW_CONNECTION_LINE_CONTAINER_STYLE}
-        className={reactFlowStyles}
         snapToGrid={snapToGrid}
         snapGrid={snapGrid}
       >
-        <CanvasControls mode={canvasMode} onModeChange={setCanvasMode} />
+        <CanvasActionBar mode={canvasMode} onModeChange={setCanvasMode} onFitView={handleFitView} />
       </WorkflowCanvas>
     </div>
   )

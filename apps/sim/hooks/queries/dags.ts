@@ -10,6 +10,7 @@ import {
   type UpdateDagBody,
   updateDagContract,
 } from '@/lib/api/contracts/dags'
+import { reconcileDagWithGitHub } from '@/lib/dags/github-reconciliation'
 
 export const dagKeys = {
   all: ['dags'] as const,
@@ -54,6 +55,14 @@ export function useDag(workspaceId: string, dagId: string) {
     staleTime: DAG_STALE_TIME,
     refetchInterval: DAG_STALE_TIME,
     retry: retryDagRead,
+  })
+}
+
+/** Reads external facts only; the editor commits them through its normal DAG mutation queue. */
+export function useReconcileDagWithGitHub() {
+  return useMutation({
+    mutationFn: ({ document }: { document: DagResponse['dag'] }) =>
+      reconcileDagWithGitHub(document),
   })
 }
 
