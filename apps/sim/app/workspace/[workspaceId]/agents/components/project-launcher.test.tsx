@@ -10,6 +10,7 @@ const mocks = vi.hoisted(() => ({
   refetch: vi.fn(),
   context: undefined as VibeVscodeHostContext | undefined,
   host: undefined as VscodeHost | undefined,
+  hosts: [] as VscodeHost[],
 }))
 vi.mock('next/navigation', () => ({
   useParams: () => ({ workspaceId: 'workspace-1' }),
@@ -22,7 +23,7 @@ vi.mock('nuqs', async (importOriginal) => ({
 }))
 vi.mock('@/hooks/queries/vscode-agents', () => ({
   useVscodeHosts: () => ({
-    data: { hosts: [mocks.host] },
+    data: { hosts: mocks.hosts },
     isPending: false,
     refetch: mocks.refetch,
   }),
@@ -100,6 +101,23 @@ beforeEach(() => {
     logicalWorkspace: mocks.host.catalog.logicalWorkspaces[0],
     project: mocks.host.catalog.physicalWorkspace.folders[0],
   }
+  mocks.hosts = [
+    mocks.host,
+    {
+      id: 'host-2',
+      revision: 1,
+      updatedAt: '',
+      catalog: {
+        physicalWorkspace: {
+          id: 'physical-2',
+          name: 'Other Workspace',
+          remoteAuthority: '',
+          folders: [{ name: 'C', uri: 'file:///project-c', index: 0 }],
+        },
+        logicalWorkspaces: [],
+      },
+    },
+  ]
   container = document.createElement('div')
   document.body.appendChild(container)
   root = createRoot(container)
@@ -111,6 +129,28 @@ afterEach(() => {
 })
 
 describe('project Agent launch intent', () => {
+  it('limits sidebar projects to the current host, not another entry point', () => {
+    expect(
+      Array.from(container.querySelectorAll('option'), (option) => option.textContent)
+    ).toEqual(['A', 'B'])
+  })
+
+  it('keeps projects from all hosts available in the full Sim launcher', () => {
+    act(() => root.render(<ProjectLauncher />))
+    expect(
+      Array.from(container.querySelectorAll('option'), (option) => option.textContent)
+    ).toEqual(['A · Workspace', 'B · Workspace', 'C · Other Workspace'])
+  })
+
+  it('does not expose cached projects before the current host is resolved', () => {
+    mocks.host = undefined
+    act(() => root.render(<ProjectLauncher compact />))
+    expect({
+      projects: container.querySelectorAll('option').length,
+      canCreate: !createButton().disabled,
+    }).toEqual({ projects: 0, canCreate: false })
+  })
+
   it('guards same-tick duplicate clicks and opens the native chat ID', async () => {
     const pending = deferred<{ id: string; workspaceId: string }>()
     mocks.create.mockReturnValueOnce(pending.promise)

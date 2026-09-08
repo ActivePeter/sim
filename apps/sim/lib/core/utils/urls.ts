@@ -261,7 +261,7 @@ export function getSocketServerUrl(): string {
  *
  * Resolution order:
  * 1. `NEXT_PUBLIC_SOCKET_URL` if explicitly set (subdomain, separate host:port)
- * 2. In the browser when the page is served from a non-localhost origin, the
+ * 2. In the browser when the page uses HTTPS or a non-localhost origin, the
  *    page's own origin — assumes the reverse proxy routes `/socket.io` to the
  *    realtime service. This avoids shipping a hardcoded `localhost:3002` to
  *    self-hosters behind nginx/Cloudflare.
@@ -272,7 +272,11 @@ export function getSocketUrl(): string {
   if (explicit) return explicit
 
   const browserOrigin = getBrowserOrigin()
-  if (browserOrigin && !isLoopbackHostname(new URL(browserOrigin).hostname)) {
+  if (
+    browserOrigin &&
+    (new URL(browserOrigin).protocol === 'https:' ||
+      !isLoopbackHostname(new URL(browserOrigin).hostname))
+  ) {
     return browserOrigin
   }
 

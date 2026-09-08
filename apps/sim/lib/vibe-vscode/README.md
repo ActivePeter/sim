@@ -11,7 +11,8 @@ in the VS Code sidebar, Sim's chat list and `/workspace/<workspaceId>/agents`.
 complete physical workspace, remote authority, projects and logical workspaces.
 Revision compare-and-swap rejects stale catalog writes; equivalent projections
 coalesce. The UI's project list is read from this database projection, never from
-a hardcoded project catalog.
+a hardcoded project catalog. The sidebar shows only its current host's projects;
+the full Sim launcher can select projects across accessible hosts.
 
 `vscode_project_sessions` binds a native chat to its immutable project origin and
 server-owned runtime thread. Creation locks the canonical host, validates the
@@ -38,6 +39,11 @@ is unknown state, not idle; permission loss hides the cached workspace. Stop car
 the observed stream ID. A process crash may interrupt a task: it is not silently
 re-executed. Persisted messages survive and a new turn may be started after lock
 reconciliation.
+
+Agent streaming, replay and monitoring use native HTTP/SSE, Redis and database
+queries; they do not depend on the workflow canvas's Socket.IO connection. Workflow
+collaboration requires a separately paired realtime service sharing Sim's database
+and authentication configuration.
 
 ## Local runner configuration
 
@@ -81,7 +87,9 @@ The immutable DB binding selects the local adapter at the native chat endpoint;
 client-supplied runtime flags have no authority. Local project sessions use the
 same composer with text-only capabilities. Project files can be referenced by path.
 Cloud attachments/resources, voice and cloud-specific tool context are not exposed
-for this runtime, and are rejected if supplied manually.
+for this runtime, and are rejected if supplied manually. Native service-side fork
+and feedback actions are hidden for local sessions; copying a message remains
+available. Other native chats retain their existing capabilities.
 
 ## Deployment and tests
 

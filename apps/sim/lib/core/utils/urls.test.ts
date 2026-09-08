@@ -133,6 +133,11 @@ describe('getSocketUrl', () => {
     expect(getSocketUrl()).toBe('https://10.0.3.36')
   })
 
+  it('uses the HTTPS gateway on loopback instead of an insecure realtime port', () => {
+    setLocation('https://127.0.0.1:18082/workspace/ws/agents')
+    expect(getSocketUrl()).toBe('https://127.0.0.1:18082')
+  })
+
   it('falls back to localhost:3002 when served from localhost', () => {
     setLocation('http://localhost:3000/')
     expect(getSocketUrl()).toBe('http://localhost:3002')

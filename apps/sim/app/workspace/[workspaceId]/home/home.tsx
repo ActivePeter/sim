@@ -703,6 +703,7 @@ export function Home({ chatId, userName, userId, projectOrigin }: HomeProps) {
         ) : (
           <MothershipChat
             textOnly={!!projectOrigin}
+            serviceActionsEnabled={!projectOrigin}
             layout={compact ? 'copilot-view' : 'mothership-view'}
             workspaceId={workspaceId}
             messages={messages}

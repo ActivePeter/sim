@@ -3,7 +3,7 @@ import { act } from 'react'
 import { createRoot, type Root } from 'react-dom/client'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import type { VibeVscodeSurface } from '@/lib/vibe-vscode/surface'
-import { useVscodeSurface } from '@/hooks/use-vscode-surface'
+import { useVscodeEmbedded, useVscodeSurface } from '@/hooks/use-vscode-surface'
 
 const navigation = vi.hoisted(() => ({ searchParams: new URLSearchParams() }))
 vi.mock('next/navigation', () => ({ useSearchParams: () => navigation.searchParams }))
@@ -23,6 +23,9 @@ function installBridge(surface: VibeVscodeSurface | null) {
 }
 function Surface() {
   return <output>{useVscodeSurface() ?? 'full-sim'}</output>
+}
+function Embedded() {
+  return <output>{useVscodeEmbedded() ? 'embedded' : 'standalone'}</output>
 }
 let container: HTMLDivElement
 let root: Root
@@ -71,5 +74,27 @@ describe('mounted VS Code surface authority', () => {
       root.render(<Surface />)
     })
     expect(container.textContent).toBe('full-sim')
+  })
+
+  it('recognizes fullscreen as embedded after its initial URL hints are gone', () => {
+    navigation.searchParams = new URLSearchParams()
+    act(() => {
+      installBridge(null)
+      root.render(<Embedded />)
+    })
+    expect(container.textContent).toBe('embedded')
+  })
+
+  it('does not hide standalone connection state without a bridge or surface hint', () => {
+    navigation.searchParams = new URLSearchParams()
+    act(() => root.render(<Embedded />))
+    expect(container.textContent).toBe('standalone')
+    act(() => installBridge(null))
+    expect(container.textContent).toBe('embedded')
+  })
+
+  it('recognizes a sidebar route before its bridge is mounted', () => {
+    act(() => root.render(<Embedded />))
+    expect(container.textContent).toBe('embedded')
   })
 })

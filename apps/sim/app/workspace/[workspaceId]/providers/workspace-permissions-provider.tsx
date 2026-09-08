@@ -1,12 +1,11 @@
 'use client'
 
 import type React from 'react'
-import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from 'react'
+import { createContext, useCallback, useContext, useEffect, useMemo, useRef } from 'react'
 import { useToast } from '@sim/emcn'
 import { createLogger } from '@sim/logger'
 import { useQueryClient } from '@tanstack/react-query'
 import { useParams } from 'next/navigation'
-import { isVibeVscodeEmbeddedUrl } from '@/lib/vibe-vscode/surface'
 import { useSocket } from '@/app/workspace/providers/socket-provider'
 import {
   useWorkspacePermissionsQuery,
@@ -15,6 +14,7 @@ import {
 } from '@/hooks/queries/workspace'
 import { useStableFlag } from '@/hooks/use-stable-flag'
 import { useUserPermissions, type WorkspaceUserPermissions } from '@/hooks/use-user-permissions'
+import { useVscodeEmbedded } from '@/hooks/use-vscode-surface'
 import { useOperationQueueStore } from '@/stores/operation-queue/store'
 
 const logger = createLogger('WorkspacePermissionsProvider')
@@ -125,11 +125,7 @@ export function WorkspacePermissionsProvider({ children }: WorkspacePermissionsP
 
   const hasOperationError = useOperationQueueStore((state) => state.hasOperationError)
   const { isReconnecting, isRetryingWorkflowJoin, blockedJoinWorkflowId } = useSocket()
-  const [isVibeVscodeEmbedded, setIsVibeVscodeEmbedded] = useState(false)
-
-  useEffect(() => {
-    setIsVibeVscodeEmbedded(isVibeVscodeEmbeddedUrl(new URL(window.location.href)))
-  }, [])
+  const isVibeVscodeEmbedded = useVscodeEmbedded()
 
   const isOfflineMode = hasOperationError
   const isJoinBlocked = Boolean(blockedJoinWorkflowId) && blockedJoinWorkflowId === urlWorkflowId

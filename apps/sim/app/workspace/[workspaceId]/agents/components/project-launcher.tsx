@@ -44,14 +44,16 @@ export function ProjectLauncher({ compact = false }: ProjectLauncherProps) {
   })
   const projects = useMemo(
     () =>
-      (hostsQuery.data?.hosts ?? []).flatMap((host) =>
-        host.catalog.physicalWorkspace.folders.map((project) => ({
-          key: `${host.id}:${project.uri}`,
-          host,
-          project,
-        }))
-      ),
-    [hostsQuery.data]
+      (hostsQuery.data?.hosts ?? [])
+        .filter((host) => !compact || host.id === projection.host?.id)
+        .flatMap((host) =>
+          host.catalog.physicalWorkspace.folders.map((project) => ({
+            key: `${host.id}:${project.uri}`,
+            host,
+            project,
+          }))
+        ),
+    [hostsQuery.data, compact, projection.host?.id]
   )
   const active =
     projects.find((item) => item.key === selection) ??

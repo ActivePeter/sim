@@ -93,6 +93,8 @@ interface MothershipChatProps {
   className?: string
   /** Runtime accepts a text prompt, but not cloud resource attachments or speech. */
   textOnly?: boolean
+  /** Fork/feedback require a runtime with native service-side conversation state. */
+  serviceActionsEnabled?: boolean
 }
 
 /**
@@ -337,6 +339,7 @@ export function MothershipChat({
   onInputAnimationEnd,
   className,
   textOnly = false,
+  serviceActionsEnabled = true,
 }: MothershipChatProps) {
   const queryClient = useQueryClient()
   const styles = LAYOUT_STYLES[layout]
@@ -749,6 +752,7 @@ export function MothershipChat({
     <ChatSurfaceProvider
       chatId={chatId}
       userId={userId}
+      serviceActionsEnabled={serviceActionsEnabled}
       onContextAdd={onContextAdd}
       onContextRemove={onContextRemove}
       onWorkspaceResourceSelect={onWorkspaceResourceSelect}
