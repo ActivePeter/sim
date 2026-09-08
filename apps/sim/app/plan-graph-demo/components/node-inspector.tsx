@@ -156,8 +156,8 @@ export function NodeInspector({
   const dependenciesPassed = item.blockerIds.length === 0
   const mergeBlockerIds = getMergeBlockingItemIds(item.id, items, dependencies)
   const mergeDependenciesPassed = mergeBlockerIds.length === 0
-  const reviewPassed = item.primaryPr.review === 'Approved' || item.primaryPr.state === 'Merged'
-  const checksPassed = item.primaryPr.checks === 'Passed' || item.primaryPr.state === 'Merged'
+  const reviewPassed = item.primaryPr.review === 'Approved'
+  const checksPassed = item.primaryPr.checks === 'Passed'
   const claimCommand = `bun .agents/skills/plan-node/scripts/plan-node.ts claim --node ${item.id} --agent <agent-id>`
 
   return (
@@ -432,10 +432,6 @@ export function NodeInspector({
             <GateRow
               label={t('plan.inspector.mergeDependenciesSatisfied')}
               passed={mergeDependenciesPassed}
-            />
-            <GateRow
-              label={t('plan.inspector.parentShaCurrent')}
-              passed={item.resolvedLifecycle !== 'blocked'}
             />
             <GateRow label={t('plan.inspector.requiredChecksPassed')} passed={checksPassed} />
             <GateRow label={t('plan.inspector.reviewApproved')} passed={reviewPassed} />
