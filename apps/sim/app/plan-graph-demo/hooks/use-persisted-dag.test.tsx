@@ -11,11 +11,15 @@ interface MockPlanFile {
   key: string
   name: string
   updatedAt: Date
+  workspaceId: string
 }
 
 interface MockFilesQuery {
   data: MockPlanFile[]
   isLoading: boolean
+  isSuccess: boolean
+  isPlaceholderData: boolean
+  error: Error | null
 }
 
 interface MockContentQuery {
@@ -26,7 +30,13 @@ interface MockContentQuery {
 const mocks = vi.hoisted(() => ({
   contentQuery: { data: undefined, isLoading: true } as MockContentQuery,
   createWorkspaceFile: vi.fn(),
-  filesQuery: { data: [], isLoading: false } as MockFilesQuery,
+  filesQuery: {
+    data: [],
+    isLoading: false,
+    isSuccess: true,
+    isPlaceholderData: false,
+    error: null,
+  } as MockFilesQuery,
   invalidateQueries: vi.fn(),
   toastError: vi.fn(),
   updateWorkspaceFileContent: vi.fn(),
@@ -105,9 +115,13 @@ describe('usePersistedDag loading state', () => {
         key: 'workspace/workspace-1/plan.json',
         name: getPlanFileName(DAG_ID),
         updatedAt: now,
+        workspaceId: WORKSPACE_ID,
       },
     ]
     mocks.filesQuery.isLoading = false
+    mocks.filesQuery.isSuccess = true
+    mocks.filesQuery.isPlaceholderData = false
+    mocks.filesQuery.error = null
     mocks.contentQuery.data = undefined
     mocks.contentQuery.isLoading = true
   })
@@ -137,5 +151,30 @@ describe('usePersistedDag loading state', () => {
 
     expect(harness.getResult().dag).toBeDefined()
     expect(harness.getResult().isLoading).toBe(false)
+  })
+
+  it('does not seed a DAG after a failed file listing', () => {
+    mocks.filesQuery.data = []
+    mocks.filesQuery.isSuccess = false
+    mocks.filesQuery.error = new Error('File listing unavailable')
+    harness = renderPersistedDag()
+
+    expect(harness.getResult().error).toBe('File listing unavailable')
+    expect(mocks.createWorkspaceFile).not.toHaveBeenCalled()
+  })
+
+  it('does not seed a DAG from a placeholder listing', () => {
+    mocks.filesQuery.data = []
+    mocks.filesQuery.isPlaceholderData = true
+    harness = renderPersistedDag()
+
+    expect(mocks.createWorkspaceFile).not.toHaveBeenCalled()
+  })
+
+  it('still seeds a missing DAG after a successful authoritative listing', () => {
+    mocks.filesQuery.data = []
+    harness = renderPersistedDag()
+
+    expect(mocks.createWorkspaceFile).toHaveBeenCalledTimes(1)
   })
 })

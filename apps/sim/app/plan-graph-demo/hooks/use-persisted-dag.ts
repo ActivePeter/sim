@@ -5,22 +5,18 @@ import { toast } from '@sim/emcn'
 import { getErrorMessage } from '@sim/utils/errors'
 import { useQueryClient } from '@tanstack/react-query'
 import type { WorkspaceFileRecord } from '@/lib/uploads/contexts/workspace'
+import { useDagDocument } from '@/app/plan-graph-demo/hooks/use-dag-document'
 import {
   createDemoDag,
   type DagDocument,
   getPlanFileName,
-  parseDagDocument,
   serializeDagDocument,
 } from '@/app/plan-graph-demo/plan-graph-model'
 import {
   useCreateWorkspaceFile,
   useUpdateWorkspaceFileContent,
-  useWorkspaceFileContent,
-  useWorkspaceFiles,
   workspaceFilesKeys,
 } from '@/hooks/queries/workspace-files'
-
-const PLAN_REFRESH_INTERVAL_MS = 5_000
 
 export type DagMutation = (document: DagDocument) => DagDocument
 
@@ -59,18 +55,12 @@ export function usePersistedDag(
   const saveGenerationRef = useRef(0)
 
   const planFileName = getPlanFileName(dagId)
-  const filesQuery = useWorkspaceFiles(workspaceId ?? '', 'active', {
-    enabled: Boolean(workspaceId),
-    refetchInterval: PLAN_REFRESH_INTERVAL_MS,
-  })
-  const planFile = filesQuery.data?.find((file) => file.name === planFileName)
-  const contentQuery = useWorkspaceFileContent(
-    workspaceId ?? '',
-    planFile?.id ?? '',
-    planFile?.key ?? '',
-    false,
-    { refetchInterval: PLAN_REFRESH_INTERVAL_MS }
-  )
+  const {
+    dag: storedDag,
+    error: readError,
+    file: planFile,
+    isMissing,
+  } = useDagDocument(workspaceId, dagId)
 
   useEffect(() => {
     if (!planFile) return
@@ -80,7 +70,7 @@ export function usePersistedDag(
   }, [planFile])
 
   useEffect(() => {
-    if (!workspaceId || filesQuery.isLoading || planFile || creatingRef.current) return
+    if (!workspaceId || !isMissing || creatingRef.current) return
     creatingRef.current = true
     const initial = createDemoDag(dagId)
     createWorkspaceFile(
@@ -98,23 +88,23 @@ export function usePersistedDag(
         },
       }
     )
-  }, [createWorkspaceFile, dagId, filesQuery.isLoading, planFile, planFileName, workspaceId])
+  }, [createWorkspaceFile, dagId, isMissing, planFileName, workspaceId])
 
   useEffect(() => {
-    if (!contentQuery.data || pendingWrites > 0) return
-    try {
-      const parsed = parseDagDocument(contentQuery.data)
-      const currentRevision = persistedRef.current?.revision ?? -1
-      if (parsed.revision >= currentRevision) {
-        persistedRef.current = parsed
-        optimisticRef.current = parsed
-        setDag(parsed)
-      }
-      setError(undefined)
-    } catch (cause) {
-      setError(getErrorMessage(cause, 'The plan document is invalid'))
+    if (pendingWrites > 0) return
+    if (readError) {
+      setError(readError)
+      return
     }
-  }, [contentQuery.data, pendingWrites])
+    if (!storedDag) return
+    const currentRevision = persistedRef.current?.revision ?? -1
+    if (storedDag.revision >= currentRevision) {
+      persistedRef.current = storedDag
+      optimisticRef.current = storedDag
+      setDag(storedDag)
+    }
+    setError(undefined)
+  }, [pendingWrites, readError, storedDag])
 
   const recoverFromWriteFailure = useCallback(
     (cause: unknown, generation: number) => {

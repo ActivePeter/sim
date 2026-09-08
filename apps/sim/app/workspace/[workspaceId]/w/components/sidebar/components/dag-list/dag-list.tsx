@@ -2,8 +2,9 @@
 
 import { cn } from '@sim/emcn'
 import { Split } from '@sim/emcn/icons'
-import { DEFAULT_DEMO_DAG_ID, DEMO_DAGS } from '@/lib/dags/demo-catalog'
+import { type DagCatalogItem, DEMO_DAGS } from '@/lib/dags/demo-catalog'
 import { useI18n } from '@/lib/i18n'
+import { useDagDocument } from '@/app/plan-graph-demo/hooks/use-dag-document'
 import {
   CollapsedResourceFlyout,
   CollapsedSidebarMenu,
@@ -18,18 +19,22 @@ interface DagListProps {
   workspaceId: string
 }
 
+interface DagListEntryProps extends DagListProps {
+  dag: DagCatalogItem
+}
+
 export function DagList({ currentDagId, isCollapsed, workspaceId }: DagListProps) {
   const hover = useHoverMenu()
   const { t } = useI18n()
-  const getName = (dag: (typeof DEMO_DAGS)[number]) =>
-    dag.id === DEFAULT_DEMO_DAG_ID ? t('plan.demo.name') : dag.name
-  const flyoutEntries = DEMO_DAGS.map((dag) => ({
-    kind: 'item' as const,
-    id: dag.id,
-    name: getName(dag),
-    pinned: false,
-    href: `/workspace/${workspaceId}/d/${dag.id}`,
-  }))
+  const entries = DEMO_DAGS.map((dag) => (
+    <DagListEntry
+      key={dag.id}
+      dag={dag}
+      currentDagId={currentDagId}
+      isCollapsed={isCollapsed}
+      workspaceId={workspaceId}
+    />
+  ))
 
   if (isCollapsed) {
     return (
@@ -39,31 +44,36 @@ export function DagList({ currentDagId, isCollapsed, workspaceId }: DagListProps
           hover={hover}
           ariaLabel={t('sidebar.dags')}
         >
-          <CollapsedResourceFlyout
-            entries={flyoutEntries}
-            icon={Split}
-            currentItemId={currentDagId}
-            emptyLabel={t('sidebar.noDags')}
-          />
+          {entries}
         </CollapsedSidebarMenu>
       </div>
     )
   }
 
+  return <div className={cn(SIDEBAR_ITEM_GAP_CLASS, 'flex flex-col px-2')}>{entries}</div>
+}
+
+function DagListEntry({ dag, currentDagId, isCollapsed, workspaceId }: DagListEntryProps) {
+  const { t } = useI18n()
+  const document = useDagDocument(workspaceId, dag.id)
+  const name = document.dag?.name ?? (document.isMissing ? dag.name : t('plan.loading'))
+  const href = `/workspace/${workspaceId}/d/${dag.id}`
+
+  if (isCollapsed) {
+    return (
+      <CollapsedResourceFlyout
+        entries={[{ kind: 'item', id: dag.id, name, pinned: false, href }]}
+        icon={Split}
+        currentItemId={currentDagId}
+        emptyLabel={t('sidebar.noDags')}
+      />
+    )
+  }
+
   return (
-    <div className={cn(SIDEBAR_ITEM_GAP_CLASS, 'flex flex-col px-2')}>
-      {DEMO_DAGS.map((dag) => (
-        <SidebarNavChip
-          key={dag.id}
-          item={{
-            id: dag.id,
-            label: getName(dag),
-            icon: Split,
-            href: `/workspace/${workspaceId}/d/${dag.id}`,
-          }}
-          active={dag.id === currentDagId}
-        />
-      ))}
-    </div>
+    <SidebarNavChip
+      item={{ id: dag.id, label: name, icon: Split, href }}
+      active={dag.id === currentDagId}
+    />
   )
 }

@@ -28,7 +28,7 @@ const EN_MESSAGES = {
   'plan.activity.githubUnchangedDetail': 'All artifact bindings already matched GitHub.',
   'plan.activity.initializedDetail':
     'The graph is backed by a durable workspace file with optimistic concurrency.',
-  'plan.activity.initializedTitle': 'Sim self-hosting roadmap initialized',
+  'plan.activity.initializedTitle': 'Development roadmap loaded',
   'plan.activity.panelTitle': 'Plan activity',
   'plan.activity.readyDetail':
     'This MVP branch and its first real pull request are the first execution attempt.',
@@ -224,7 +224,7 @@ const ZH_CN_MESSAGES = {
   'plan.activity.githubSyncFailedTitle': 'GitHub 同步失败',
   'plan.activity.githubUnchangedDetail': '所有绑定状态已与 GitHub 一致。',
   'plan.activity.initializedDetail': '该图由支持乐观并发控制的持久化工作区文件保存。',
-  'plan.activity.initializedTitle': 'Sim 自举开发路线已初始化',
+  'plan.activity.initializedTitle': '开发路线图已加载',
   'plan.activity.panelTitle': '计划动态',
   'plan.activity.readyDetail': '当前 MVP 分支及其首个真实 PR 是第一次执行尝试。',
   'plan.activity.readyTitle': 'PG-01 已可认领',

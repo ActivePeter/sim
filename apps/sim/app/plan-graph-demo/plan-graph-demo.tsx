@@ -306,7 +306,7 @@ export function DagDemo({ dagId = DEFAULT_DEMO_DAG_ID, workspaceId }: DagDemoPro
         isSaving={isSaving}
         isSyncing={githubSync.isPending}
         lastGithubSyncAt={dag.lastGithubSyncAt}
-        name={dag.id === DEFAULT_DEMO_DAG_ID ? t('plan.demo.name') : dag.name}
+        name={dag.name}
         nextReadyItemId={nextReadyItem?.id}
         onAddNode={handleAddItem}
         onInspectNext={handleInspectNext}
