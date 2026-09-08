@@ -3043,6 +3043,26 @@ export const docsEmbeddings = pgTable(
 
 export const chatTypeEnum = pgEnum('chat_type', ['mothership', 'copilot'])
 
+/** Rebuildable VS Code catalog projection. VS Code remains the catalog authority. */
+export const vscodeWorkspaceHosts = pgTable(
+  'vscode_workspace_hosts',
+  {
+    id: text('id').primaryKey(),
+    workspaceId: text('workspace_id').notNull().references(() => workspace.id, { onDelete: 'cascade' }),
+    userId: text('user_id').notNull().references(() => user.id, { onDelete: 'cascade' }),
+    physicalWorkspaceId: text('physical_workspace_id').notNull(),
+    remoteAuthority: text('remote_authority').notNull(),
+    catalog: jsonb('catalog').notNull(),
+    revision: integer('revision').notNull().default(1),
+    updatedAt: timestamp('updated_at').notNull().defaultNow(),
+  },
+  (table) => ({
+    identity: uniqueIndex('vscode_workspace_hosts_identity_idx').on(
+      table.workspaceId, table.userId, table.physicalWorkspaceId, table.remoteAuthority
+    ),
+  })
+)
+
 export const copilotChats = pgTable(
   'copilot_chats',
   {
@@ -3101,6 +3121,20 @@ export const copilotChats = pgTable(
       .on(table.userId, table.workspaceId)
       .where(sql`${table.deletedAt} IS NOT NULL`),
   })
+)
+
+/** Runtime binding for a native chat, never a second transcript or session catalog. */
+export const vscodeProjectSessions = pgTable(
+  'vscode_project_sessions',
+  {
+    chatId: uuid('chat_id').primaryKey().references(() => copilotChats.id, { onDelete: 'cascade' }),
+    hostId: text('host_id').references(() => vscodeWorkspaceHosts.id, { onDelete: 'set null' }),
+    requestKey: text('request_key').notNull().unique(),
+    origin: jsonb('origin').notNull(),
+    runtimeThreadId: text('runtime_thread_id'),
+    lastTurnId: text('last_turn_id'),
+    lastOutcome: text('last_outcome'),
+  }
 )
 
 export const copilotMessages = pgTable(

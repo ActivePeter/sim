@@ -91,6 +91,8 @@ interface MothershipChatProps {
   animateInput?: boolean
   onInputAnimationEnd?: () => void
   className?: string
+  /** Runtime accepts a text prompt, but not cloud resource attachments or speech. */
+  textOnly?: boolean
 }
 
 /**
@@ -334,6 +336,7 @@ export function MothershipChat({
   animateInput = false,
   onInputAnimationEnd,
   className,
+  textOnly = false,
 }: MothershipChatProps) {
   const queryClient = useQueryClient()
   const styles = LAYOUT_STYLES[layout]
@@ -827,6 +830,7 @@ export function MothershipChat({
               onCancelEdit={onCancelQueueEdit}
             />
             <UserInput
+              textOnly={textOnly}
               key={draftScopeKey}
               ref={userInputRef}
               onSubmit={onSubmit}

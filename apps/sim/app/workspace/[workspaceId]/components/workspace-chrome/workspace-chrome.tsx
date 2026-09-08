@@ -7,6 +7,7 @@ import { usePathname, useSearchParams } from 'next/navigation'
 import { getDesktopBridge } from '@/lib/desktop'
 import { parseVibeVscodeSurface, VIBE_VSCODE_SURFACE_PARAM } from '@/lib/vibe-vscode/surface'
 import { applyDesktopTitleBarMode, type DesktopTitleBarMode } from '@/app/_shell/desktop-title-bar'
+import { AgentSidebar } from '@/app/workspace/[workspaceId]/agents/components/agent-sidebar'
 import { useSidebarPeek } from '@/app/workspace/[workspaceId]/components/workspace-chrome/use-sidebar-peek'
 import { Sidebar, SidebarTooltip } from '@/app/workspace/[workspaceId]/w/components/sidebar/sidebar'
 import { useFullscreenOriginStore } from '@/stores/fullscreen-origin'
@@ -187,7 +188,7 @@ export function WorkspaceChrome({ children, initialSidebarCollapsed }: Workspace
   if (surface === 'sidebar') {
     return (
       <div className='flex min-h-0 w-full flex-1 overflow-hidden bg-[var(--surface-1)]'>
-        <Sidebar isCollapsed={false} fixedExpanded />
+        <AgentSidebar>{children}</AgentSidebar>
       </div>
     )
   }

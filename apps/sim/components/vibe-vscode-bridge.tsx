@@ -9,32 +9,16 @@ import {
   VIBE_VSCODE_SURFACE_PARAM,
   withVibeVscodeSurface,
 } from '@/lib/vibe-vscode/surface'
+import type { VibeVscodeHostContext } from '@/lib/vibe-vscode/types'
 
 const HOST_SOURCE = 'vibe-vscode'
 const SIM_SOURCE = 'sim'
 const TOKEN_STORAGE_KEY = 'vibe-vscode-bridge-token'
 
-interface VibeVscodeSelection {
-  startLine: number
-  startCharacter: number
-  endLine: number
-  endCharacter: number
-}
-
-interface VibeVscodeHostContext {
-  language: string
-  physicalWorkspace?: {
-    id: string
-    name: string
-    folders: readonly { name: string; uri: string; index: number }[]
-  }
-  logicalWorkspace?: { id: string; name: string }
-  project?: { name: string; uri: string }
-  activeFile?: { uri: string; selection?: VibeVscodeSelection }
-}
-
 interface VibeVscodeBridgeApi {
   getContext: () => VibeVscodeHostContext | undefined
+  openEditor: (path: string) => void
+  openMonitor: () => void
   openFile: (uri: string, line?: number, character?: number) => void
   openDiff: (originalUri: string, modifiedUri: string, title?: string) => void
   openTerminal: (uri?: string) => void
@@ -74,6 +58,7 @@ function isHostContext(value: unknown): value is VibeVscodeHostContext {
       !isRecord(value.physicalWorkspace) ||
       typeof value.physicalWorkspace.id !== 'string' ||
       typeof value.physicalWorkspace.name !== 'string' ||
+      typeof value.physicalWorkspace.remoteAuthority !== 'string' ||
       !Array.isArray(value.physicalWorkspace.folders) ||
       !value.physicalWorkspace.folders.every(
         (folder) =>
@@ -86,6 +71,14 @@ function isHostContext(value: unknown): value is VibeVscodeHostContext {
       return false
     }
   }
+  if (
+    value.logicalWorkspaces !== undefined &&
+    (!Array.isArray(value.logicalWorkspaces) ||
+      !value.logicalWorkspaces.every(
+        (item) => isRecord(item) && typeof item.id === 'string' && typeof item.name === 'string'
+      ))
+  )
+    return false
   if (
     value.logicalWorkspace !== undefined &&
     (!isRecord(value.logicalWorkspace) ||
@@ -188,7 +181,6 @@ export function VibeVscodeBridge() {
       const embeddedHref = new URL(withVibeVscodeSurface(path, surface), window.location.origin)
       embeddedHref.hash = `${VIBE_VSCODE_EMBED_HASH_PREFIX.slice(1)}${encodeURIComponent(token)}`
       anchor.href = embeddedHref.toString()
-      if (surface === 'sidebar') postToHost('openEditor', { path })
     }
     const messageListener = (event: MessageEvent<unknown>) => {
       if (event.source !== window.parent || !isHostBridgeMessage(event.data, token)) return
@@ -225,6 +217,10 @@ export function VibeVscodeBridge() {
 
     window.vibeVscode = {
       getContext: () => (hostContext ? structuredClone(hostContext) : undefined),
+      openEditor: (path) => {
+        if (isSafeNavigationPath(path)) postToHost('openEditor', { path })
+      },
+      openMonitor: () => postToHost('openMonitor'),
       openFile: (uri, line, character) => postToHost('openFile', { uri, line, character }),
       openDiff: (originalUri, modifiedUri, title) =>
         postToHost('openDiff', { originalUri, modifiedUri, title }),

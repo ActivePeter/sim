@@ -37,6 +37,8 @@ export interface PromptEditorProps extends PromptEditorKeyPolicy {
    * with chips but not be edited.
    */
   readOnly?: boolean
+  /** Text-only runtimes keep the shared editor without cloud resource/skill menus. */
+  contextMenus?: boolean
   /**
    * Layout/sizing only — a height cap (`max-h-[200px]`) or fill (`flex-1`)
    * for the scroll container. The text chrome is owned by the editor.
@@ -67,6 +69,7 @@ export function PromptEditor({
   placeholder,
   autoFocus = false,
   readOnly = false,
+  contextMenus = true,
   className,
   'aria-label': ariaLabel,
   onSubmit,
@@ -269,7 +272,7 @@ export function PromptEditor({
         />
       </div>
 
-      {!readOnly && (
+      {!readOnly && contextMenus && (
         <>
           <PlusMenuDropdown
             ref={editor.plusMenuRef}

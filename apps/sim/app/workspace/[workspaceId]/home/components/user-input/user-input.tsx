@@ -70,6 +70,8 @@ interface UserInputProps {
   isInitialView?: boolean
   onSendQueuedHead?: () => void
   onEditQueuedTail?: () => void
+  /** The native composer is shared by runtimes with different input capabilities. */
+  textOnly?: boolean
 }
 
 export interface UserInputHandle {
@@ -97,6 +99,7 @@ const UserInputImpl = forwardRef<UserInputHandle, UserInputProps>(function UserI
     isInitialView = true,
     onSendQueuedHead,
     onEditQueuedTail,
+    textOnly = false,
   },
   ref
 ) {
@@ -117,7 +120,7 @@ const UserInputImpl = forwardRef<UserInputHandle, UserInputProps>(function UserI
   const files = useFileAttachments({
     userId,
     workspaceId,
-    disabled: false,
+    disabled: textOnly,
     isLoading: isSending,
   })
   const hasFiles = files.attachedFiles.some((f) => !f.uploading && f.key)
@@ -133,8 +136,8 @@ const UserInputImpl = forwardRef<UserInputHandle, UserInputProps>(function UserI
   const editor = usePromptEditor({
     workspaceId,
     initialValue,
-    onContextAdd,
-    onPasteFiles: handlePasteFiles,
+    onContextAdd: textOnly ? undefined : onContextAdd,
+    onPasteFiles: textOnly ? undefined : handlePasteFiles,
   })
   const editorRef = useRef(editor)
   editorRef.current = editor
@@ -147,13 +150,14 @@ const UserInputImpl = forwardRef<UserInputHandle, UserInputProps>(function UserI
    * input consumed it and skips its persist-and-navigate fallback.
    */
   useEffect(() => {
+    if (textOnly) return
     const handleAddContext = (event: Event) => {
       handleMothershipAddContextEvent(event, editorRef.current)
     }
 
     window.addEventListener(MOTHERSHIP_ADD_CONTEXT_EVENT, handleAddContext)
     return () => window.removeEventListener(MOTHERSHIP_ADD_CONTEXT_EVENT, handleAddContext)
-  }, [])
+  }, [textOnly])
 
   const draftScopeKeyRef = useRef(draftScopeKey)
   draftScopeKeyRef.current = draftScopeKey
@@ -191,8 +195,8 @@ const UserInputImpl = forwardRef<UserInputHandle, UserInputProps>(function UserI
       useMothershipDraftsStore.getState().clearDraft(draftScopeKey)
       return
     }
-    if (restoredContexts) editor.setContexts(restoredContexts)
-    if (restoredFiles) files.restoreAttachedFiles(restoredFiles)
+    if (restoredContexts && !textOnly) editor.setContexts(restoredContexts)
+    if (restoredFiles && !textOnly) files.restoreAttachedFiles(restoredFiles)
     if (caretText !== null) {
       const textarea = textareaRef.current
       if (textarea) {
@@ -538,8 +542,8 @@ const UserInputImpl = forwardRef<UserInputHandle, UserInputProps>(function UserI
     const activeContexts = currentEditor.getActiveContexts()
     onSubmit(
       currentEditor.getPlainValue(),
-      fileAttachmentsForApi.length > 0 ? fileAttachmentsForApi : undefined,
-      activeContexts.length > 0 ? activeContexts : undefined
+      !textOnly && fileAttachmentsForApi.length > 0 ? fileAttachmentsForApi : undefined,
+      !textOnly && activeContexts.length > 0 ? activeContexts : undefined
     )
     currentEditor.clear()
     sttPrefixRef.current = ''
@@ -554,7 +558,7 @@ const UserInputImpl = forwardRef<UserInputHandle, UserInputProps>(function UserI
     resetTranscript()
     currentFiles.clearAttachedFiles()
     prevSelectedContextsRef.current = []
-  }, [onSubmit, resetTranscript])
+  }, [onSubmit, resetTranscript, textOnly])
 
   /**
    * Enter policy for the editor: mirror canSubmit's uploading guard (Enter
@@ -611,12 +615,14 @@ const UserInputImpl = forwardRef<UserInputHandle, UserInputProps>(function UserI
         'relative z-10 mx-auto w-full max-w-chat cursor-text rounded-2xl border border-[var(--border-1)] bg-[var(--white)] px-2.5 py-2 dark:bg-[var(--surface-4)]',
         isInitialView && 'shadow-ambient'
       )}
-      onDragEnter={handleDragEnter}
-      onDragLeave={handleDragLeave}
-      onDragOver={handleContainerDragOver}
-      onDrop={handleContainerDrop}
+      onDragEnter={textOnly ? undefined : handleDragEnter}
+      onDragLeave={textOnly ? undefined : handleDragLeave}
+      onDragOver={textOnly ? (event) => event.preventDefault() : handleContainerDragOver}
+      onDrop={textOnly ? (event) => event.preventDefault() : handleContainerDrop}
     >
-      <AnimatedPlaceholderEffect textareaRef={textareaRef} isInitialView={isInitialView} />
+      {!textOnly && (
+        <AnimatedPlaceholderEffect textareaRef={textareaRef} isInitialView={isInitialView} />
+      )}
 
       <AttachedFilesList
         attachedFiles={files.attachedFiles}
@@ -626,7 +632,8 @@ const UserInputImpl = forwardRef<UserInputHandle, UserInputProps>(function UserI
 
       <PromptEditor
         editor={editor}
-        placeholder='Ask Sim to '
+        contextMenus={!textOnly}
+        placeholder={textOnly ? '描述项目任务…' : 'Ask Sim to '}
         onSubmit={handleEnterSubmit}
         onArrowUpOnEmpty={handleArrowUpOnEmpty}
         className={cn('max-h-[200px]', isInitialView && 'min-h-[56px]')}
@@ -634,51 +641,59 @@ const UserInputImpl = forwardRef<UserInputHandle, UserInputProps>(function UserI
 
       <div className='flex items-center justify-between'>
         <div className='flex items-center gap-1'>
-          <Tooltip.Root>
-            <Tooltip.Trigger asChild>
-              <Button
-                type='button'
-                variant='ghost'
-                onClick={handlePlusClick}
-                aria-label='Add resources'
-                className='size-[28px] rounded-full p-0 hover-hover:bg-[var(--surface-hover)]'
-              >
-                <Plus className='size-[16px] text-[var(--text-icon)]' />
-              </Button>
-            </Tooltip.Trigger>
-            <Tooltip.Content side='top'>Add resources</Tooltip.Content>
-          </Tooltip.Root>
-          <Tooltip.Root>
-            <Tooltip.Trigger asChild>
-              <Button
-                type='button'
-                variant='ghost'
-                onClick={handleFileSelectStable}
-                aria-label='Attach file'
-                className='size-[28px] rounded-full p-0 hover-hover:bg-[var(--surface-hover)]'
-              >
-                <Paperclip className='size-[16px] text-[var(--text-icon)]' />
-              </Button>
-            </Tooltip.Trigger>
-            <Tooltip.Content side='top'>Attach file</Tooltip.Content>
-          </Tooltip.Root>
-          <Tooltip.Root>
-            <Tooltip.Trigger asChild>
-              <Button
-                type='button'
-                variant='ghost'
-                onClick={handleSlashTriggerClick}
-                aria-label='Skills'
-                className='size-[28px] rounded-full p-0 hover-hover:bg-[var(--surface-hover)]'
-              >
-                <Slash className='size-[16px] text-[var(--text-icon)]' />
-              </Button>
-            </Tooltip.Trigger>
-            <Tooltip.Content side='top'>Skills</Tooltip.Content>
-          </Tooltip.Root>
+          {textOnly ? (
+            <span className='px-1 text-[var(--text-muted)] text-caption'>
+              项目文件可直接按路径引用
+            </span>
+          ) : (
+            <>
+              <Tooltip.Root>
+                <Tooltip.Trigger asChild>
+                  <Button
+                    type='button'
+                    variant='ghost'
+                    onClick={handlePlusClick}
+                    aria-label='Add resources'
+                    className='size-[28px] rounded-full p-0 hover-hover:bg-[var(--surface-hover)]'
+                  >
+                    <Plus className='size-[16px] text-[var(--text-icon)]' />
+                  </Button>
+                </Tooltip.Trigger>
+                <Tooltip.Content side='top'>Add resources</Tooltip.Content>
+              </Tooltip.Root>
+              <Tooltip.Root>
+                <Tooltip.Trigger asChild>
+                  <Button
+                    type='button'
+                    variant='ghost'
+                    onClick={handleFileSelectStable}
+                    aria-label='Attach file'
+                    className='size-[28px] rounded-full p-0 hover-hover:bg-[var(--surface-hover)]'
+                  >
+                    <Paperclip className='size-[16px] text-[var(--text-icon)]' />
+                  </Button>
+                </Tooltip.Trigger>
+                <Tooltip.Content side='top'>Attach file</Tooltip.Content>
+              </Tooltip.Root>
+              <Tooltip.Root>
+                <Tooltip.Trigger asChild>
+                  <Button
+                    type='button'
+                    variant='ghost'
+                    onClick={handleSlashTriggerClick}
+                    aria-label='Skills'
+                    className='size-[28px] rounded-full p-0 hover-hover:bg-[var(--surface-hover)]'
+                  >
+                    <Slash className='size-[16px] text-[var(--text-icon)]' />
+                  </Button>
+                </Tooltip.Trigger>
+                <Tooltip.Content side='top'>Skills</Tooltip.Content>
+              </Tooltip.Root>
+            </>
+          )}
         </div>
         <div className='flex items-center gap-1.5'>
-          {isSttSupported && (
+          {!textOnly && isSttSupported && (
             <MicButton
               audioLevelsRef={audioLevelsRef}
               isListening={isListening}

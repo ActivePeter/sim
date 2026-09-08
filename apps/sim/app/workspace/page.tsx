@@ -139,7 +139,9 @@ export default function WorkspacePage() {
       const destination =
         redirectTarget === 'upgrade'
           ? buildUpgradeHref(id, isUpgradeReason(rawReason) ? rawReason : undefined)
-          : `/workspace/${id}`
+          : redirectTarget === 'agents'
+            ? `/workspace/${id}/agents`
+            : `/workspace/${id}`
       return withVibeVscodeSurface(destination, vibeVscodeSurface)
     }
 

@@ -802,6 +802,13 @@ export const Sidebar = memo(function Sidebar({
           additionalActivePaths: [`/workspace/${workspaceId}/skills`],
           hidden: permissionConfig.hideIntegrationsTab,
         },
+        {
+          id: 'agent-monitor',
+          label: 'Agent 工作台 / 全局监控',
+          icon: Home,
+          href: `/workspace/${workspaceId}/agents`,
+          hidden: !isChatEnabled,
+        },
       ].filter((item) => !item.hidden),
     [
       workspaceId,

@@ -2178,6 +2178,13 @@
       "when": 1788879458147,
       "tag": "0311_workspace_dags",
       "breakpoints": true
+    },
+    {
+      "idx": 312,
+      "version": "7",
+      "when": 1788888079330,
+      "tag": "0312_vscode_project_agents",
+      "breakpoints": true
     }
   ]
 }
