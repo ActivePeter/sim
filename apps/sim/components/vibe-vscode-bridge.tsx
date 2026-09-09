@@ -1,6 +1,7 @@
 'use client'
 
 import { useEffect } from 'react'
+import { useRouter } from 'next/navigation'
 import { useI18n } from '@/lib/i18n'
 import {
   parseVibeVscodeSurface,
@@ -145,6 +146,7 @@ function toSameOriginNavigationPath(value: string): string | null {
 
 /** Connects the original Sim application surface to its trusted Vibe VS Code editor host. */
 export function VibeVscodeBridge() {
+  const { replace: replaceRoute } = useRouter()
   const { setLocale } = useI18n()
 
   useEffect(() => {
@@ -230,7 +232,8 @@ export function VibeVscodeBridge() {
       if (event.data.type === 'navigate' && isRecord(event.data.payload)) {
         const path = event.data.payload.path
         if (isSafeNavigationPath(path)) {
-          window.location.assign(withVibeVscodeSurface(path, surface))
+          /** Native tab selection preserves the sidebar layout, queries and scroll position. */
+          replaceRoute(withVibeVscodeSurface(path, surface), { scroll: false })
         }
         return
       }
@@ -317,7 +320,7 @@ export function VibeVscodeBridge() {
       window.vibeVscode = undefined
       window.dispatchEvent(new Event('vibe-vscode-context'))
     }
-  }, [setLocale])
+  }, [replaceRoute, setLocale])
 
   return null
 }

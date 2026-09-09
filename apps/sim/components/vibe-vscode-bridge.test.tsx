@@ -4,7 +4,9 @@ import { createRoot, type Root } from 'react-dom/client'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 const locale = vi.hoisted(() => ({ setLocale: vi.fn() }))
+const router = vi.hoisted(() => ({ replace: vi.fn() }))
 vi.mock('@/lib/i18n', () => ({ useI18n: () => locale }))
+vi.mock('next/navigation', () => ({ useRouter: () => ({ ...router }) }))
 
 import { VibeVscodeBridge } from '@/components/vibe-vscode-bridge'
 
@@ -29,6 +31,16 @@ function link(href: string, target = '') {
 
 function editorRequests() {
   return messages.filter((message) => message.type === 'openEditor')
+}
+
+function navigateFromHost(path: string, token = 'test-generation', source = host.contentWindow) {
+  window.dispatchEvent(
+    new MessageEvent('message', {
+      source,
+      origin: window.location.origin,
+      data: { source: 'vibe-vscode', type: 'navigate', token, payload: { path } },
+    })
+  )
 }
 
 beforeEach(() => {
@@ -63,6 +75,56 @@ afterEach(() => {
 })
 
 describe('embedded Sim navigation', () => {
+  it('uses the native client router without reconnecting or resetting sidebar scroll', () => {
+    const bridge = window.vibeVscode
+    navigateFromHost('/workspace/one/d/plan?view=overview')
+    expect(router.replace).toHaveBeenCalledExactlyOnceWith(
+      '/workspace/one/d/plan?view=overview&_vscodeSurface=sidebar',
+      { scroll: false }
+    )
+    expect(window.vibeVscode).toBe(bridge)
+    expect(messages.filter((message) => message.type === 'ready')).toHaveLength(1)
+    expect(editorRequests()).toEqual([])
+
+    /** The router commit remains a passive projection, not another native editor open. */
+    window.history.replaceState(null, '', '/workspace/one/d/plan?view=overview')
+    expect(messages.at(-1)).toMatchObject({
+      type: 'routeChanged',
+      payload: { path: '/workspace/one/d/plan?view=overview', userInitiated: false },
+    })
+  })
+
+  it('forwards rapid tab selections in order for the native router to supersede old transitions', () => {
+    navigateFromHost('/workspace/one/w/workflow')
+    navigateFromHost('/workspace/one/chat/latest')
+    expect(router.replace.mock.calls).toEqual([
+      ['/workspace/one/w/workflow?_vscodeSurface=sidebar', { scroll: false }],
+      ['/workspace/one/chat/latest?_vscodeSurface=sidebar', { scroll: false }],
+    ])
+    window.history.replaceState(null, '', '/workspace/one/chat/latest')
+    expect(messages.at(-1)).toMatchObject({
+      type: 'routeChanged',
+      payload: { path: '/workspace/one/chat/latest', userInitiated: false },
+    })
+    expect(editorRequests()).toEqual([])
+  })
+
+  it('does not rebuild the bridge when the router hook returns a fresh wrapper', () => {
+    const bridge = window.vibeVscode
+    act(() => root.render(<VibeVscodeBridge />))
+    expect(window.vibeVscode).toBe(bridge)
+    expect(messages.filter((message) => message.type === 'ready')).toHaveLength(1)
+  })
+
+  it('rejects untrusted host navigation before reaching the router', () => {
+    navigateFromHost('/workspace/one/chat/wrong-token', 'obsolete')
+    navigateFromHost('/workspace/one/chat/wrong-window', 'test-generation', window)
+    for (const path of ['//other.invalid', 'https://other.invalid', 'javascript:alert(1)']) {
+      navigateFromHost(path)
+    }
+    expect(router.replace).not.toHaveBeenCalled()
+  })
+
   it('publishes startup and replacement routes without requesting editor focus', () => {
     window.history.replaceState(null, '', '/workspace/one/chat/restored')
     expect(messages.filter((message) => message.type === 'routeChanged')).toMatchObject([
