@@ -169,5 +169,5 @@ export interface ProjectSession {
   activeStreamId: string | null
   status: ProjectSessionStatus
   origin: z.output<typeof vscodeSessionIdentitySchema> | null
-  runtime: 'local-codex' | 'sim'
+  runtime: 'local-codex' | 'local-claude' | 'sim'
 }

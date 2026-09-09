@@ -8,6 +8,11 @@ in the VS Code editor, Sim's original sidebar chat list and
 
 ## Data and lifecycle
 
+The host supplies projects through the public `vibe-vscode.project-switcher`
+plugin API (`vibe-vscode.getProjectContext` for cross-Extension-Host reads).
+The canonical readiness and snapshot contract lives with that Vibe plugin;
+Sim's bridge consumes it without becoming another workspace authority.
+
 `vscode_workspace_hosts` is a per-user, per-Sim-workspace projection of the host's
 complete physical workspace, remote authority, projects and logical workspaces.
 Revision compare-and-swap rejects stale catalog writes; equivalent projections
@@ -46,7 +51,7 @@ The native per-chat stream lock claims a turn; its `copilot_runs` replay identit
 chat marker and user message commit in one transaction. A failed run registration
 cannot start the runner or publish an orphan input. Native replay retains its
 existing authenticated-user/run lookup; embedded sessions do not bypass that gate.
-The local adapter translates Codex JSONL into Sim's versioned stream envelopes;
+The local adapters translate Codex or Claude Code JSONL into Sim's versioned stream envelopes;
 native transcript/finalization code saves the assistant and flushes buffered content
 before recording a terminal run and emitting successful completion. Setup failures,
 execution errors and explicit cancellation close the same native run. Stream IDs and
@@ -69,6 +74,34 @@ queries; they do not depend on the workflow canvas's Socket.IO connection. Workf
 collaboration requires a separately paired realtime service sharing Sim's database
 and authentication configuration.
 
+## Agent configuration and prompt recall
+
+The native Home composer exposes the server's installed Agent catalog next to its
+input. An empty project chat can choose Codex or Claude Code. The first admitted
+turn locks runtime identity, even before the runner returns a thread ID. Changing
+to another runtime requires a new chat; an existing thread is never passed to a
+different provider.
+
+Model, reasoning effort and additional session instructions are saved in
+`vscode_project_sessions.agent_config`. This belongs with the runtime binding,
+not `copilot_chats.config`, which is still replaced wholesale by the legacy cloud
+message-save operation. A revision-checked transaction serializes configuration
+updates with native turn admission. Each run records and uses an immutable
+configuration snapshot; edits affect the next admitted turn. Equal saves are
+no-ops, stale saves return a visible conflict, and a failed save retains the form's
+draft. Models are entered as the runner's actual model ID/alias, with an empty
+value inheriting its configured default. The UI does not maintain a second model
+catalog, and unavailable binaries are not selectable. Installation is not an
+authentication check; credential/provider failures remain visible native turn errors.
+
+Prompt recall reads user messages from the same native transcript. Unmodified
+Up on the first visual line recalls an older prompt; Down on the last visual
+line moves forward and eventually restores the unsent draft. IME composition,
+non-collapsed selections, menu navigation and queued-message editing retain their
+existing precedence. Recall does not replace file/resource attachments, mutate
+persisted messages or keep a separate history database. Each chat owns its own
+transient recall cursor and draft.
+
 ## Local runner configuration
 
 Supply these through the existing Sim runtime environment file
@@ -82,14 +115,25 @@ SIM_VSCODE_REMOTE_AUTHORITIES='["<browser-visible-vscode-host:port>"]'
 SIM_VSCODE_CODEX_BINARY='<absolute-codex-executable>'
 SIM_VSCODE_CODEX_HOME='<private-writable-codex-state-directory>'
 SIM_VSCODE_CODEX_SANDBOX=read-only
+SIM_VSCODE_CLAUDE_BINARY='<absolute-claude-code-executable>'
+SIM_VSCODE_CLAUDE_HOME='<private-writable-claude-code-state-directory>'
 ```
 
 The runner defaults to `read-only`. An operator can explicitly select
 `workspace-write`; unrestricted execution is not supported. Use a dedicated writable
 Codex home with configured credentials and thread storage; do not reuse a running
 agent's mutable session database. Verify both an initial execution and `exec resume`
-before enabling it. The runtime binary/model configuration belongs to the environment,
-not to a browser request or project catalog.
+before enabling it. Binary paths, credential homes and maximum permissions belong
+to this environment surface, never to a browser request or project catalog.
+Per-chat model/effort choices are the bounded settings described above.
+
+Claude Code uses its print/stream-json protocol and an exact persisted resume ID.
+The current adapter allows only Read/Grep/Glob, never shell or write tools. Hooks,
+project settings, MCP servers, Chrome and slash-command customization are disabled
+for this non-interactive adapter. It does not bypass permission checks. Configure a
+dedicated Claude Code credential/state directory; the process receives
+`CLAUDE_CONFIG_DIR`, not Sim's application-level Anthropic API key. A different
+permission mode or an interactive permission-request bridge is out of scope.
 
 Local `file:` project URIs are accepted only for a local physical workspace.
 `vscode-remote:` URIs must match the captured remote authority and an explicit
@@ -107,7 +151,7 @@ real session principal and canonical workspace authorization. Direct access to a
 auth-disabled development Sim port cannot execute project agents. No existing Sim
 workspace is transferred to a different owner.
 
-The immutable DB binding selects the local adapter at the native chat endpoint;
+The DB runtime binding selects the local adapter at the native chat endpoint;
 client-supplied runtime flags have no authority. Local project sessions use the
 same composer with text-only capabilities. Project files can be referenced by path.
 Cloud attachments/resources, voice and cloud-specific tool context are not exposed
@@ -117,13 +161,17 @@ available. Other native chats retain their existing capabilities.
 
 ## Deployment and tests
 
-Migration `0312_vscode_project_agents` adds only projection/binding tables, leaving
-deployed native chat readers compatible. Apply the normal Drizzle migration, commit
+Migration `0312_vscode_project_agents` adds the projection/binding tables;
+`0313_vscode_agent_configuration` adds a nullable configuration field to the binding.
+Absent legacy configuration retains Codex. These additive changes leave deployed
+native chat readers compatible. Apply the normal Drizzle migration, commit
 validated source and use `bun run deploy:sim:latest` from a clean same-source checkout.
 The deployment coordinator owns immutable releases, locking, health checks and rollback.
 
 Tests cover operation authorization, catalog CAS, idempotent native chat creation,
 remote/root policy, runtime arguments, native persistence and replay, browser
-disconnect, cancellation, lost ownership, failed finalization and monitor authority.
+disconnect, cancellation, lost ownership, failed finalization, monitor authority,
+configuration CAS, frozen turn settings, runtime locking, provider protocols,
+composer draft recovery and keyboard history precedence.
 Integration validation should use a dedicated test chat and a read-only prompt,
 not production workflows or the planning DAG.

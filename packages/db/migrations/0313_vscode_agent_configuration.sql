@@ -1,0 +1,1 @@
+ALTER TABLE "vscode_project_sessions" ADD COLUMN "agent_config" jsonb;

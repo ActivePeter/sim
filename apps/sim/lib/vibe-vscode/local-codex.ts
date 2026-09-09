@@ -1,12 +1,12 @@
-import { spawn } from 'node:child_process'
 import { realpath, stat } from 'node:fs/promises'
 import { isAbsolute, relative, sep } from 'node:path'
-import { createInterface } from 'node:readline'
 import { fileURLToPath } from 'node:url'
 import { env } from '@/lib/core/config/env'
 import { OrchestrationError } from '@/lib/core/orchestration/types'
+import type { ProjectAgentSettings } from '@/lib/vibe-vscode/agent-config'
+import { type LocalAgentTurn, runLocalAgentProcess } from '@/lib/vibe-vscode/local-agent-process'
 import type { VscodeSessionOrigin } from '@/lib/vibe-vscode/types'
-import { type CodexEvent, parseCodexJsonLine } from '@/executor/handlers/codex/core/events'
+import { parseCodexJsonLine } from '@/executor/handlers/codex/core/events'
 
 function stringArray(value: string | undefined): string[] {
   if (!value) return []
@@ -114,7 +114,11 @@ export async function resolveLocalProject(
   )
 }
 
-export function localCodexArguments(cwd: string, threadId?: string): string[] {
+export function localCodexArguments(
+  cwd: string,
+  threadId?: string,
+  settings?: Pick<ProjectAgentSettings, 'model' | 'reasoningEffort'>
+): string[] {
   const args = [
     'exec',
     '--json',
@@ -130,102 +134,24 @@ export function localCodexArguments(cwd: string, threadId?: string): string[] {
     '-C',
     cwd,
   ]
+  if (settings?.model) args.push('--model', settings.model)
+  if (settings?.reasoningEffort)
+    args.push('-c', `model_reasoning_effort="${settings.reasoningEffort}"`)
   if (threadId) args.push('resume', threadId)
   args.push('-')
   return args
 }
 
 /** No shell interpolation, inherited application secrets, or destructive CODEX_HOME setup. */
-export async function runLocalCodex(options: {
-  cwd: string
-  threadId?: string
-  prompt: string
-  signal: AbortSignal
-  onEvent(event: CodexEvent): Promise<void>
-}): Promise<void> {
-  if (options.signal.aborted) throw new Error('Agent turn cancelled')
-  const childEnv: NodeJS.ProcessEnv = { NODE_ENV: 'production' }
-  for (const key of [
-    'HOME',
-    'PATH',
-    'LANG',
-    'TMPDIR',
-    'HTTPS_PROXY',
-    'HTTP_PROXY',
-    'NO_PROXY',
-    'SSL_CERT_FILE',
-    'NODE_EXTRA_CA_CERTS',
-  ]) {
-    if (process.env[key]) childEnv[key] = process.env[key]
-  }
-  childEnv.CODEX_HOME = env.SIM_VSCODE_CODEX_HOME ?? process.env.CODEX_HOME
-  const child = spawn(
-    env.SIM_VSCODE_CODEX_BINARY ?? 'codex',
-    localCodexArguments(options.cwd, options.threadId),
-    {
-      cwd: options.cwd,
-      env: childEnv,
-      stdio: ['pipe', 'pipe', 'pipe'],
-      detached: process.platform !== 'win32',
-    }
-  )
-  let killTimer: ReturnType<typeof setTimeout> | undefined
-  let closed = false
-  const kill = (signal: NodeJS.Signals) => {
-    if (closed || !child.pid) return
-    try {
-      if (process.platform === 'win32') child.kill(signal)
-      else process.kill(-child.pid, signal)
-    } catch {
-      /* Process already exited. */
-    }
-  }
-  const abort = () => {
-    kill('SIGTERM')
-    killTimer ??= setTimeout(() => kill('SIGKILL'), 3000)
-  }
-  const completion = new Promise<number | null>((resolve, reject) => {
-    child.once('error', () =>
-      reject(
-        new Error(
-          'The local Codex runner could not start. Check the configured executable and credentials.'
-        )
-      )
-    )
-    child.once('close', (code) => {
-      closed = true
-      if (killTimer) clearTimeout(killTimer)
-      resolve(code)
-    })
+export async function runLocalCodex(
+  options: LocalAgentTurn & { settings?: ProjectAgentSettings }
+): Promise<void> {
+  await runLocalAgentProcess({
+    ...options,
+    executable: env.SIM_VSCODE_CODEX_BINARY ?? 'codex',
+    label: 'Codex',
+    args: localCodexArguments(options.cwd, options.threadId, options.settings),
+    environment: { CODEX_HOME: env.SIM_VSCODE_CODEX_HOME ?? process.env.CODEX_HOME },
+    parseLine: parseCodexJsonLine,
   })
-  // Observe failures immediately, including ENOENT before the stdout loop settles.
-  void completion.catch(() => {})
-  options.signal.addEventListener('abort', abort, { once: true })
-  if (options.signal.aborted) abort()
-  // CLI diagnostics are not a transcript and may contain sensitive environment details.
-  child.stderr.resume()
-  child.stdin.on('error', () => {})
-  child.stdin.end(options.prompt)
-  const lines = createInterface({ input: child.stdout, crlfDelay: Number.POSITIVE_INFINITY })
-  try {
-    for await (const line of lines) {
-      if (line.length > 2_000_000)
-        throw new Error('The local runner exceeded the event size limit.')
-      for (const event of parseCodexJsonLine(line)) await options.onEvent(event)
-    }
-    const code = await completion
-    if (options.signal.aborted) throw new Error('Agent turn cancelled')
-    if (code !== 0)
-      throw new Error(
-        'The local Codex runner exited unsuccessfully. Check its authentication and configuration.'
-      )
-  } finally {
-    options.signal.removeEventListener('abort', abort)
-    lines.close()
-    if (!closed) {
-      abort()
-      await completion.catch(() => {})
-    }
-    if (killTimer) clearTimeout(killTimer)
-  }
 }

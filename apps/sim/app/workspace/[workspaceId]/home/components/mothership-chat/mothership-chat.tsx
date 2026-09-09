@@ -95,6 +95,8 @@ interface MothershipChatProps {
   textOnly?: boolean
   /** Fork/feedback require a runtime with native service-side conversation state. */
   serviceActionsEnabled?: boolean
+  toolbar?: React.ReactNode
+  submissionBlocked?: boolean
 }
 
 /**
@@ -340,6 +342,8 @@ export function MothershipChat({
   className,
   textOnly = false,
   serviceActionsEnabled = true,
+  toolbar,
+  submissionBlocked,
 }: MothershipChatProps) {
   const queryClient = useQueryClient()
   const styles = LAYOUT_STYLES[layout]
@@ -693,14 +697,15 @@ export function MothershipChat({
     (id: string) => {
       const msg = onEditQueuedMessage(id)
       if (msg) userInputRef.current?.loadQueuedMessage(msg)
+      return !!msg
     },
     [onEditQueuedMessage]
   )
 
   const handleEditQueuedTail = useCallback(() => {
     const tail = messageQueueRef.current[messageQueueRef.current.length - 1]
-    if (!tail) return
-    handleEditQueued(tail.id)
+    if (!tail) return false
+    return handleEditQueued(tail.id)
   }, [handleEditQueued])
 
   /**
@@ -835,6 +840,11 @@ export function MothershipChat({
             />
             <UserInput
               textOnly={textOnly}
+              toolbar={toolbar}
+              submissionBlocked={submissionBlocked}
+              promptHistory={messages
+                .filter((message) => message.role === 'user')
+                .map((message) => message.content)}
               key={draftScopeKey}
               ref={userInputRef}
               onSubmit={onSubmit}

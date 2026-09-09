@@ -141,6 +141,8 @@ export const env = createEnv({
     SIM_VSCODE_CODEX_BINARY:               z.string().optional(),                  // Local Codex executable; defaults to PATH lookup
     SIM_VSCODE_CODEX_HOME:                 z.string().optional(),                  // Environment-owned Codex credentials and thread state
     SIM_VSCODE_CODEX_SANDBOX:              z.enum(['read-only', 'workspace-write']).optional(),
+    SIM_VSCODE_CLAUDE_BINARY:              z.string().optional(),                  // Local Claude Code executable; defaults to PATH lookup
+    SIM_VSCODE_CLAUDE_HOME:                z.string().optional(),                  // Environment-owned Claude Code credentials and thread state
     /** Gates risky copilot tools behind an Allow / Skip prompt. Off by default. */
     COPILOT_TOOL_PERMISSIONS_ENABLED:      z.boolean().optional(),
     SIM_AGENT_API_URL:                     z.string().url().optional(),            // URL for internal sim agent API

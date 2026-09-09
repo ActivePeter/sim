@@ -10,9 +10,12 @@ vi.mock('@/hooks/queries/mothership-chats', () => ({
   mothershipChatKeys: { workspaceLists: (id: string) => ['chats', id] },
 }))
 
+import { DEFAULT_PROJECT_AGENT_CONFIG } from '@/lib/vibe-vscode/agent-config'
 import type { VscodeCreateChatRequest } from '@/lib/vibe-vscode/types'
 import {
   useCreateProjectSessionFromSelection,
+  useProjectAgentConfig,
+  useUpdateProjectAgentConfig,
   vscodeAgentKeys,
   waitForProjectedVscodeHost,
 } from '@/hooks/queries/vscode-agents'
@@ -48,6 +51,112 @@ beforeEach(() => {
 })
 afterEach(() => {
   queryClient.clear()
+})
+
+describe('native project Agent configuration queries', () => {
+  const configData = { config: DEFAULT_PROJECT_AGENT_CONFIG, agentLocked: false, agents: [] }
+  const { version: _version, revision: _revision, ...settings } = DEFAULT_PROJECT_AGENT_CONFIG
+
+  it('scopes each read by both workspace and chat and forwards cancellation', async () => {
+    api.request.mockResolvedValue(configData)
+    function Consumer() {
+      useProjectAgentConfig('workspace-one', 'chat-one')
+      useProjectAgentConfig('workspace-two', 'chat-two')
+      return null
+    }
+    const container = document.createElement('div')
+    const root = createRoot(container)
+    try {
+      await act(async () =>
+        root.render(
+          createElement(QueryClientProvider, { client: queryClient }, createElement(Consumer))
+        )
+      )
+      await vi.waitFor(() => expect(api.request).toHaveBeenCalledTimes(2))
+      expect(
+        api.request.mock.calls.map(([contract, input]) => ({
+          method: contract.method,
+          params: input.params,
+          query: input.query,
+          signal: input.signal instanceof AbortSignal,
+        }))
+      ).toEqual([
+        {
+          method: 'GET',
+          params: { chatId: 'chat-one' },
+          query: { workspaceId: 'workspace-one' },
+          signal: true,
+        },
+        {
+          method: 'GET',
+          params: { chatId: 'chat-two' },
+          query: { workspaceId: 'workspace-two' },
+          signal: true,
+        },
+      ])
+      expect(queryClient.getQueryData(vscodeAgentKeys.config('workspace-one', 'chat-one'))).toEqual(
+        configData
+      )
+      expect(queryClient.getQueryData(vscodeAgentKeys.config('workspace-two', 'chat-two'))).toEqual(
+        configData
+      )
+    } finally {
+      act(() => root.unmount())
+    }
+  })
+
+  it('does not let an old save result replace a newer revision or another chat', async () => {
+    const key = vscodeAgentKeys.config('workspace-one', 'chat-one')
+    const otherKey = vscodeAgentKeys.config('workspace-two', 'chat-two')
+    queryClient.setQueryData(key, configData)
+    queryClient.setQueryData(otherKey, configData)
+    let resolve!: (value: {
+      config: typeof DEFAULT_PROJECT_AGENT_CONFIG
+      agentLocked: boolean
+    }) => void
+    api.request.mockImplementation(
+      () =>
+        new Promise((done) => {
+          resolve = done
+        })
+    )
+    let mutation!: ReturnType<typeof useUpdateProjectAgentConfig>
+    function Consumer() {
+      mutation = useUpdateProjectAgentConfig()
+      return null
+    }
+    const container = document.createElement('div')
+    const root = createRoot(container)
+    try {
+      act(() =>
+        root.render(
+          createElement(QueryClientProvider, { client: queryClient }, createElement(Consumer))
+        )
+      )
+      await act(async () => {
+        const pending = mutation.mutateAsync({
+          chatId: 'chat-one',
+          body: { workspaceId: 'workspace-one', expectedRevision: 0, settings },
+        })
+        await vi.waitFor(() => expect(api.request).toHaveBeenCalledOnce())
+        const newer = {
+          ...configData,
+          config: { ...DEFAULT_PROJECT_AGENT_CONFIG, revision: 3, model: 'newer-model' },
+        }
+        queryClient.setQueryData(key, newer)
+        resolve({ config: { ...DEFAULT_PROJECT_AGENT_CONFIG, revision: 1 }, agentLocked: false })
+        await pending
+        expect(queryClient.getQueryData(key)).toEqual(newer)
+        expect(queryClient.getQueryData(otherKey)).toEqual(configData)
+      })
+      expect(api.request.mock.calls[0][1]).toEqual({
+        params: { chatId: 'chat-one' },
+        body: { workspaceId: 'workspace-one', expectedRevision: 0, settings },
+      })
+    } finally {
+      act(() => root.unmount())
+    }
+  })
 })
 
 describe('selection creation waits for the existing host projection', () => {

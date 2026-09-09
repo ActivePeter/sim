@@ -15,11 +15,13 @@ vi.mock('@/lib/copilot/chat/stream-liveness', () => ({
 }))
 
 import { copilotChats, vscodeProjectSessions } from '@sim/db/schema'
+import { DEFAULT_PROJECT_AGENT_CONFIG } from '@/lib/vibe-vscode/agent-config'
 import {
   createProjectSession,
   listProjectSessions,
   loadOwnedChat,
   syncHost,
+  updateProjectAgentConfig,
 } from '@/lib/vibe-vscode/projects-repository'
 import { vscodeCatalogSchema } from '@/lib/vibe-vscode/types'
 
@@ -66,6 +68,86 @@ beforeEach(() => {
   mocks.latestRuns.mockResolvedValue([])
 })
 describe('native project session repository', () => {
+  const {
+    version: _version,
+    revision: _revision,
+    ...defaultSettings
+  } = DEFAULT_PROJECT_AGENT_CONFIG
+  const configInput = {
+    workspaceId: 'workspace-1',
+    chatId: 'chat-1',
+    expectedRevision: 0,
+    settings: { ...defaultSettings, agentId: 'local-claude' as const },
+  }
+  const binding = { agentConfig: null, lastTurnId: null, runtimeThreadId: null }
+
+  it('switches only an empty chat and persists a versioned native runtime configuration', async () => {
+    dbChainMockFns.limit.mockResolvedValueOnce([{ binding }])
+    const result = await updateProjectAgentConfig('user-1', configInput)
+    expect(result).toEqual({
+      config: { ...configInput.settings, revision: 1, version: 1 },
+      agentLocked: false,
+    })
+    expect(dbChainMockFns.for).toHaveBeenCalledWith('update')
+    expect(dbChainMockFns.set).toHaveBeenCalledWith({ agentConfig: result.config })
+    const query = dialect.sqlToQuery(dbChainMockFns.where.mock.calls[0][0])
+    expect(query.params).toEqual(['chat-1', 'user-1', 'workspace-1'])
+    expect(query.sql).toContain('"copilot_chats"."deleted_at" is null')
+  })
+  it('cannot use a stale revision to overwrite another tab', async () => {
+    dbChainMockFns.limit.mockResolvedValueOnce([
+      { binding: { ...binding, agentConfig: { ...DEFAULT_PROJECT_AGENT_CONFIG, revision: 2 } } },
+    ])
+    await expect(updateProjectAgentConfig('user-1', configInput)).rejects.toMatchObject({
+      code: 'conflict',
+    })
+    expect(dbChainMockFns.update).not.toHaveBeenCalled()
+  })
+  it.each([
+    { lastTurnId: 'turn', runtimeThreadId: null },
+    { lastTurnId: null, runtimeThreadId: 'thread' },
+  ])('serializes runtime changes after turn admission: %j', async (state) => {
+    dbChainMockFns.limit.mockResolvedValueOnce([{ binding: { ...binding, ...state } }])
+    await expect(updateProjectAgentConfig('user-1', configInput)).rejects.toMatchObject({
+      code: 'conflict',
+    })
+    expect(dbChainMockFns.update).not.toHaveBeenCalled()
+  })
+  it('allows next-turn configuration changes without resetting an existing runtime thread', async () => {
+    dbChainMockFns.limit.mockResolvedValueOnce([
+      { binding: { ...binding, lastTurnId: 'turn', runtimeThreadId: 'thread' } },
+    ])
+    const result = await updateProjectAgentConfig('user-1', {
+      ...configInput,
+      settings: { ...defaultSettings, model: 'configured-model', reasoningEffort: 'high' },
+    })
+    expect(result.agentLocked).toBe(true)
+    expect(dbChainMockFns.set).toHaveBeenCalledWith({
+      agentConfig: {
+        ...defaultSettings,
+        model: 'configured-model',
+        reasoningEffort: 'high',
+        version: 1,
+        revision: 1,
+      },
+    })
+    expect(dbChainMockFns.update).toHaveBeenCalledWith(vscodeProjectSessions)
+  })
+  it('does not bump the revision for a no-op', async () => {
+    dbChainMockFns.limit.mockResolvedValueOnce([{ binding }])
+    expect(
+      await updateProjectAgentConfig('user-1', { ...configInput, settings: defaultSettings })
+    ).toEqual({ config: DEFAULT_PROJECT_AGENT_CONFIG, agentLocked: false })
+    expect(dbChainMockFns.update).not.toHaveBeenCalled()
+  })
+  it('rechecks the live owned chat inside the configuration transaction', async () => {
+    dbChainMockFns.limit.mockResolvedValueOnce([])
+    await expect(updateProjectAgentConfig('user-1', configInput)).rejects.toMatchObject({
+      code: 'not_found',
+    })
+    expect(dbChainMockFns.update).not.toHaveBeenCalled()
+  })
+
   it('does not publish duplicate project identities', () => {
     expect(
       vscodeCatalogSchema.safeParse({

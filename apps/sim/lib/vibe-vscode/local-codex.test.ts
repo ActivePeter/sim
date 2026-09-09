@@ -69,6 +69,22 @@ describe('local project runner boundary', () => {
       )
     ).toThrow('not mapped')
   })
+  it('forwards configured model and reasoning without replacing deployment-owned sandbox policy', () => {
+    const args = localCodexArguments('/projects/a', 'thread', {
+      model: 'configured-model',
+      reasoningEffort: 'high',
+    })
+    expect(args.slice(-7)).toEqual([
+      '--model',
+      'configured-model',
+      '-c',
+      'model_reasoning_effort="high"',
+      'resume',
+      'thread',
+      '-',
+    ])
+    expect(args[args.indexOf('--sandbox') + 1]).toBe('read-only')
+  })
   it('preserves the port and Unicode path in a real VS Code remote URI', () => {
     expect(
       projectPathFromUri(

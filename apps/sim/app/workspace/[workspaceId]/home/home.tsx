@@ -33,10 +33,12 @@ import {
   type MothershipSendMessageDetail,
 } from '@/lib/mothership/events'
 import { captureEvent } from '@/lib/posthog/client'
+import type { ProjectAgentSettings } from '@/lib/vibe-vscode/agent-config'
 import type { VscodeSessionOrigin } from '@/lib/vibe-vscode/types'
 import { persistImportedWorkflow } from '@/lib/workflows/operations/import-export'
 import { ProjectLauncher } from '@/app/workspace/[workspaceId]/agents/components/project-launcher'
 import { RESOURCE_HEADER_CLASSES } from '@/app/workspace/[workspaceId]/home/components/mothership-view/components/resource-tabs/resource-tab-controls'
+import { ProjectAgentControls } from '@/app/workspace/[workspaceId]/home/components/project-agent-controls'
 import { resolveWorkspaceResourceRef } from '@/app/workspace/[workspaceId]/home/resolve-resource-ref'
 import {
   resolveResourceEventPresentation,
@@ -45,6 +47,7 @@ import {
 import { resourceParam, resourceUrlKeys } from '@/app/workspace/[workspaceId]/home/search-params'
 import { useFolders } from '@/hooks/queries/folders'
 import { useMarkMothershipChatRead } from '@/hooks/queries/mothership-chats'
+import { useProjectAgentConfig, useUpdateProjectAgentConfig } from '@/hooks/queries/vscode-agents'
 import { useWorkflows } from '@/hooks/queries/workflows'
 import { getWorkspaceFilesQueryOptions, useWorkspaceFiles } from '@/hooks/queries/workspace-files'
 import { useOAuthReturnRouter } from '@/hooks/use-oauth-return'
@@ -323,6 +326,42 @@ function ChatHome({
   )
 
   const { mothershipRef, handleResizePointerDown, clearWidth } = useMothershipResize(desktopScopeId)
+  const agentConfigQuery = useProjectAgentConfig(
+    workspaceId,
+    projectOrigin ? (resolvedChatId ?? undefined) : undefined
+  )
+  const { mutateAsync: saveAgentConfig, isPending: isAgentConfigSaving } =
+    useUpdateProjectAgentConfig()
+  const handleSaveAgentConfig = useCallback(
+    (settings: ProjectAgentSettings, expectedRevision: number) => {
+      if (!resolvedChatId) return Promise.reject(new Error('项目会话尚未就绪'))
+      return saveAgentConfig({
+        chatId: resolvedChatId,
+        body: { workspaceId, settings, expectedRevision },
+      })
+    },
+    [resolvedChatId, workspaceId, saveAgentConfig]
+  )
+  const agentSubmissionBlocked =
+    !!projectOrigin &&
+    (!agentConfigQuery.data ||
+      isAgentConfigSaving ||
+      !agentConfigQuery.data.agents.find(
+        (agent) => agent.id === agentConfigQuery.data.config.agentId
+      )?.available)
+  const agentToolbar = projectOrigin ? (
+    <ProjectAgentControls
+      key={`${workspaceId}:${resolvedChatId}`}
+      data={agentConfigQuery.data}
+      loadError={agentConfigQuery.error}
+      saving={isAgentConfigSaving}
+      hasMessages={messages.length > 0 || isSending || isReconnecting}
+      onRefresh={() => {
+        void agentConfigQuery.refetch()
+      }}
+      onSave={handleSaveAgentConfig}
+    />
+  ) : undefined
   const effectiveActiveResourceIdRef = useRef(activeResourceId)
   effectiveActiveResourceIdRef.current = activeResourceId
   const resourceAttentionChatIdRef = useRef(resolvedChatId)
@@ -743,6 +782,8 @@ function ChatHome({
                     draftScopeKey={draftScopeKey}
                     onSubmit={handleSubmit}
                     textOnly={!!projectOrigin}
+                    toolbar={agentToolbar}
+                    submissionBlocked={agentSubmissionBlocked}
                     isSending={isSending}
                     onStopGeneration={handleStopGeneration}
                   />
@@ -763,6 +804,8 @@ function ChatHome({
         ) : (
           <MothershipChat
             textOnly={!!projectOrigin}
+            toolbar={agentToolbar}
+            submissionBlocked={agentSubmissionBlocked}
             serviceActionsEnabled={!projectOrigin}
             layout={compact ? 'copilot-view' : 'mothership-view'}
             workspaceId={workspaceId}

@@ -27,7 +27,7 @@ vi.mock('@/lib/copilot/async-runs/repository', () => ({
   createRunSegment: mocks.createRun,
   updateRunStatus: mocks.updateRun,
 }))
-vi.mock('@/lib/vibe-vscode/local-codex', () => ({ runLocalCodex: mocks.run }))
+vi.mock('@/lib/vibe-vscode/local-agents', () => ({ runProjectAgent: mocks.run }))
 vi.mock('@/lib/copilot/chat/messages-store', () => ({ appendCopilotChatMessages: mocks.append }))
 vi.mock('@/lib/copilot/chat/terminal-state', () => ({ finalizeAssistantTurn: mocks.finalize }))
 vi.mock('@/lib/copilot/chat-status', () => ({ chatPubSub: { publishStatusChanged: mocks.status } }))
@@ -48,11 +48,15 @@ vi.mock('@/lib/copilot/request/session', async (importOriginal) => ({
 
 import { CopilotChatFinalizeOutcome } from '@/lib/copilot/generated/trace-attribute-values-v1'
 import { AbortReason } from '@/lib/copilot/request/session/abort-reason'
-import type { runLocalCodex } from '@/lib/vibe-vscode/local-codex'
+import {
+  DEFAULT_PROJECT_AGENT_CONFIG,
+  type ProjectAgentConfig,
+} from '@/lib/vibe-vscode/agent-config'
+import type { runProjectAgent } from '@/lib/vibe-vscode/local-agents'
 import { startProjectChat } from '@/lib/vibe-vscode/project-chat'
 import type { VscodeSelection } from '@/lib/vibe-vscode/types'
 
-type RunOptions = Parameters<typeof runLocalCodex>[0]
+type RunOptions = Parameters<typeof runProjectAgent>[0]
 const input = {
   workspaceId: 'workspace-1',
   chatId: '00000000-0000-4000-8000-000000000001',
@@ -63,12 +67,16 @@ const origin = {
   physicalWorkspace: { id: 'physical-1', name: 'Projects', remoteAuthority: '' },
   project: { uri: 'file:///projects/a', name: 'Project A', index: 0 },
 }
-function prepareTurn(threadId: string | null = null, selection?: VscodeSelection) {
+function prepareTurn(
+  threadId: string | null = null,
+  selection?: VscodeSelection,
+  agentConfig?: ProjectAgentConfig
+) {
   dbChainMockFns.limit
     .mockResolvedValueOnce([
       {
         chat: { id: input.chatId, userId: 'user-1', workspaceId: input.workspaceId },
-        binding: { origin: { ...origin, selection }, runtimeThreadId: threadId },
+        binding: { origin: { ...origin, selection }, runtimeThreadId: threadId, agentConfig },
       },
     ])
     .mockResolvedValueOnce([])
@@ -176,6 +184,47 @@ describe('project agent uses the native chat lifecycle', () => {
       threadId: 'stored-thread',
     })
     expect(mocks.run.mock.calls[0][0].prompt).toContain('Project A')
+  })
+
+  it('captures runtime, model and instructions atomically and keeps them stable during a turn', async () => {
+    const settings: ProjectAgentConfig = {
+      ...DEFAULT_PROJECT_AGENT_CONFIG,
+      agentId: 'local-claude',
+      revision: 4,
+      model: 'test-model',
+      reasoningEffort: 'high',
+      instructions: 'Answer in Chinese.',
+    }
+    prepareTurn('claude-thread', undefined, settings)
+    const started = deferred<RunOptions>()
+    const finish = deferred()
+    mocks.run.mockImplementation(async (options: RunOptions) => {
+      started.resolve(options)
+      await finish.promise
+      await complete(options)
+    })
+    const response = await startProjectChat('user-1', input, '/projects/a')
+    const options = await started.promise
+    settings.model = 'changed-after-start'
+    settings.instructions = 'Changed for the next turn.'
+    expect(options.settings).toMatchObject({
+      agentId: 'local-claude',
+      model: 'test-model',
+      revision: 4,
+    })
+    expect(Object.isFrozen(options.settings)).toBe(true)
+    expect(options.threadId).toBe('claude-thread')
+    expect(options.prompt).toContain('Answer in Chinese.')
+    expect(options.prompt).not.toContain(settings.instructions)
+    expect(mocks.createRun.mock.calls[0][0]).toMatchObject({
+      agent: 'local-claude',
+      provider: 'local-claude',
+      model: 'test-model',
+      requestContext: { projectAgentConfig: { revision: 4 } },
+    })
+    expect(mocks.append.mock.calls[0][2].chatModel).toBe('test-model')
+    finish.resolve()
+    expect(await response.text()).toContain('"model":"test-model"')
   })
   it('uses the stored selection as reference context only when the user starts the first turn', async () => {
     const selection = {

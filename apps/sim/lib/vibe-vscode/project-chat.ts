@@ -31,9 +31,9 @@ import {
 } from '@/lib/copilot/request/session'
 import { toStreamBatchEvent } from '@/lib/copilot/request/session/types'
 import { OrchestrationError } from '@/lib/core/orchestration/types'
-import { runLocalCodex } from '@/lib/vibe-vscode/local-codex'
+import { type ProjectAgentConfig, readProjectAgentConfig } from '@/lib/vibe-vscode/agent-config'
+import { runProjectAgent } from '@/lib/vibe-vscode/local-agents'
 import { vscodeSessionOriginSchema } from '@/lib/vibe-vscode/types'
-import { applyCodexEvent, createCodexTotals } from '@/executor/handlers/codex/core/events'
 
 const logger = createLogger('VscodeProjectChat')
 
@@ -71,7 +71,7 @@ export async function startProjectChat(
     timestamp: new Date().toISOString(),
   }
   const runId = generateId()
-  let turn: { threadId?: string; prompt: string }
+  let turn: { threadId?: string; prompt: string; settings: Readonly<ProjectAgentConfig> }
   let claimedTurn = false
   try {
     turn = await db.transaction(async (tx) => {
@@ -96,6 +96,9 @@ export async function startProjectChat(
         .where(and(eq(copilotMessages.chatId, chatId), eq(copilotMessages.messageId, streamId)))
         .limit(1)
       if (replay) throw new ProjectChatBusyError(chatId, null)
+      /** The binding is locked with the native turn; later configuration saves affect only later turns. */
+      const settings = readProjectAgentConfig(row.binding.agentConfig)
+      const model = settings.model ?? settings.agentId
       const history = await tx
         .select({ messageId: copilotMessages.messageId, content: copilotMessages.content })
         .from(copilotMessages)
@@ -103,7 +106,7 @@ export async function startProjectChat(
         .orderBy(desc(copilotMessages.seq))
         .limit(1000)
       const origin = vscodeSessionOriginSchema.parse(row.binding.origin)
-      // The client never chooses cwd, model credentials, or the runtime thread.
+      /** The client never chooses cwd, credentials, permissions, or the runtime thread. */
       const preamble =
         'You are the project agent for ' +
         origin.project.name +
@@ -113,7 +116,10 @@ export async function startProjectChat(
         ', shared with VS Code. Work only on the user request.\n' +
         'The project working directory is ' +
         cwd +
-        '. Follow its AGENTS.md instructions.\n'
+        '. Follow its AGENTS.md instructions.\n' +
+        (settings.instructions
+          ? `\nAdditional user instructions for this turn:\n${settings.instructions}\n`
+          : '')
       const historyText = row.binding.runtimeThreadId
         ? ''
         : history
@@ -139,29 +145,25 @@ export async function startProjectChat(
           userId,
           workspaceId: input.workspaceId,
           streamId,
-          agent: 'local-codex',
-          model: 'local-codex',
-          provider: 'local-codex',
-          requestContext: { requestId: streamId },
+          agent: settings.agentId,
+          model,
+          provider: settings.agentId,
+          requestContext: { requestId: streamId, projectAgentConfig: settings },
         },
         tx
       )
       if (!run) throw new Error('The project agent run could not be registered.')
       await tx
         .update(copilotChats)
-        .set({ conversationId: streamId, updatedAt: new Date() })
+        .set({ conversationId: streamId, model, updatedAt: new Date() })
         .where(eq(copilotChats.id, chatId))
       await tx
         .update(vscodeProjectSessions)
         .set({ lastTurnId: streamId })
         .where(eq(vscodeProjectSessions.chatId, chatId))
-      await appendCopilotChatMessages(
-        chatId,
-        [userMessage],
-        { streamId, chatModel: 'local-codex' },
-        tx
-      )
+      await appendCopilotChatMessages(chatId, [userMessage], { streamId, chatModel: model }, tx)
       return {
+        settings,
         threadId: row.binding.runtimeThreadId ?? undefined,
         prompt:
           preamble +
@@ -245,7 +247,13 @@ export async function startProjectChat(
   const execute = async () => {
     let outcome: 'complete' | 'error' | 'cancelled' = 'complete'
     let runError: string | null = null
-    const totals = createCodexTotals()
+    const totals = {
+      turnCompleted: false,
+      inputTokens: 0,
+      outputTokens: 0,
+      cachedInputTokens: 0,
+      cacheWriteInputTokens: 0,
+    }
     try {
       publish({ type: 'session', payload: { kind: 'chat', chatId } })
       publish({ type: 'session', payload: { kind: 'start', data: { responseId: streamId } } })
@@ -256,13 +264,13 @@ export async function startProjectChat(
         streamId,
         type: 'started',
       })
-      await runLocalCodex({
+      await runProjectAgent({
         cwd,
         threadId: turn.threadId,
         prompt: turn.prompt,
+        settings: turn.settings,
         signal: controller.signal,
         onEvent: async (event) => {
-          applyCodexEvent(totals, event)
           switch (event.type) {
             case 'thread_started':
               await db
@@ -316,6 +324,15 @@ export async function startProjectChat(
               break
             case 'error':
               throw new Error(event.message)
+            case 'usage':
+              totals.inputTokens += event.inputTokens
+              totals.outputTokens += event.outputTokens
+              totals.cachedInputTokens += event.cachedInputTokens
+              totals.cacheWriteInputTokens += event.cacheWriteInputTokens
+              break
+            case 'final':
+              totals.turnCompleted = true
+              break
           }
           await writer.flush()
         },
@@ -334,7 +351,11 @@ export async function startProjectChat(
             : getErrorMessage(error, 'The project agent failed.')
         publish({
           type: 'error',
-          payload: { message: runError, code: 'local_agent_error', provider: 'local-codex' },
+          payload: {
+            message: runError,
+            code: 'local_agent_error',
+            provider: turn.settings.agentId,
+          },
         })
       }
     } finally {
@@ -347,7 +368,8 @@ export async function startProjectChat(
               input_tokens: totals.inputTokens,
               output_tokens: totals.outputTokens,
               cache_read_input_tokens: totals.cachedInputTokens,
-              model: 'local-codex',
+              cache_creation_input_tokens: totals.cacheWriteInputTokens,
+              model: turn.settings.model ?? turn.settings.agentId,
             },
           },
         }

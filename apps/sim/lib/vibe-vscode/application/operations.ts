@@ -31,6 +31,18 @@ export const vscodeAgentOperations = {
     workspaceApiKey: 'deny',
     principalKinds: ['session'],
   }),
+  readConfig: defineWorkspaceOperation({
+    id: 'vscode.sessions.config.read',
+    minimumRole: 'read',
+    workspaceApiKey: 'deny',
+    principalKinds: ['session'],
+  }),
+  updateConfig: defineWorkspaceOperation({
+    id: 'vscode.sessions.config.update',
+    minimumRole: 'write',
+    workspaceApiKey: 'deny',
+    principalKinds: ['session'],
+  }),
   runSession: defineWorkspaceOperation({
     id: 'vscode.sessions.run',
     minimumRole: 'write',

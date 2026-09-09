@@ -2,6 +2,11 @@ import { z } from 'zod'
 import { workspaceIdSchema } from '@/lib/api/contracts/primitives'
 import { defineRouteContract } from '@/lib/api/contracts/types'
 import {
+  projectAgentCapabilitySchema,
+  projectAgentConfigSchema,
+  projectAgentSettingsSchema,
+} from '@/lib/vibe-vscode/agent-config'
+import {
   vscodeCatalogSchema,
   vscodeSelectionSchema,
   vscodeSessionIdentitySchema,
@@ -75,7 +80,7 @@ export const listProjectSessionsContract = defineRouteContract({
             'unknown',
           ]),
           origin: vscodeSessionIdentitySchema.nullable(),
-          runtime: z.enum(['local-codex', 'sim']),
+          runtime: z.enum(['local-codex', 'local-claude', 'sim']),
         })
       ),
     }),
@@ -92,6 +97,38 @@ export const stopProjectSessionContract = defineRouteContract({
   response: { mode: 'json', schema: z.object({ stopped: z.boolean() }) },
 })
 export type StopProjectSessionBody = z.input<typeof stopProjectSessionBodySchema>
+
+const projectAgentParamsSchema = z.object({ chatId: z.string().uuid() })
+export const projectAgentConfigStateSchema = z.object({
+  config: projectAgentConfigSchema,
+  agentLocked: z.boolean(),
+})
+export const getProjectAgentConfigContract = defineRouteContract({
+  method: 'GET',
+  path: '/api/vscode/sessions/[chatId]/config',
+  params: projectAgentParamsSchema,
+  query: scope,
+  response: {
+    mode: 'json',
+    schema: projectAgentConfigStateSchema.extend({ agents: z.array(projectAgentCapabilitySchema) }),
+  },
+})
+export type GetProjectAgentConfigResponse = z.output<
+  typeof getProjectAgentConfigContract.response.schema
+>
+export const updateProjectAgentConfigBodySchema = scope.extend({
+  expectedRevision: z.number().int().nonnegative(),
+  settings: projectAgentSettingsSchema,
+})
+export type UpdateProjectAgentConfigBody = z.input<typeof updateProjectAgentConfigBodySchema>
+export type ProjectAgentConfigState = z.output<typeof projectAgentConfigStateSchema>
+export const updateProjectAgentConfigContract = defineRouteContract({
+  method: 'PATCH',
+  path: '/api/vscode/sessions/[chatId]/config',
+  params: projectAgentParamsSchema,
+  body: updateProjectAgentConfigBodySchema,
+  response: { mode: 'json', schema: projectAgentConfigStateSchema },
+})
 
 /** Streaming is the native chat protocol; unsupported cloud-only inputs fail explicitly. */
 export const localProjectChatBodySchema = z

@@ -11,12 +11,16 @@ import type { ContractJsonResponse } from '@/lib/api/contracts'
 import {
   type CreateProjectSessionBody,
   createProjectSessionContract,
+  type GetProjectAgentConfigResponse,
+  getProjectAgentConfigContract,
   listProjectSessionsContract,
   listVscodeHostsContract,
   type StopProjectSessionBody,
   type SyncVscodeHostBody,
   stopProjectSessionContract,
   syncVscodeHostContract,
+  type UpdateProjectAgentConfigBody,
+  updateProjectAgentConfigContract,
 } from '@/lib/api/contracts/vscode-agents'
 import type { VscodeCreateChatRequest, VscodeHost } from '@/lib/vibe-vscode/types'
 import { mothershipChatKeys } from '@/hooks/queries/mothership-chats'
@@ -24,12 +28,56 @@ import { mothershipChatKeys } from '@/hooks/queries/mothership-chats'
 export const VSCODE_HOSTS_STALE_TIME = 30_000
 export const VSCODE_SESSIONS_STALE_TIME = 2000
 export const VSCODE_MONITOR_POLL_INTERVAL = 4000
+export const VSCODE_AGENT_CONFIG_STALE_TIME = 10_000
 export const vscodeAgentKeys = {
   all: ['vscode-agents'] as const,
   hosts: () => [...vscodeAgentKeys.all, 'hosts'] as const,
   hostList: (workspaceId: string) => [...vscodeAgentKeys.hosts(), workspaceId] as const,
   sessions: () => [...vscodeAgentKeys.all, 'sessions'] as const,
   sessionList: (workspaceId: string) => [...vscodeAgentKeys.sessions(), workspaceId] as const,
+  configs: () => [...vscodeAgentKeys.all, 'config'] as const,
+  config: (workspaceId: string, chatId: string) =>
+    [...vscodeAgentKeys.configs(), workspaceId, chatId] as const,
+}
+
+export function useProjectAgentConfig(workspaceId: string, chatId?: string) {
+  return useQuery({
+    queryKey: vscodeAgentKeys.config(workspaceId, chatId ?? ''),
+    queryFn: ({ signal }) =>
+      requestJson(getProjectAgentConfigContract, {
+        params: { chatId: chatId! },
+        query: { workspaceId },
+        signal,
+      }),
+    staleTime: VSCODE_AGENT_CONFIG_STALE_TIME,
+    enabled: !!workspaceId && !!chatId,
+  })
+}
+
+export function useUpdateProjectAgentConfig() {
+  const queryClient = useQueryClient()
+  return useMutation({
+    mutationFn: ({ chatId, body }: { chatId: string; body: UpdateProjectAgentConfigBody }) =>
+      requestJson(updateProjectAgentConfigContract, { params: { chatId }, body }),
+    onMutate: ({ chatId, body }) =>
+      queryClient.cancelQueries({ queryKey: vscodeAgentKeys.config(body.workspaceId, chatId) }),
+    onSuccess: (result, { chatId, body }) => {
+      queryClient.setQueryData<GetProjectAgentConfigResponse>(
+        vscodeAgentKeys.config(body.workspaceId, chatId),
+        (current) =>
+          current && current.config.revision <= result.config.revision
+            ? { ...current, ...result }
+            : current
+      )
+    },
+    onSettled: (_result, _error, { chatId, body }) =>
+      Promise.all([
+        queryClient.invalidateQueries({
+          queryKey: vscodeAgentKeys.config(body.workspaceId, chatId),
+        }),
+        queryClient.invalidateQueries({ queryKey: vscodeAgentKeys.sessionList(body.workspaceId) }),
+      ]),
+  })
 }
 
 export function useVscodeHosts(workspaceId: string) {

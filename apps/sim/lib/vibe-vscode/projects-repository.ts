@@ -8,6 +8,11 @@ import { getLatestRunsForChats } from '@/lib/copilot/async-runs/repository'
 import { reconcileChatStreamMarkers } from '@/lib/copilot/chat/stream-liveness'
 import { OrchestrationError } from '@/lib/core/orchestration/types'
 import {
+  isProjectAgentLocked,
+  type ProjectAgentSettings,
+  readProjectAgentConfig,
+} from '@/lib/vibe-vscode/agent-config'
+import {
   isVscodeSelectionInProject,
   type ProjectSession,
   type ProjectSessionStatus,
@@ -270,7 +275,65 @@ export async function listProjectSessions(
       activeStreamId: marker?.streamId ?? null,
       status,
       origin: binding ? vscodeSessionIdentitySchema.parse(binding.origin) : null,
-      runtime: binding ? 'local-codex' : 'sim',
+      runtime: binding ? readProjectAgentConfig(binding.agentConfig).agentId : 'sim',
     }
+  })
+}
+
+export interface UpdateProjectAgentConfigInput {
+  workspaceId: string
+  chatId: string
+  expectedRevision: number
+  settings: ProjectAgentSettings
+}
+
+/** Serializes with turn admission so a started thread can never be rebound to another runtime. */
+export async function updateProjectAgentConfig(
+  userId: string,
+  input: UpdateProjectAgentConfigInput
+) {
+  return db.transaction(async (tx) => {
+    const [row] = await tx
+      .select({ binding: vscodeProjectSessions })
+      .from(copilotChats)
+      .innerJoin(vscodeProjectSessions, eq(vscodeProjectSessions.chatId, copilotChats.id))
+      .where(
+        and(
+          eq(copilotChats.id, input.chatId),
+          eq(copilotChats.userId, userId),
+          eq(copilotChats.workspaceId, input.workspaceId),
+          isNull(copilotChats.deletedAt)
+        )
+      )
+      .for('update')
+      .limit(1)
+    if (!row) throw new OrchestrationError('not_found', 'Project session not found')
+    const current = readProjectAgentConfig(row.binding.agentConfig)
+    const agentLocked = isProjectAgentLocked(row.binding)
+    if (current.revision !== input.expectedRevision) {
+      throw new OrchestrationError('conflict', 'Agent configuration changed. Refresh and retry.')
+    }
+    if (agentLocked && current.agentId !== input.settings.agentId) {
+      throw new OrchestrationError(
+        'conflict',
+        'This conversation has already started. Create a new chat to use a different Agent.'
+      )
+    }
+    const { version: _version, revision: _revision, ...settings } = current
+    if (
+      Object.keys(settings).every(
+        (key) =>
+          settings[key as keyof ProjectAgentSettings] ===
+          input.settings[key as keyof ProjectAgentSettings]
+      )
+    ) {
+      return { config: current, agentLocked }
+    }
+    const config = { ...input.settings, version: 1 as const, revision: current.revision + 1 }
+    await tx
+      .update(vscodeProjectSessions)
+      .set({ agentConfig: config })
+      .where(eq(vscodeProjectSessions.chatId, input.chatId))
+    return { config, agentLocked }
   })
 }
