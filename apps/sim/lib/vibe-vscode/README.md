@@ -89,10 +89,34 @@ message-save operation. A revision-checked transaction serializes configuration
 updates with native turn admission. Each run records and uses an immutable
 configuration snapshot; edits affect the next admitted turn. Equal saves are
 no-ops, stale saves return a visible conflict, and a failed save retains the form's
-draft. Models are entered as the runner's actual model ID/alias, with an empty
-value inheriting its configured default. The UI does not maintain a second model
-catalog, and unavailable binaries are not selectable. Installation is not an
-authentication check; credential/provider failures remain visible native turn errors.
+draft. A searchable model selector reads the installed runner's model catalog through
+the existing authorized configuration read. Codex supplies `model/list` through its
+stdio app-server protocol; Claude Code supplies model aliases, resolved IDs and effort
+levels in its print-protocol `initialize` response. Only normalized model metadata
+reaches the browser, never account details or credentials. There is no frontend model
+table or Agent-wide level list. Model IDs and level identifiers are bounded, and both
+saving and execution check the chosen pair against the same server catalog.
+
+Changing models preserves a compatible level and otherwise clears the explicit override.
+A concrete model's advertised default effort is applied at execution so it cannot
+inherit an incompatible effort configured for another model. When a runner does not
+advertise a default effort, it resolves the unset level itself. Models without effort
+controls expose no levels. The separate runtime default choice leaves both model
+and effort to the runner; choosing an explicit level requires an explicit model.
+Legacy model IDs and levels remain visible, including resolved aliases reported by the
+runtime. An unrecognized or incompatible saved choice is not silently replaced: the
+form explains the problem and requires an explicit choice before saving. It remains
+in the database until then.
+
+Discovery runs outside project directories, without a user prompt, chat persistence,
+tools or a listening port. It shares the turn runner's environment allowlist and
+process-group cleanup. A query has a ten-second deadline, a two-megabyte response cap
+and bounded pagination; cleanup escalates to a forced stop after three seconds. Each
+server process coalesces concurrent requests per runtime and caches successful catalogs
+for five minutes. Failed reads are retryable errors, never authoritative empty lists
+or silently stale capabilities. They do not prevent use of paired runtime defaults.
+Unavailable binaries are not selectable; installation and catalog discovery do not
+prove a model call will authenticate, so provider failures remain native turn errors.
 
 Prompt recall reads user messages from the same native transcript. Unmodified
 Up on the first visual line recalls an older prompt; Down on the last visual
@@ -172,6 +196,7 @@ Tests cover operation authorization, catalog CAS, idempotent native chat creatio
 remote/root policy, runtime arguments, native persistence and replay, browser
 disconnect, cancellation, lost ownership, failed finalization, monitor authority,
 configuration CAS, frozen turn settings, runtime locking, provider protocols,
+model-specific levels and defaults, bounded discovery and cache recovery,
 composer draft recovery and keyboard history precedence.
 Integration validation should use a dedicated test chat and a read-only prompt,
 not production workflows or the planning DAG.

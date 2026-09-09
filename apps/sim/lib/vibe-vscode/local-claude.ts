@@ -1,15 +1,28 @@
 import { toRecordOrNull } from '@sim/utils/object'
 import { truncate } from '@sim/utils/string'
+import { z } from 'zod'
 import { env } from '@/lib/core/config/env'
-import type { ProjectAgentSettings } from '@/lib/vibe-vscode/agent-config'
+import {
+  DEFAULT_PROJECT_AGENT_CONFIG,
+  type ProjectAgentModel,
+  type ProjectAgentSettings,
+  projectAgentEffortSchema,
+  projectAgentModelIdSchema,
+  projectAgentModelsSchema,
+} from '@/lib/vibe-vscode/agent-config'
 import {
   type LocalAgentEvent,
   type LocalAgentTurn,
+  queryLocalAgentProcess,
   runLocalAgentProcess,
 } from '@/lib/vibe-vscode/local-agent-process'
 
 /** Claude's non-interactive adapter is read-only; browser settings cannot widen permissions. */
-export function localClaudeArguments(settings: ProjectAgentSettings, threadId?: string): string[] {
+export function localClaudeArguments(
+  settings: ProjectAgentSettings,
+  threadId?: string,
+  mode: 'turn' | 'catalog' = 'turn'
+): string[] {
   const args = [
     '--print',
     '--output-format',
@@ -18,7 +31,7 @@ export function localClaudeArguments(settings: ProjectAgentSettings, threadId?: 
     '--permission-mode',
     'dontAsk',
     '--tools',
-    'Read,Grep,Glob',
+    mode === 'catalog' ? '' : 'Read,Grep,Glob',
     '--disable-slash-commands',
     '--strict-mcp-config',
     '--mcp-config',
@@ -32,6 +45,7 @@ export function localClaudeArguments(settings: ProjectAgentSettings, threadId?: 
   if (settings.model) args.push('--model', settings.model)
   if (settings.reasoningEffort) args.push('--effort', settings.reasoningEffort)
   if (threadId) args.push('--resume', threadId)
+  if (mode === 'catalog') args.push('--input-format', 'stream-json', '--no-session-persistence')
   return args
 }
 
@@ -133,13 +147,73 @@ export function createClaudeEventParser(): (line: string) => LocalAgentEvent[] {
   }
 }
 
+function localClaudeProcessOptions() {
+  return {
+    executable: env.SIM_VSCODE_CLAUDE_BINARY ?? 'claude',
+    label: 'Claude Code',
+    environment: { CLAUDE_CONFIG_DIR: env.SIM_VSCODE_CLAUDE_HOME ?? process.env.CLAUDE_CONFIG_DIR },
+  }
+}
+
+const claudeModelListSchema = z.object({
+  models: z
+    .array(
+      z.object({
+        value: projectAgentModelIdSchema,
+        resolvedModel: projectAgentModelIdSchema.optional(),
+        displayName: z.string().min(1).max(200),
+        description: z.string().max(2000),
+        supportsEffort: z.boolean().optional(),
+        supportedEffortLevels: z.array(projectAgentEffortSchema).max(32).optional(),
+      })
+    )
+    .min(1)
+    .max(256),
+})
+
+/** The print protocol's initialize response supplies models and per-model effort support. */
+export async function getLocalClaudeModels(): Promise<ProjectAgentModel[]> {
+  const requestId = 'sim-model-catalog'
+  return queryLocalAgentProcess({
+    ...localClaudeProcessOptions(),
+    args: localClaudeArguments(DEFAULT_PROJECT_AGENT_CONFIG, undefined, 'catalog'),
+    initialMessage: {
+      type: 'control_request',
+      request_id: requestId,
+      request: { subtype: 'initialize' },
+    },
+    onMessage(message) {
+      const envelope = toRecordOrNull(message)
+      const response = toRecordOrNull(envelope?.response)
+      if (envelope?.type !== 'control_response' || response?.request_id !== requestId) return
+      if (response.subtype !== 'success') throw new Error('Claude Code model discovery failed')
+      const { models } = claudeModelListSchema.parse(response.response)
+      return projectAgentModelsSchema.parse(
+        models.map((model) => {
+          if (model.supportsEffort && !model.supportedEffortLevels?.length) {
+            throw new Error('Claude Code did not provide per-model effort levels')
+          }
+          return {
+            id: model.value,
+            ...(model.resolvedModel && model.resolvedModel !== model.value
+              ? { aliases: [model.resolvedModel] }
+              : {}),
+            label: model.displayName,
+            description: model.description,
+            reasoningEfforts: model.supportsEffort ? model.supportedEffortLevels : [],
+            defaultReasoningEffort: null,
+          }
+        })
+      )
+    },
+  })
+}
+
 export async function runLocalClaude(options: LocalAgentTurn & { settings: ProjectAgentSettings }) {
   await runLocalAgentProcess({
     ...options,
-    executable: env.SIM_VSCODE_CLAUDE_BINARY ?? 'claude',
-    label: 'Claude Code',
+    ...localClaudeProcessOptions(),
     args: localClaudeArguments(options.settings, options.threadId),
-    environment: { CLAUDE_CONFIG_DIR: env.SIM_VSCODE_CLAUDE_HOME ?? process.env.CLAUDE_CONFIG_DIR },
     parseLine: createClaudeEventParser(),
   })
 }

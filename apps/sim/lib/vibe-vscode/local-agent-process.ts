@@ -1,4 +1,5 @@
 import { spawn } from 'node:child_process'
+import { tmpdir } from 'node:os'
 import { createInterface } from 'node:readline'
 
 /** Provider adapters emit complete message blocks into Sim's existing native stream. */
@@ -26,17 +27,16 @@ export interface LocalAgentTurn {
   onEvent(event: LocalAgentEvent): Promise<void>
 }
 
-/** Owns the process group and cleanup once, independently of each runner's JSONL protocol. */
-export async function runLocalAgentProcess(
-  options: LocalAgentTurn & {
-    executable: string
-    label: string
-    args: string[]
-    environment: Record<string, string | undefined>
-    parseLine(line: string): readonly LocalAgentEvent[]
-  }
-): Promise<void> {
-  if (options.signal.aborted) throw new Error('Agent turn cancelled')
+interface LocalAgentProcessOptions {
+  executable: string
+  label: string
+  args: string[]
+  environment: Record<string, string | undefined>
+  cwd: string
+}
+
+/** Turns and capability discovery share the credential boundary and process-group release owner. */
+function startLocalAgentProcess(options: LocalAgentProcessOptions) {
   const childEnv: NodeJS.ProcessEnv = { NODE_ENV: 'production' }
   for (const key of [
     'HOME',
@@ -69,7 +69,8 @@ export async function runLocalAgentProcess(
       /** Process already exited. */
     }
   }
-  const abort = () => {
+  const terminate = () => {
+    if (closed) return
     kill('SIGTERM')
     killTimer ??= setTimeout(() => kill('SIGKILL'), 3000)
   }
@@ -89,11 +90,23 @@ export async function runLocalAgentProcess(
   })
   /** Observe ENOENT immediately, even before the stdout loop settles. */
   void completion.catch(() => {})
-  options.signal.addEventListener('abort', abort, { once: true })
-  if (options.signal.aborted) abort()
   /** Diagnostics may contain credentials or paths; they are never a transcript. */
   child.stderr.resume()
   child.stdin.on('error', () => {})
+  return { child, completion, terminate }
+}
+
+/** Owns the process group and cleanup once, independently of each runner's JSONL protocol. */
+export async function runLocalAgentProcess(
+  options: LocalAgentTurn &
+    LocalAgentProcessOptions & {
+      parseLine(line: string): readonly LocalAgentEvent[]
+    }
+): Promise<void> {
+  if (options.signal.aborted) throw new Error('Agent turn cancelled')
+  const { child, completion, terminate } = startLocalAgentProcess(options)
+  options.signal.addEventListener('abort', terminate, { once: true })
+  if (options.signal.aborted) terminate()
   child.stdin.end(options.prompt)
   const lines = createInterface({ input: child.stdout, crlfDelay: Number.POSITIVE_INFINITY })
   try {
@@ -110,12 +123,78 @@ export async function runLocalAgentProcess(
       )
     }
   } finally {
-    options.signal.removeEventListener('abort', abort)
+    options.signal.removeEventListener('abort', terminate)
     lines.close()
-    if (!closed) {
-      abort()
-      await completion.catch(() => {})
-    }
-    if (killTimer) clearTimeout(killTimer)
+    terminate()
+    await completion.catch(() => {})
+  }
+}
+
+/** Bounded, stdio-only discovery never sends a user prompt or enters a project directory. */
+export async function queryLocalAgentProcess<T>(
+  options: Omit<LocalAgentProcessOptions, 'cwd'> & {
+    initialMessage: Record<string, unknown>
+    onMessage(message: unknown, send: (message: Record<string, unknown>) => void): T | undefined
+  }
+): Promise<T> {
+  const { child, completion, terminate } = startLocalAgentProcess({ ...options, cwd: tmpdir() })
+  let timer: ReturnType<typeof setTimeout> | undefined
+  let onData: ((chunk: string) => void) | undefined
+  let settled = false
+  const send = (message: Record<string, unknown>) => {
+    if (!settled) child.stdin.write(`${JSON.stringify(message)}\n`)
+  }
+  try {
+    return await new Promise<T>((resolve, reject) => {
+      let buffer = ''
+      let bytes = 0
+      const fail = (error: Error) => {
+        if (settled) return
+        settled = true
+        reject(error)
+      }
+      timer = setTimeout(() => fail(new Error('Agent model discovery timed out.')), 10_000)
+      void completion.then(
+        () => fail(new Error('Agent model discovery ended before returning a catalog.')),
+        () => fail(new Error('Agent model discovery could not start.'))
+      )
+      child.stdout.setEncoding('utf8')
+      onData = (chunk) => {
+        if (settled) return
+        bytes += Buffer.byteLength(chunk)
+        if (bytes > 2_000_000) {
+          fail(new Error('Agent model discovery exceeded the response size limit.'))
+          return
+        }
+        buffer += chunk
+        let end = buffer.indexOf('\n')
+        while (end !== -1 && !settled) {
+          const line = buffer.slice(0, end).trim()
+          buffer = buffer.slice(end + 1)
+          if (line) {
+            try {
+              const result = options.onMessage(JSON.parse(line), send)
+              if (result !== undefined) {
+                settled = true
+                resolve(result)
+              }
+            } catch {
+              fail(new Error('Agent model discovery returned an invalid or unsupported response.'))
+            }
+          }
+          end = buffer.indexOf('\n')
+        }
+      }
+      child.stdout.on('data', onData)
+      send(options.initialMessage)
+    })
+  } finally {
+    settled = true
+    if (timer) clearTimeout(timer)
+    if (onData) child.stdout.removeListener('data', onData)
+    child.stdout.resume()
+    child.stdin.end()
+    terminate()
+    await completion.catch(() => {})
   }
 }

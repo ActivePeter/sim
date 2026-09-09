@@ -6,13 +6,20 @@ const mocks = vi.hoisted(() => ({
   stat: vi.fn(),
   codex: vi.fn(),
   claude: vi.fn(),
+  models: vi.fn(),
 }))
 vi.mock('node:fs/promises', () => ({ access: mocks.access, stat: mocks.stat }))
 vi.mock('@/lib/core/config/env', () => ({ env: {} }))
 vi.mock('@/lib/vibe-vscode/local-codex', () => ({ runLocalCodex: mocks.codex }))
 vi.mock('@/lib/vibe-vscode/local-claude', () => ({ runLocalClaude: mocks.claude }))
+vi.mock('@/lib/vibe-vscode/local-agent-models', () => ({
+  localAgentModelCatalogs: { read: mocks.models },
+}))
 
-import { DEFAULT_PROJECT_AGENT_CONFIG } from '@/lib/vibe-vscode/agent-config'
+import {
+  DEFAULT_PROJECT_AGENT_CONFIG,
+  type ProjectAgentModelCatalog,
+} from '@/lib/vibe-vscode/agent-config'
 import {
   getProjectAgentCapabilities,
   runProjectAgent,
@@ -25,11 +32,38 @@ beforeEach(() => {
   vi.stubEnv('PATH', '/bin:/usr/bin')
   mocks.access.mockResolvedValue(undefined)
   mocks.stat.mockResolvedValue({ isFile: () => true })
+  mocks.models.mockResolvedValue({
+    status: 'ready',
+    models: [
+      {
+        id: 'model-one',
+        label: 'One',
+        description: '',
+        reasoningEfforts: ['low', 'high'],
+        defaultReasoningEffort: 'low',
+      },
+      {
+        id: 'model-two',
+        aliases: ['full-model-two'],
+        label: 'Two',
+        description: '',
+        reasoningEfforts: ['high', 'max', 'ultra'],
+        defaultReasoningEffort: 'high',
+      },
+      {
+        id: 'no-reasoning',
+        label: 'Simple',
+        description: '',
+        reasoningEfforts: [],
+        defaultReasoningEffort: null,
+      },
+    ],
+  })
 })
 afterEach(() => vi.unstubAllEnvs())
 
 describe('server-owned project Agent capabilities', () => {
-  it('only enables installed executables and never reads credentials', async () => {
+  it('only discovers models for installed executables and never sends a turn', async () => {
     mocks.access.mockImplementation(async (path: string) => {
       if (path.endsWith('/claude')) throw new Error('not installed')
     })
@@ -40,19 +74,20 @@ describe('server-owned project Agent capabilities', () => {
     ])
     expect(mocks.codex).not.toHaveBeenCalled()
     expect(mocks.claude).not.toHaveBeenCalled()
+    expect(mocks.models).toHaveBeenCalledExactlyOnceWith('local-codex')
     expect(JSON.stringify(agents)).not.toContain('/bin/')
   })
   it('does not mistake a directory on PATH for an executable', async () => {
     mocks.stat.mockResolvedValue({ isFile: () => false })
     expect((await getProjectAgentCapabilities()).every((agent) => !agent.available)).toBe(true)
   })
-  it('validates actual runtime effort capabilities and normalizes input', async () => {
+  it('validates each model independently, including new levels supplied by the runtime', async () => {
     await expect(
-      validateProjectAgentSettings({ ...settings, reasoningEffort: 'max' })
+      validateProjectAgentSettings({ ...settings, model: 'model-one', reasoningEffort: 'max' })
     ).rejects.toMatchObject({ code: 'validation' })
     await expect(
-      validateProjectAgentSettings({ ...settings, agentId: 'local-claude', reasoningEffort: 'max' })
-    ).resolves.toMatchObject({ agentId: 'local-claude', reasoningEffort: 'max' })
+      validateProjectAgentSettings({ ...settings, model: 'model-two', reasoningEffort: 'ultra' })
+    ).resolves.toMatchObject({ model: 'model-two', reasoningEffort: 'ultra' })
     const value = await validateProjectAgentSettings({
       ...settings,
       model: ' model-one ',
@@ -60,6 +95,39 @@ describe('server-owned project Agent capabilities', () => {
     })
     expect(value).toMatchObject({ model: 'model-one', instructions: 'Chinese' })
     expect(Object.isFrozen(value)).toBe(true)
+  })
+  it('recognizes only aliases attested by the same runtime and rejects unknown models', async () => {
+    await expect(
+      validateProjectAgentSettings({ ...settings, model: 'full-model-two', reasoningEffort: 'max' })
+    ).resolves.toMatchObject({ model: 'full-model-two', reasoningEffort: 'max' })
+    await expect(
+      validateProjectAgentSettings({ ...settings, model: 'unlisted' })
+    ).rejects.toMatchObject({ code: 'validation' })
+    await expect(
+      validateProjectAgentSettings({ ...settings, model: 'no-reasoning', reasoningEffort: 'low' })
+    ).rejects.toMatchObject({ code: 'validation' })
+    await expect(
+      validateProjectAgentSettings({ ...settings, model: 'no-reasoning' })
+    ).resolves.toMatchObject({ model: 'no-reasoning', reasoningEffort: null })
+  })
+  it('does not invent a default model/level pairing or block inherited defaults on catalog failure', async () => {
+    await expect(
+      validateProjectAgentSettings({ ...settings, reasoningEffort: 'high' })
+    ).rejects.toMatchObject({ code: 'validation' })
+    await expect(validateProjectAgentSettings(settings)).resolves.toEqual(settings)
+    expect(mocks.models).not.toHaveBeenCalled()
+    mocks.models.mockResolvedValue({ status: 'error', message: 'Catalog offline; retry' })
+    await expect(
+      validateProjectAgentSettings({ ...settings, model: 'model-one' })
+    ).rejects.toMatchObject({ code: 'validation', message: 'Catalog offline; retry' })
+  })
+  it('keeps discovery failure distinct from an unavailable executable', async () => {
+    mocks.models.mockResolvedValue({ status: 'error', message: 'Catalog offline' })
+    const agents = await getProjectAgentCapabilities()
+    expect(agents.map(({ available, modelCatalog }) => ({ available, modelCatalog }))).toEqual([
+      { available: true, modelCatalog: { status: 'error', message: 'Catalog offline' } },
+      { available: true, modelCatalog: { status: 'error', message: 'Catalog offline' } },
+    ])
   })
   it('routes a versioned snapshot only to its saved runtime', async () => {
     const turn = {
@@ -92,5 +160,68 @@ describe('server-owned project Agent capabilities', () => {
     ).rejects.toMatchObject({ code: 'validation' })
     expect(mocks.codex).not.toHaveBeenCalled()
     expect(mocks.claude).not.toHaveBeenCalled()
+  })
+  it('rejects an invalid model/level before starting a process and applies model-specific defaults at execution', async () => {
+    const turn = {
+      cwd: '/projects/a',
+      prompt: 'Task',
+      signal: new AbortController().signal,
+      onEvent: vi.fn(),
+    }
+    await expect(
+      runProjectAgent({
+        ...turn,
+        settings: { ...settings, model: 'model-one', reasoningEffort: 'ultra' },
+      })
+    ).rejects.toMatchObject({ code: 'validation' })
+    expect(mocks.codex).not.toHaveBeenCalled()
+    await runProjectAgent({ ...turn, settings: { ...settings, model: 'model-one' } })
+    expect(mocks.codex).toHaveBeenCalledWith({
+      ...turn,
+      settings: { ...settings, model: 'model-one', reasoningEffort: 'low' },
+    })
+    expect(Object.isFrozen(mocks.codex.mock.calls[0][0].settings)).toBe(true)
+  })
+  it('never starts a turn cancelled before or during model discovery', async () => {
+    const controller = new AbortController()
+    const turn = {
+      cwd: '/projects/a',
+      prompt: 'Task',
+      signal: controller.signal,
+      onEvent: vi.fn(),
+      settings: { ...settings, model: 'model-one' },
+    }
+    let resolve!: (value: ProjectAgentModelCatalog) => void
+    let started!: () => void
+    const startedPromise = new Promise<void>((done) => {
+      started = done
+    })
+    mocks.models.mockImplementation(() => {
+      started()
+      return new Promise((done) => {
+        resolve = done
+      })
+    })
+    const pending = runProjectAgent(turn)
+    const rejected = expect(pending).rejects.toThrow('cancelled')
+    await startedPromise
+    controller.abort()
+    resolve({
+      status: 'ready',
+      models: [
+        {
+          id: 'model-one',
+          label: 'One',
+          description: '',
+          reasoningEfforts: ['low'],
+          defaultReasoningEffort: 'low',
+        },
+      ],
+    })
+    await rejected
+    expect(mocks.codex).not.toHaveBeenCalled()
+    expect(mocks.claude).not.toHaveBeenCalled()
+    await expect(runProjectAgent(turn)).rejects.toThrow('cancelled')
+    expect(mocks.models).toHaveBeenCalledOnce()
   })
 })

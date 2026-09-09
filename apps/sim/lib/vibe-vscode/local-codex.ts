@@ -1,10 +1,22 @@
 import { realpath, stat } from 'node:fs/promises'
 import { isAbsolute, relative, sep } from 'node:path'
 import { fileURLToPath } from 'node:url'
+import { toRecordOrNull } from '@sim/utils/object'
+import { z } from 'zod'
 import { env } from '@/lib/core/config/env'
 import { OrchestrationError } from '@/lib/core/orchestration/types'
-import type { ProjectAgentSettings } from '@/lib/vibe-vscode/agent-config'
-import { type LocalAgentTurn, runLocalAgentProcess } from '@/lib/vibe-vscode/local-agent-process'
+import {
+  type ProjectAgentModel,
+  type ProjectAgentSettings,
+  projectAgentEffortSchema,
+  projectAgentModelIdSchema,
+  projectAgentModelsSchema,
+} from '@/lib/vibe-vscode/agent-config'
+import {
+  type LocalAgentTurn,
+  queryLocalAgentProcess,
+  runLocalAgentProcess,
+} from '@/lib/vibe-vscode/local-agent-process'
 import type { VscodeSessionOrigin } from '@/lib/vibe-vscode/types'
 import { parseCodexJsonLine } from '@/executor/handlers/codex/core/events'
 
@@ -142,16 +154,94 @@ export function localCodexArguments(
   return args
 }
 
+function localCodexProcessOptions() {
+  return {
+    executable: env.SIM_VSCODE_CODEX_BINARY ?? 'codex',
+    label: 'Codex',
+    environment: { CODEX_HOME: env.SIM_VSCODE_CODEX_HOME ?? process.env.CODEX_HOME },
+  }
+}
+
+const codexModelPageSchema = z.object({
+  data: z
+    .array(
+      z.object({
+        model: projectAgentModelIdSchema,
+        displayName: z.string().min(1).max(200),
+        description: z.string().max(2000),
+        hidden: z.boolean().optional(),
+        supportedReasoningEfforts: z
+          .array(z.object({ reasoningEffort: projectAgentEffortSchema }))
+          .max(32),
+        defaultReasoningEffort: projectAgentEffortSchema.nullable(),
+      })
+    )
+    .max(256),
+  nextCursor: z.string().min(1).max(4096).nullable(),
+})
+
+/** Uses the installed app-server's model/list protocol; no thread, turn, or listening socket. */
+export async function getLocalCodexModels(): Promise<ProjectAgentModel[]> {
+  const models: ProjectAgentModel[] = []
+  const cursors = new Set<string>()
+  let requestId = 0
+  return queryLocalAgentProcess({
+    ...localCodexProcessOptions(),
+    args: ['app-server', '--listen', 'stdio://'],
+    initialMessage: {
+      id: requestId,
+      method: 'initialize',
+      params: { clientInfo: { name: 'sim-model-catalog', version: '1.0.0' }, capabilities: null },
+    },
+    onMessage(message, send) {
+      const response = toRecordOrNull(message)
+      if (!response || response.id !== requestId) return
+      if (response.error || !Object.hasOwn(response, 'result')) {
+        throw new Error('Codex model discovery failed')
+      }
+      let cursor: string | null = null
+      if (requestId === 0) {
+        send({ method: 'initialized' })
+      } else {
+        const page = codexModelPageSchema.parse(response.result)
+        for (const model of page.data) {
+          if (model.hidden) continue
+          models.push({
+            id: model.model,
+            label: model.displayName,
+            description: model.description,
+            reasoningEfforts: model.supportedReasoningEfforts.map(
+              (option) => option.reasoningEffort
+            ),
+            defaultReasoningEffort: model.defaultReasoningEffort,
+          })
+        }
+        if (models.length > 256) throw new Error('Codex model catalog is too large')
+        cursor = page.nextCursor
+        if (cursor === null) return projectAgentModelsSchema.parse(models)
+        if (cursors.has(cursor) || cursors.size >= 16) {
+          throw new Error('Codex model catalog pagination did not terminate')
+        }
+        cursors.add(cursor)
+      }
+      requestId += 1
+      send({
+        id: requestId,
+        method: 'model/list',
+        params: { limit: 100, includeHidden: false, cursor },
+      })
+    },
+  })
+}
+
 /** No shell interpolation, inherited application secrets, or destructive CODEX_HOME setup. */
 export async function runLocalCodex(
   options: LocalAgentTurn & { settings?: ProjectAgentSettings }
 ): Promise<void> {
   await runLocalAgentProcess({
     ...options,
-    executable: env.SIM_VSCODE_CODEX_BINARY ?? 'codex',
-    label: 'Codex',
+    ...localCodexProcessOptions(),
     args: localCodexArguments(options.cwd, options.threadId, options.settings),
-    environment: { CODEX_HOME: env.SIM_VSCODE_CODEX_HOME ?? process.env.CODEX_HOME },
     parseLine: parseCodexJsonLine,
   })
 }

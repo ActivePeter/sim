@@ -57,7 +57,18 @@ const capabilities = [
     label: 'Codex',
     available: true,
     permissionLabel: 'Read only',
-    reasoningEfforts: ['low', 'high'],
+    modelCatalog: {
+      status: 'ready',
+      models: [
+        {
+          id: 'test-model',
+          label: 'Test model',
+          description: '',
+          reasoningEfforts: ['low', 'high'],
+          defaultReasoningEffort: 'low',
+        },
+      ],
+    },
   },
 ]
 const state = { config: DEFAULT_PROJECT_AGENT_CONFIG, agentLocked: false }

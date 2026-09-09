@@ -4,10 +4,13 @@ import { delimiter, isAbsolute, join } from 'node:path'
 import { env } from '@/lib/core/config/env'
 import { OrchestrationError } from '@/lib/core/orchestration/types'
 import {
+  getProjectAgentModel,
   type ProjectAgentCapability,
+  type ProjectAgentId,
   type ProjectAgentSettings,
   projectAgentSettingsSchema,
 } from '@/lib/vibe-vscode/agent-config'
+import { localAgentModelCatalogs } from '@/lib/vibe-vscode/local-agent-models'
 import type { LocalAgentTurn } from '@/lib/vibe-vscode/local-agent-process'
 import { runLocalClaude } from '@/lib/vibe-vscode/local-claude'
 import { runLocalCodex } from '@/lib/vibe-vscode/local-codex'
@@ -33,70 +36,104 @@ async function executableAvailable(binary: string): Promise<boolean> {
   return results.some(Boolean)
 }
 
-/** Runtime capabilities are server-owned; the UI never invents Agents or model catalogs. */
-export async function getProjectAgentCapabilities(): Promise<ProjectAgentCapability[]> {
-  const [codex, claude] = await Promise.all([
-    executableAvailable(env.SIM_VSCODE_CODEX_BINARY ?? 'codex'),
-    executableAvailable(env.SIM_VSCODE_CLAUDE_BINARY ?? 'claude'),
-  ])
-  return [
-    {
-      id: 'local-codex',
+async function getProjectAgentAvailability(
+  id: ProjectAgentId
+): Promise<Omit<ProjectAgentCapability, 'modelCatalog'>> {
+  if (id === 'local-codex') {
+    const available = await executableAvailable(env.SIM_VSCODE_CODEX_BINARY ?? 'codex')
+    return {
+      id,
       label: 'Codex',
-      available: codex,
-      ...(!codex ? { unavailableReason: '服务端未安装或未配置 Codex 运行器' } : {}),
+      available,
+      ...(!available ? { unavailableReason: '服务端未安装或未配置 Codex 运行器' } : {}),
       permissionLabel:
         env.SIM_VSCODE_CODEX_SANDBOX === 'workspace-write'
           ? '项目内写入 · 部署策略'
           : '只读 · 部署策略',
-      reasoningEfforts: ['low', 'medium', 'high', 'xhigh'],
-    },
-    {
-      id: 'local-claude',
-      label: 'Claude Code',
-      available: claude,
-      ...(!claude ? { unavailableReason: '服务端未安装或未配置 Claude Code 运行器' } : {}),
-      permissionLabel: '只读 · Read / Grep / Glob，不执行 shell',
-      reasoningEfforts: ['low', 'medium', 'high', 'xhigh', 'max'],
-    },
-  ]
+    }
+  }
+  const available = await executableAvailable(env.SIM_VSCODE_CLAUDE_BINARY ?? 'claude')
+  return {
+    id,
+    label: 'Claude Code',
+    available,
+    ...(!available ? { unavailableReason: '服务端未安装或未配置 Claude Code 运行器' } : {}),
+    permissionLabel: '只读 · Read / Grep / Glob，不执行 shell',
+  }
 }
 
-export async function validateProjectAgentSettings(
-  input: ProjectAgentSettings
-): Promise<Readonly<ProjectAgentSettings>> {
+/** Runtime capabilities are server-owned; the UI never invents Agents or model catalogs. */
+export async function getProjectAgentCapabilities(): Promise<ProjectAgentCapability[]> {
+  return Promise.all(
+    (['local-codex', 'local-claude'] as const).map(async (id) => {
+      const agent = await getProjectAgentAvailability(id)
+      return {
+        ...agent,
+        modelCatalog: agent.available
+          ? await localAgentModelCatalogs.read(id)
+          : { status: 'error' as const, message: agent.unavailableReason! },
+      }
+    })
+  )
+}
+
+async function checkProjectAgentSettings(input: ProjectAgentSettings) {
   const parsed = projectAgentSettingsSchema.safeParse(input)
   if (!parsed.success) {
     throw new OrchestrationError('validation', 'Invalid project Agent configuration')
   }
   const settings = parsed.data
-  const capability = (await getProjectAgentCapabilities()).find(
-    (agent) => agent.id === settings.agentId
-  )
-  if (!capability?.available) {
+  const capability = await getProjectAgentAvailability(settings.agentId)
+  if (!capability.available) {
     throw new OrchestrationError(
       'validation',
-      capability?.unavailableReason ?? 'Project Agent is unavailable'
+      capability.unavailableReason ?? 'Project Agent is unavailable'
     )
   }
-  if (settings.reasoningEffort && !capability.reasoningEfforts.includes(settings.reasoningEffort)) {
-    throw new OrchestrationError(
-      'validation',
-      'This Agent does not support the selected reasoning effort'
-    )
+  if (settings.model === null) {
+    if (settings.reasoningEffort !== null) {
+      throw new OrchestrationError(
+        'validation',
+        '请先选择模型再设置推理强度，运行器默认项同时继承模型和推理配置。'
+      )
+    }
+    return { settings: Object.freeze(settings), model: undefined }
   }
-  return Object.freeze(settings)
+  const catalog = await localAgentModelCatalogs.read(settings.agentId)
+  if (catalog.status === 'error') throw new OrchestrationError('validation', catalog.message)
+  const model = getProjectAgentModel(catalog, settings.model)
+  if (!model) {
+    throw new OrchestrationError('validation', '当前模型不在运行器目录中，请刷新并重新选择模型。')
+  }
+  if (settings.reasoningEffort && !model.reasoningEfforts.includes(settings.reasoningEffort)) {
+    throw new OrchestrationError('validation', '当前模型不支持所选推理强度，请重新选择。')
+  }
+  return { settings: Object.freeze(settings), model }
+}
+
+export async function validateProjectAgentSettings(
+  input: ProjectAgentSettings
+): Promise<Readonly<ProjectAgentSettings>> {
+  return (await checkProjectAgentSettings(input)).settings
 }
 
 export async function runProjectAgent(
   options: LocalAgentTurn & { settings: ProjectAgentSettings }
 ): Promise<void> {
+  if (options.signal.aborted) throw new Error('Agent turn cancelled')
   const { agentId, model, reasoningEffort, instructions } = options.settings
-  const settings = await validateProjectAgentSettings({
+  const checked = await checkProjectAgentSettings({
     agentId,
     model,
     reasoningEffort,
     instructions,
+  })
+  if (options.signal.aborted) throw new Error('Agent turn cancelled')
+  /** A concrete model's default must not inherit another model's configured effort. */
+  const settings = Object.freeze({
+    ...checked.settings,
+    reasoningEffort:
+      checked.settings.reasoningEffort ?? checked.model?.defaultReasoningEffort ?? null,
   })
   const turn = { ...options, settings }
   if (settings.agentId === 'local-codex') await runLocalCodex(turn)

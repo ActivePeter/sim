@@ -10,12 +10,17 @@ import {
   ChipModalFooter,
   ChipModalHeader,
   ChipSelect,
+  type ChipSelectOption,
   OverflowText,
   Tooltip,
 } from '@sim/emcn'
 import { getErrorMessage } from '@sim/utils/errors'
 import type { GetProjectAgentConfigResponse } from '@/lib/api/contracts/vscode-agents'
-import type { ProjectAgentConfig, ProjectAgentSettings } from '@/lib/vibe-vscode/agent-config'
+import {
+  getProjectAgentModel,
+  type ProjectAgentConfig,
+  type ProjectAgentSettings,
+} from '@/lib/vibe-vscode/agent-config'
 import { useUserPermissionsContext } from '@/app/workspace/[workspaceId]/providers/workspace-permissions-provider'
 
 interface ProjectAgentControlsProps {
@@ -26,6 +31,8 @@ interface ProjectAgentControlsProps {
   onRefresh(): void
   onSave(settings: ProjectAgentSettings, expectedRevision: number): Promise<unknown>
 }
+
+const RUNTIME_DEFAULT = '__runtime_default__'
 
 /** Composer-adjacent controls project the server's catalog and save to the native runtime binding. */
 export function ProjectAgentControls({
@@ -41,6 +48,31 @@ export function ProjectAgentControls({
   const [saveError, setSaveError] = useState<string | null>(null)
   const currentAgent = data?.agents.find((agent) => agent.id === data.config.agentId)
   const draftAgent = data?.agents.find((agent) => agent.id === draft?.agentId)
+  const catalog = draftAgent?.modelCatalog
+  const draftModel = getProjectAgentModel(catalog, draft?.model)
+  const modelInvalid = !!draft?.model && !draftModel
+  const effortInvalid =
+    !!draft?.reasoningEffort && !draftModel?.reasoningEfforts.includes(draft.reasoningEffort)
+  const modelOptions: ChipSelectOption[] = [
+    { value: RUNTIME_DEFAULT, label: '运行器默认' },
+    ...(catalog?.status === 'ready'
+      ? catalog.models.map((model) => ({
+          value: model.id,
+          label: model.label,
+          tooltip: `${model.id}\n${model.description}`,
+          searchTerms: [model.id, ...(model.aliases ?? []), model.description],
+        }))
+      : []),
+  ]
+  if (draft?.model && !modelOptions.some((option) => option.value === draft.model)) {
+    modelOptions.push({
+      value: draft.model,
+      label: draftModel
+        ? `${draftModel.label} · ${draft.model}`
+        : `${draft.model} · ${catalog?.status === 'ready' ? '不在当前目录' : '目录未加载'}`,
+      disabled: !draftModel,
+    })
+  }
   const agentLocked = hasMessages || data?.agentLocked
   const options =
     data?.agents.map((agent) => ({
@@ -121,6 +153,11 @@ export function ProjectAgentControls({
           {saveError}
         </span>
       )}
+      {loadError && (
+        <span role='alert' className='w-full text-[var(--text-error)] text-caption'>
+          {loadError.message} <Chip onClick={onRefresh}>重试</Chip>
+        </span>
+      )}
       {!currentAgent?.available && (
         <span role='alert' className='w-full text-[var(--text-error)] text-caption'>
           {currentAgent?.unavailableReason ?? '当前 Agent 不可用'}
@@ -165,30 +202,100 @@ export function ProjectAgentControls({
             />
           </ChipModalField>
           <ChipModalField
-            type='input'
+            type='custom'
             title='模型'
-            value={draft?.model ?? ''}
-            onChange={(value) => draft && setDraft({ ...draft, model: value || null })}
-            placeholder='留空使用运行器默认模型'
-            maxLength={200}
-            disabled={!canEdit || saving}
-            hint='模型 ID 或别名，以该运行器账号实际支持的模型为准。凭据不在此配置。'
-          />
-          <ChipModalField type='custom' title='推理强度'>
+            hint='模型及可选 level 来自当前运行器。悬浮可查看模型 ID 和说明。'
+            error={
+              catalog?.status === 'error'
+                ? catalog.message
+                : modelInvalid
+                  ? '已保存的模型不在当前目录中，请重新选择；原配置尚未修改。'
+                  : undefined
+            }
+          >
+            <ChipSelect
+              aria-label='模型'
+              fullWidth
+              searchable
+              searchPlaceholder='搜索模型名称或 ID…'
+              dropdownWidth='trigger'
+              options={modelOptions}
+              value={draft?.model ?? RUNTIME_DEFAULT}
+              disabled={!canEdit || saving}
+              aria-invalid={modelInvalid || undefined}
+              onChange={(value) => {
+                if (!draft) return
+                if (value === RUNTIME_DEFAULT) {
+                  setDraft({ ...draft, model: null, reasoningEffort: null })
+                  return
+                }
+                const model = getProjectAgentModel(catalog, value)
+                if (!model) return
+                setDraft({
+                  ...draft,
+                  model: value,
+                  reasoningEffort:
+                    draft.reasoningEffort && model.reasoningEfforts.includes(draft.reasoningEffort)
+                      ? draft.reasoningEffort
+                      : null,
+                })
+              }}
+            />
+            {catalog?.status === 'error' && (
+              <Chip disabled={saving} onClick={onRefresh}>
+                重试模型目录
+              </Chip>
+            )}
+          </ChipModalField>
+          <ChipModalField
+            type='custom'
+            title='推理强度（level）'
+            error={
+              effortInvalid && (draftModel || !draft?.model)
+                ? '当前模型不支持已保存的 level，请重新选择。'
+                : undefined
+            }
+            hint={
+              !draft?.model
+                ? '运行器默认同时继承模型和推理配置；选择具体模型后可设置 level。'
+                : !draftModel
+                  ? '尚无法确认此模型支持的 level，已保留原值；重试目录或选择模型后再校验。'
+                  : draftModel.reasoningEfforts.length === 0
+                    ? '此模型没有可选的推理 level。'
+                    : '切换模型时保留兼容的 level，不兼容时恢复默认。'
+            }
+          >
             <ChipSelect
               aria-label='推理强度'
               fullWidth
-              value={draft?.reasoningEffort ?? 'default'}
-              disabled={!canEdit || saving}
+              value={draft?.reasoningEffort ?? RUNTIME_DEFAULT}
+              disabled={
+                !canEdit || saving || (!draftModel?.reasoningEfforts.length && !effortInvalid)
+              }
+              aria-invalid={effortInvalid || undefined}
               options={[
-                { value: 'default', label: '运行器默认' },
-                ...(draftAgent?.reasoningEfforts.map((effort) => ({
+                {
+                  value: RUNTIME_DEFAULT,
+                  label: draftModel?.defaultReasoningEffort
+                    ? `模型默认（${draftModel.defaultReasoningEffort}）`
+                    : '运行器默认',
+                },
+                ...(draftModel?.reasoningEfforts.map((effort) => ({
                   value: effort,
                   label: effort,
                 })) ?? []),
+                ...(effortInvalid && draft?.reasoningEffort
+                  ? [
+                      {
+                        value: draft.reasoningEffort,
+                        label: `${draft.reasoningEffort} · ${draftModel || !draft.model ? '不适用' : '待验证'}`,
+                        disabled: true,
+                      },
+                    ]
+                  : []),
               ]}
               onChange={(value) => {
-                const effort = draftAgent?.reasoningEfforts.find((item) => item === value) ?? null
+                const effort = draftModel?.reasoningEfforts.find((item) => item === value) ?? null
                 if (draft) setDraft({ ...draft, reasoningEffort: effort })
               }}
             />
@@ -233,7 +340,13 @@ export function ProjectAgentControls({
           cancelDisabled={saving}
           primaryAction={{
             label: saving ? '保存中…' : '保存配置',
-            disabled: saving || !canEdit || !draftAgent?.available || !draft,
+            disabled:
+              saving ||
+              !canEdit ||
+              !draftAgent?.available ||
+              !draft ||
+              modelInvalid ||
+              effortInvalid,
             onClick: () => {
               if (draft) {
                 const { version: _version, revision, ...settings } = draft

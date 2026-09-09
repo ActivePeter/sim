@@ -2,6 +2,7 @@
 import { describe, expect, it } from 'vitest'
 import {
   DEFAULT_PROJECT_AGENT_CONFIG,
+  getProjectAgentModel,
   isProjectAgentLocked,
   projectAgentSettingsSchema,
   readProjectAgentConfig,
@@ -47,5 +48,38 @@ describe('project Agent configuration authority', () => {
     expect(isProjectAgentLocked({ lastTurnId: null, runtimeThreadId: null })).toBe(false)
     expect(isProjectAgentLocked({ lastTurnId: 'turn', runtimeThreadId: null })).toBe(true)
     expect(isProjectAgentLocked({ lastTurnId: null, runtimeThreadId: 'legacy-thread' })).toBe(true)
+  })
+  it.each(['ultra', 'minimal', 'future-level'])(
+    'accepts bounded runtime-provided effort identifiers without a hardcoded level union: %s',
+    (reasoningEffort) => {
+      const { version: _version, revision: _revision, ...settings } = DEFAULT_PROJECT_AGENT_CONFIG
+      expect(projectAgentSettingsSchema.safeParse({ ...settings, reasoningEffort }).success).toBe(
+        true
+      )
+    }
+  )
+  it.each(['--unsafe', 'high"\n-c evil=true', '$(command)', 'x'.repeat(33)])(
+    'rejects malformed effort identifiers before runtime lookup: %s',
+    (reasoningEffort) => {
+      const { version: _version, revision: _revision, ...settings } = DEFAULT_PROJECT_AGENT_CONFIG
+      expect(projectAgentSettingsSchema.safeParse({ ...settings, reasoningEffort }).success).toBe(
+        false
+      )
+    }
+  )
+  it("prefers an exact model ID to another model's resolved alias", () => {
+    const base = { label: 'Model', description: '', defaultReasoningEffort: null }
+    expect(
+      getProjectAgentModel(
+        {
+          status: 'ready',
+          models: [
+            { ...base, id: 'alias', aliases: ['model'], reasoningEfforts: ['high'] },
+            { ...base, id: 'model', reasoningEfforts: ['low'] },
+          ],
+        },
+        'model'
+      )?.reasoningEfforts
+    ).toEqual(['low'])
   })
 })
