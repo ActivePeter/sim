@@ -10,6 +10,7 @@ import {
   projectAgentModelIdSchema,
   projectAgentModelsSchema,
 } from '@/lib/vibe-vscode/agent-config'
+import { resolveLocalAgentPermission } from '@/lib/vibe-vscode/local-agent-permissions'
 import {
   type LocalAgentEvent,
   type LocalAgentTurn,
@@ -23,6 +24,7 @@ export function localClaudeArguments(
   threadId?: string,
   mode: 'turn' | 'catalog' = 'turn'
 ): string[] {
+  resolveLocalAgentPermission('local-claude', settings.permissionMode)
   const args = [
     '--print',
     '--output-format',

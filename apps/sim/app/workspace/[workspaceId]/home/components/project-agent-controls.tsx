@@ -18,7 +18,10 @@ import { getErrorMessage } from '@sim/utils/errors'
 import type { GetProjectAgentConfigResponse } from '@/lib/api/contracts/vscode-agents'
 import {
   getProjectAgentModel,
+  getProjectAgentPermission,
   type ProjectAgentConfig,
+  type ProjectAgentPermissionMode,
+  type ProjectAgentPermissionPolicy,
   type ProjectAgentSettings,
 } from '@/lib/vibe-vscode/agent-config'
 import { useUserPermissionsContext } from '@/app/workspace/[workspaceId]/providers/workspace-permissions-provider'
@@ -33,6 +36,30 @@ interface ProjectAgentControlsProps {
 }
 
 const RUNTIME_DEFAULT = '__runtime_default__'
+const DEPLOYMENT_DEFAULT = '__deployment_default__'
+
+function permissionOptions(
+  policy: ProjectAgentPermissionPolicy | undefined,
+  saved: ProjectAgentPermissionMode | null | undefined
+): ChipSelectOption[] {
+  if (!policy) return []
+  const options: ChipSelectOption[] = [
+    {
+      value: DEPLOYMENT_DEFAULT,
+      label: `部署默认（${getProjectAgentPermission(policy, null)?.label}）`,
+      tooltip: policy.description,
+    },
+    ...policy.modes.map((mode) => ({
+      value: mode.id,
+      label: mode.label,
+      tooltip: mode.description,
+    })),
+  ]
+  if (saved && !getProjectAgentPermission(policy, saved)) {
+    options.push({ value: saved, label: `${saved} · 当前部署不允许`, disabled: true })
+  }
+  return options
+}
 
 /** Composer-adjacent controls project the server's catalog and save to the native runtime binding. */
 export function ProjectAgentControls({
@@ -50,6 +77,11 @@ export function ProjectAgentControls({
   const draftAgent = data?.agents.find((agent) => agent.id === draft?.agentId)
   const catalog = draftAgent?.modelCatalog
   const draftModel = getProjectAgentModel(catalog, draft?.model)
+  const permissionInvalid =
+    !!draft && !getProjectAgentPermission(draftAgent?.permissions, draft.permissionMode)
+  const currentPermissionInvalid =
+    !!currentAgent &&
+    !getProjectAgentPermission(currentAgent.permissions, data?.config.permissionMode)
   const modelInvalid = !!draft?.model && !draftModel
   const effortInvalid =
     !!draft?.reasoningEffort && !draftModel?.reasoningEfforts.includes(draft.reasoningEffort)
@@ -120,6 +152,11 @@ export function ProjectAgentControls({
                     agentId: agent.id,
                     model: null,
                     reasoningEffort: null,
+                    permissionMode:
+                      data.config.permissionMode === null ||
+                      getProjectAgentPermission(agent.permissions, data.config.permissionMode)
+                        ? data.config.permissionMode
+                        : agent.permissions.defaultMode,
                     instructions: data.config.instructions,
                   },
                   data.config.revision,
@@ -131,6 +168,32 @@ export function ProjectAgentControls({
         </Tooltip.Trigger>
         <Tooltip.Content>
           {agentLocked ? '本会话已固定运行器；新建会话可切换 Agent' : '首条消息发送前可切换运行器'}
+        </Tooltip.Content>
+      </Tooltip.Root>
+      <Tooltip.Root>
+        <Tooltip.Trigger asChild>
+          <span>
+            <ChipSelect
+              aria-label='切换执行权限'
+              value={data.config.permissionMode ?? DEPLOYMENT_DEFAULT}
+              options={permissionOptions(currentAgent?.permissions, data.config.permissionMode)}
+              disabled={!canEdit || saving || !currentAgent?.available}
+              aria-invalid={currentPermissionInvalid || undefined}
+              onChange={(value) => {
+                const permissionMode =
+                  value === DEPLOYMENT_DEFAULT
+                    ? null
+                    : currentAgent?.permissions.modes.find((mode) => mode.id === value)?.id
+                if (permissionMode === undefined || permissionMode === data.config.permissionMode)
+                  return
+                const { version: _version, revision, ...settings } = data.config
+                void save({ ...settings, permissionMode }, revision, false)
+              }}
+            />
+          </span>
+        </Tooltip.Trigger>
+        <Tooltip.Content>
+          {currentAgent?.permissions.description} 权限按会话保存，从下一轮生效。
         </Tooltip.Content>
       </Tooltip.Root>
       <Chip
@@ -163,6 +226,11 @@ export function ProjectAgentControls({
           {currentAgent?.unavailableReason ?? '当前 Agent 不可用'}
         </span>
       )}
+      {currentPermissionInvalid && (
+        <span role='alert' className='w-full text-[var(--text-error)] text-caption'>
+          已保存的执行权限不被当前部署允许，请重新选择；原配置尚未修改。
+        </span>
+      )}
       <ChipModal
         open={!!draft}
         onOpenChange={(open) => {
@@ -184,8 +252,8 @@ export function ProjectAgentControls({
             title='Agent'
             hint={
               agentLocked
-                ? '会话已绑定运行器。模型、推理和指令仍可修改，从下一轮生效。'
-                : '切换 Agent 会清空不同运行器之间不兼容的模型和推理选项。'
+                ? '会话已绑定运行器。模型、推理、权限和指令仍可修改，从下一轮生效。'
+                : '切换 Agent 会重置模型和推理选项；权限保留兼容选择，否则使用目标运行器的部署默认。'
             }
           >
             <ChipSelect
@@ -197,7 +265,17 @@ export function ProjectAgentControls({
               onChange={(value) => {
                 const agent = data.agents.find((item) => item.id === value && item.available)
                 if (agent && draft)
-                  setDraft({ ...draft, agentId: agent.id, model: null, reasoningEffort: null })
+                  setDraft({
+                    ...draft,
+                    agentId: agent.id,
+                    model: null,
+                    reasoningEffort: null,
+                    permissionMode:
+                      draft.permissionMode === null ||
+                      getProjectAgentPermission(agent.permissions, draft.permissionMode)
+                        ? draft.permissionMode
+                        : agent.permissions.defaultMode,
+                  })
               }}
             />
           </ChipModalField>
@@ -312,9 +390,24 @@ export function ProjectAgentControls({
           <ChipModalField
             type='custom'
             title='执行权限'
-            hint='由部署策略决定，不会因切换模型或 Agent 提升权限。'
+            hint={`${draftAgent?.permissions.description ?? ''} 保存后从下一轮生效，不改变正在执行的任务。`}
+            error={permissionInvalid ? '当前部署不允许此执行权限，请重新选择。' : undefined}
           >
-            <span className='text-small'>{draftAgent?.permissionLabel}</span>
+            <ChipSelect
+              aria-label='配置执行权限'
+              fullWidth
+              value={draft?.permissionMode ?? DEPLOYMENT_DEFAULT}
+              options={permissionOptions(draftAgent?.permissions, draft?.permissionMode)}
+              disabled={!canEdit || saving || !draftAgent?.available}
+              aria-invalid={permissionInvalid || undefined}
+              onChange={(value) => {
+                const permissionMode =
+                  value === DEPLOYMENT_DEFAULT
+                    ? null
+                    : draftAgent?.permissions.modes.find((mode) => mode.id === value)?.id
+                if (draft && permissionMode !== undefined) setDraft({ ...draft, permissionMode })
+              }}
+            />
           </ChipModalField>
           {draft && draft.revision !== data.config.revision && (
             <ChipModalField
@@ -346,7 +439,8 @@ export function ProjectAgentControls({
               !draftAgent?.available ||
               !draft ||
               modelInvalid ||
-              effortInvalid,
+              effortInvalid ||
+              permissionInvalid,
             onClick: () => {
               if (draft) {
                 const { version: _version, revision, ...settings } = draft

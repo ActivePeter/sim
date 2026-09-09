@@ -119,7 +119,12 @@ describe('native project session repository', () => {
     ])
     const result = await updateProjectAgentConfig('user-1', {
       ...configInput,
-      settings: { ...defaultSettings, model: 'configured-model', reasoningEffort: 'high' },
+      settings: {
+        ...defaultSettings,
+        model: 'configured-model',
+        reasoningEffort: 'high',
+        permissionMode: 'read-only',
+      },
     })
     expect(result.agentLocked).toBe(true)
     expect(dbChainMockFns.set).toHaveBeenCalledWith({
@@ -127,6 +132,7 @@ describe('native project session repository', () => {
         ...defaultSettings,
         model: 'configured-model',
         reasoningEffort: 'high',
+        permissionMode: 'read-only',
         version: 1,
         revision: 1,
       },

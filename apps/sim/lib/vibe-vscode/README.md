@@ -82,7 +82,7 @@ turn locks runtime identity, even before the runner returns a thread ID. Changin
 to another runtime requires a new chat; an existing thread is never passed to a
 different provider.
 
-Model, reasoning effort and additional session instructions are saved in
+Model, reasoning effort, permission preference and additional session instructions are saved in
 `vscode_project_sessions.agent_config`. This belongs with the runtime binding,
 not `copilot_chats.config`, which is still replaced wholesale by the legacy cloud
 message-save operation. A revision-checked transaction serializes configuration
@@ -118,6 +118,22 @@ or silently stale capabilities. They do not prevent use of paired runtime defaul
 Unavailable binaries are not selectable; installation and catalog discovery do not
 prove a model call will authenticate, so provider failures remain native turn errors.
 
+The composer also exposes an execution-permission selector, mirrored in its configuration
+dialog. `permissionMode` is a bounded, server-validated profile, not a raw sandbox or
+approval flag. `local-agent-permissions.ts` owns the deployment ceiling, published choices
+and effective-mode resolution used by both configuration validation and runtime adapters.
+See [Local runner configuration](#local-runner-configuration) for the operator-owned limits.
+Both fresh and resumed invocations receive the chosen mode; an explicit read-only choice
+survives model changes. A profile removed by a later deployment stays visible but cannot
+be saved or executed until the user explicitly chooses an allowed replacement.
+
+`permissionMode: null` follows the deployment default. Legacy stored configurations without
+the field retain that behavior without a database migration. Configuration writes require
+the field, including an explicit `null` when desired: an older browser must reload instead
+of silently resetting a saved restriction while changing another setting. The selector
+projects only confirmed saves, and sending remains disabled during a pending save or when
+the saved profile is no longer allowed. Workspace read-only members cannot change it.
+
 Prompt recall reads user messages from the same native transcript. Unmodified
 Up on the first visual line recalls an older prompt; Down on the last visual
 line moves forward and eventually restores the unsent draft. IME composition,
@@ -149,7 +165,7 @@ Codex home with configured credentials and thread storage; do not reuse a runnin
 agent's mutable session database. Verify both an initial execution and `exec resume`
 before enabling it. Binary paths, credential homes and maximum permissions belong
 to this environment surface, never to a browser request or project catalog.
-Per-chat model/effort choices are the bounded settings described above.
+Per-chat preferences can narrow this ceiling through the bounded settings described above.
 
 Claude Code uses its print/stream-json protocol and an exact persisted resume ID.
 The current adapter allows only Read/Grep/Glob, never shell or write tools. Hooks,
@@ -197,6 +213,7 @@ remote/root policy, runtime arguments, native persistence and replay, browser
 disconnect, cancellation, lost ownership, failed finalization, monitor authority,
 configuration CAS, frozen turn settings, runtime locking, provider protocols,
 model-specific levels and defaults, bounded discovery and cache recovery,
+permission ceilings, legacy permission reads, explicit writes and resumed-run arguments,
 composer draft recovery and keyboard history precedence.
 Integration validation should use a dedicated test chat and a read-only prompt,
 not production workflows or the planning DAG.

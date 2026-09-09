@@ -186,7 +186,7 @@ describe('project agent uses the native chat lifecycle', () => {
     expect(mocks.run.mock.calls[0][0].prompt).toContain('Project A')
   })
 
-  it('captures runtime, model and instructions atomically and keeps them stable during a turn', async () => {
+  it('captures runtime, model, permissions and instructions atomically and keeps them stable during a turn', async () => {
     const settings: ProjectAgentConfig = {
       ...DEFAULT_PROJECT_AGENT_CONFIG,
       agentId: 'local-claude',
@@ -194,6 +194,7 @@ describe('project agent uses the native chat lifecycle', () => {
       model: 'test-model',
       reasoningEffort: 'high',
       instructions: 'Answer in Chinese.',
+      permissionMode: 'read-only',
     }
     prepareTurn('claude-thread', undefined, settings)
     const started = deferred<RunOptions>()
@@ -207,10 +208,12 @@ describe('project agent uses the native chat lifecycle', () => {
     const options = await started.promise
     settings.model = 'changed-after-start'
     settings.instructions = 'Changed for the next turn.'
+    settings.permissionMode = 'workspace-write'
     expect(options.settings).toMatchObject({
       agentId: 'local-claude',
       model: 'test-model',
       revision: 4,
+      permissionMode: 'read-only',
     })
     expect(Object.isFrozen(options.settings)).toBe(true)
     expect(options.threadId).toBe('claude-thread')
@@ -220,7 +223,7 @@ describe('project agent uses the native chat lifecycle', () => {
       agent: 'local-claude',
       provider: 'local-claude',
       model: 'test-model',
-      requestContext: { projectAgentConfig: { revision: 4 } },
+      requestContext: { projectAgentConfig: { revision: 4, permissionMode: 'read-only' } },
     })
     expect(mocks.append.mock.calls[0][2].chatModel).toBe('test-model')
     finish.resolve()

@@ -2,6 +2,7 @@ import { z } from 'zod'
 import { OrchestrationError } from '@/lib/core/orchestration/types'
 
 export const projectAgentIdSchema = z.enum(['local-codex', 'local-claude'])
+export const projectAgentPermissionModeSchema = z.enum(['read-only', 'workspace-write'])
 /** Runners own the effort vocabulary; catalog membership is checked before saving or executing. */
 export const projectAgentEffortSchema = z
   .string()
@@ -16,12 +17,13 @@ export const projectAgentModelIdSchema = z
   .max(200)
   .regex(/^[A-Za-z0-9][A-Za-z0-9._:/[\]-]*$/)
 
-/** User-editable run settings never include executables, credentials, paths, or permissions. */
+/** Permission choices are bounded profiles, never arbitrary runner flags, paths, or credentials. */
 export const projectAgentSettingsSchema = z
   .object({
     agentId: projectAgentIdSchema,
     model: projectAgentModelIdSchema.nullable(),
     reasoningEffort: projectAgentEffortSchema.nullable(),
+    permissionMode: projectAgentPermissionModeSchema.nullable(),
     instructions: z.string().trim().max(8000),
   })
   .strict()
@@ -29,10 +31,13 @@ export const projectAgentSettingsSchema = z
 export const projectAgentConfigSchema = projectAgentSettingsSchema.extend({
   version: z.literal(1),
   revision: z.number().int().nonnegative(),
+  /** Legacy stored configurations retain the deployment default; writes must choose explicitly. */
+  permissionMode: projectAgentPermissionModeSchema.nullable().default(null),
 })
 
 export type ProjectAgentId = z.infer<typeof projectAgentIdSchema>
 export type ProjectAgentEffort = z.infer<typeof projectAgentEffortSchema>
+export type ProjectAgentPermissionMode = z.infer<typeof projectAgentPermissionModeSchema>
 export type ProjectAgentSettings = z.infer<typeof projectAgentSettingsSchema>
 export type ProjectAgentConfig = z.infer<typeof projectAgentConfigSchema>
 
@@ -42,6 +47,7 @@ export const DEFAULT_PROJECT_AGENT_CONFIG: Readonly<ProjectAgentConfig> = Object
   agentId: 'local-codex',
   model: null,
   reasoningEffort: null,
+  permissionMode: null,
   instructions: '',
 })
 
@@ -92,15 +98,45 @@ export const projectAgentModelCatalogSchema = z.discriminatedUnion('status', [
 export type ProjectAgentModel = z.infer<typeof projectAgentModelSchema>
 export type ProjectAgentModelCatalog = z.infer<typeof projectAgentModelCatalogSchema>
 
+export const projectAgentPermissionPolicySchema = z
+  .object({
+    defaultMode: projectAgentPermissionModeSchema,
+    description: z.string().min(1).max(500),
+    modes: z
+      .array(
+        z.object({
+          id: projectAgentPermissionModeSchema,
+          label: z.string().min(1).max(100),
+          description: z.string().min(1).max(500),
+        })
+      )
+      .min(1)
+      .max(2),
+  })
+  .refine(
+    (policy) =>
+      new Set(policy.modes.map((mode) => mode.id)).size === policy.modes.length &&
+      policy.modes.some((mode) => mode.id === policy.defaultMode),
+    { message: 'The deployment permission default must belong to its distinct allowed modes' }
+  )
+export type ProjectAgentPermissionPolicy = z.infer<typeof projectAgentPermissionPolicySchema>
+
 export const projectAgentCapabilitySchema = z.object({
   id: projectAgentIdSchema,
   label: z.string(),
   available: z.boolean(),
   unavailableReason: z.string().optional(),
-  permissionLabel: z.string(),
+  permissions: projectAgentPermissionPolicySchema,
   modelCatalog: projectAgentModelCatalogSchema,
 })
 export type ProjectAgentCapability = z.infer<typeof projectAgentCapabilitySchema>
+
+export function getProjectAgentPermission(
+  policy: ProjectAgentPermissionPolicy | undefined,
+  mode: ProjectAgentPermissionMode | null | undefined
+) {
+  return policy?.modes.find((option) => option.id === (mode ?? policy.defaultMode))
+}
 
 /** The runtime default is deliberately not a concrete model/effort pairing. */
 export function getProjectAgentModel(

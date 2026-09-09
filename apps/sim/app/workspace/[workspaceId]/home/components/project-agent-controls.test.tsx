@@ -122,7 +122,14 @@ const data: NonNullable<Props['data']> = {
       id: 'local-codex',
       label: 'Configured Codex',
       available: true,
-      permissionLabel: 'Deployment read only',
+      permissions: {
+        defaultMode: 'workspace-write',
+        description: 'Test deployment allows project writes',
+        modes: [
+          { id: 'read-only', label: '只读', description: 'Read without writing' },
+          { id: 'workspace-write', label: '项目内读写', description: 'Write inside the project' },
+        ],
+      },
       modelCatalog: {
         status: 'ready',
         models: [
@@ -154,7 +161,11 @@ const data: NonNullable<Props['data']> = {
       id: 'local-claude',
       label: 'Configured Claude',
       available: true,
-      permissionLabel: 'Read tools only',
+      permissions: {
+        defaultMode: 'read-only',
+        description: 'Read tools only',
+        modes: [{ id: 'read-only', label: '只读工具', description: 'Read / Grep / Glob only' }],
+      },
       modelCatalog: {
         status: 'ready',
         models: [
@@ -246,7 +257,13 @@ describe('native composer Agent controls', () => {
     expect(container.textContent).toContain('Configured Claude')
     await act(async () => select('切换项目 Agent', 'local-claude'))
     expect(props.onSave).toHaveBeenCalledWith(
-      { agentId: 'local-claude', model: null, reasoningEffort: null, instructions: 'Use Chinese.' },
+      {
+        agentId: 'local-claude',
+        model: null,
+        reasoningEffort: null,
+        permissionMode: null,
+        instructions: 'Use Chinese.',
+      },
       0
     )
   })
@@ -264,6 +281,7 @@ describe('native composer Agent controls', () => {
         agentId: 'local-codex',
         model: 'different-model',
         reasoningEffort: 'low',
+        permissionMode: null,
         instructions: 'Use Chinese.',
       },
       0
@@ -317,10 +335,13 @@ describe('native composer Agent controls', () => {
   it('disables changes while saving or without workspace write permission', () => {
     render({ saving: true })
     expect(button('项目 Agent 配置').disabled).toBe(true)
+    expect(dropdown('切换执行权限').disabled).toBe(true)
     permissions.canEdit = false
     render({ saving: false })
     act(() => button('项目 Agent 配置').click())
     expect(dropdown('模型').disabled).toBe(true)
+    expect(dropdown('切换执行权限').disabled).toBe(true)
+    expect(dropdown('配置执行权限').disabled).toBe(true)
     expect(button('保存配置').disabled).toBe(true)
   })
   it('offers a searchable server model list, with levels belonging to the selected model only', () => {
@@ -472,6 +493,106 @@ describe('native composer Agent controls', () => {
     await act(async () => button('保存配置').click())
     expect(props.onSave).toHaveBeenCalledWith(
       expect.objectContaining({ model: null, reasoningEffort: null }),
+      0
+    )
+  })
+  it('switches permission directly beside an existing conversation without changing its Agent or model', async () => {
+    render({ hasMessages: true })
+    expect(dropdown('切换项目 Agent').disabled).toBe(true)
+    expect(dropdown('切换执行权限').disabled).toBe(false)
+    expect(optionValues('切换执行权限')).toEqual([
+      '__deployment_default__',
+      'read-only',
+      'workspace-write',
+    ])
+    await act(async () => select('切换执行权限', 'read-only'))
+    const { version: _version, revision, ...settings } = data.config
+    expect(props.onSave).toHaveBeenCalledWith(
+      { ...settings, permissionMode: 'read-only' },
+      revision
+    )
+    render({
+      data: { ...data, config: { ...data.config, permissionMode: 'read-only', revision: 1 } },
+    })
+    expect(dropdown('切换执行权限').value).toBe('read-only')
+    await act(async () => select('切换执行权限', 'workspace-write'))
+    expect(props.onSave).toHaveBeenLastCalledWith(
+      { ...settings, permissionMode: 'workspace-write' },
+      1
+    )
+  })
+  it('keeps the saved permission visible and reports a failed inline change', async () => {
+    render({ onSave: vi.fn().mockRejectedValue(new Error('Permission save failed')) })
+    await act(async () => select('切换执行权限', 'read-only'))
+    expect(dropdown('切换执行权限').value).toBe('__deployment_default__')
+    expect(container.textContent).toContain('Permission save failed')
+  })
+  it('keeps an explicit read-only choice when changing models or inheriting the runner model', async () => {
+    render({ data: { ...data, config: { ...data.config, permissionMode: 'read-only' } } })
+    act(() => button('项目 Agent 配置').click())
+    select('模型', 'different-model')
+    expect(dropdown('配置执行权限').value).toBe('read-only')
+    select('模型', '__runtime_default__')
+    await act(async () => button('保存配置').click())
+    expect(props.onSave).toHaveBeenCalledWith(
+      expect.objectContaining({ model: null, reasoningEffort: null, permissionMode: 'read-only' }),
+      0
+    )
+  })
+  it('preserves a permission draft through a newer server revision and failed stale save', async () => {
+    render()
+    act(() => button('项目 Agent 配置').click())
+    select('配置执行权限', 'read-only')
+    render({
+      data: { ...data, config: { ...data.config, permissionMode: 'workspace-write', revision: 3 } },
+      onSave: vi.fn().mockRejectedValue(new Error('Configuration changed')),
+    })
+    expect(dropdown('切换执行权限').value).toBe('workspace-write')
+    expect(dropdown('配置执行权限').value).toBe('read-only')
+    await act(async () => button('保存配置').click())
+    expect(props.onSave).toHaveBeenCalledWith(
+      expect.objectContaining({ permissionMode: 'read-only' }),
+      0
+    )
+    expect(dropdown('配置执行权限').value).toBe('read-only')
+    act(() => button('载入当前配置').click())
+    expect(dropdown('配置执行权限').value).toBe('workspace-write')
+  })
+  it('takes permissions from the selected Agent and retains compatible restrictions on Agent changes', async () => {
+    render({ data: { ...data, config: { ...data.config, permissionMode: 'read-only' } } })
+    act(() => button('项目 Agent 配置').click())
+    select('配置 Agent', 'local-claude')
+    expect(optionValues('配置执行权限')).toEqual(['__deployment_default__', 'read-only'])
+    expect(dropdown('配置执行权限').value).toBe('read-only')
+    select('配置 Agent', 'local-codex')
+    expect(dropdown('配置执行权限').value).toBe('read-only')
+    await act(async () => button('保存配置').click())
+    expect(props.onSave).toHaveBeenCalledWith(
+      expect.objectContaining({ permissionMode: 'read-only' }),
+      0
+    )
+  })
+  it('requires explicit repair of a previously saved permission removed by the deployment', async () => {
+    render({
+      data: {
+        ...data,
+        config: { ...data.config, permissionMode: 'workspace-write' },
+        agents: data.agents.map((agent) => ({ ...agent, permissions: data.agents[1].permissions })),
+      },
+    })
+    expect(dropdown('切换执行权限').value).toBe('workspace-write')
+    expect(container.textContent).toContain('已保存的执行权限不被当前部署允许')
+    expect(props.onSave).not.toHaveBeenCalled()
+    act(() => button('项目 Agent 配置').click())
+    expect(button('保存配置').disabled).toBe(true)
+    expect(
+      dropdown('配置执行权限').querySelector<HTMLOptionElement>('option[value="workspace-write"]')!
+        .disabled
+    ).toBe(true)
+    select('配置执行权限', 'read-only')
+    await act(async () => button('保存配置').click())
+    expect(props.onSave).toHaveBeenCalledWith(
+      expect.objectContaining({ permissionMode: 'read-only' }),
       0
     )
   })

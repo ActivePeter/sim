@@ -7,6 +7,15 @@ import { DEFAULT_PROJECT_AGENT_CONFIG } from '@/lib/vibe-vscode/agent-config'
 import { createClaudeEventParser, localClaudeArguments } from '@/lib/vibe-vscode/local-claude'
 
 describe('Claude Code native project adapter', () => {
+  it('rejects a write permission before constructing a Claude invocation', () => {
+    expect(() =>
+      localClaudeArguments({
+        ...DEFAULT_PROJECT_AGENT_CONFIG,
+        agentId: 'local-claude',
+        permissionMode: 'workspace-write',
+      })
+    ).toThrow(expect.objectContaining({ code: 'forbidden' }))
+  })
   it('pins non-interactive read-only permissions and resumes only the provided session', () => {
     const args = localClaudeArguments(
       {

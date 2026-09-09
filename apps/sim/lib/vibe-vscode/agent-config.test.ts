@@ -29,6 +29,24 @@ describe('project Agent configuration authority', () => {
     expect(captured.model).toBe('model-one')
     expect(Object.isFrozen(captured)).toBe(true)
   })
+  it('reads legacy permissions as deployment defaults but requires explicit permission intent on writes', () => {
+    const { permissionMode: _permission, ...legacy } = DEFAULT_PROJECT_AGENT_CONFIG
+    expect(readProjectAgentConfig(legacy)).toEqual(DEFAULT_PROJECT_AGENT_CONFIG)
+    const { version: _version, revision: _revision, ...legacySettings } = legacy
+    expect(projectAgentSettingsSchema.safeParse(legacySettings).success).toBe(false)
+    expect(readProjectAgentConfig({ ...legacy, permissionMode: 'read-only' }).permissionMode).toBe(
+      'read-only'
+    )
+  })
+  it.each(['danger-full-access', 'bypassPermissions', '--full-auto', ''])(
+    'rejects unbounded permission modes: %s',
+    (permissionMode) => {
+      const { version: _version, revision: _revision, ...settings } = DEFAULT_PROJECT_AGENT_CONFIG
+      expect(projectAgentSettingsSchema.safeParse({ ...settings, permissionMode }).success).toBe(
+        false
+      )
+    }
+  )
   it.each(['--dangerously-skip-permissions', 'model\n-c evil=true', 'model;$(command)', ''])(
     'rejects flag-like or malformed model identifiers: %s',
     (model) => {
@@ -36,7 +54,7 @@ describe('project Agent configuration authority', () => {
       expect(projectAgentSettingsSchema.safeParse({ ...settings, model }).success).toBe(false)
     }
   )
-  it('does not accept executable, credentials or permission fields', () => {
+  it('does not accept executables, credentials or arbitrary permission flags', () => {
     const { version: _version, revision: _revision, ...settings } = DEFAULT_PROJECT_AGENT_CONFIG
     for (const field of ['cwd', 'executable', 'env', 'approvalPolicy', 'sandbox']) {
       expect(

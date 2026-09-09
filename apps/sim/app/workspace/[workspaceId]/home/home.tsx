@@ -33,7 +33,10 @@ import {
   type MothershipSendMessageDetail,
 } from '@/lib/mothership/events'
 import { captureEvent } from '@/lib/posthog/client'
-import type { ProjectAgentSettings } from '@/lib/vibe-vscode/agent-config'
+import {
+  getProjectAgentPermission,
+  type ProjectAgentSettings,
+} from '@/lib/vibe-vscode/agent-config'
 import type { VscodeSessionOrigin } from '@/lib/vibe-vscode/types'
 import { persistImportedWorkflow } from '@/lib/workflows/operations/import-export'
 import { ProjectLauncher } from '@/app/workspace/[workspaceId]/agents/components/project-launcher'
@@ -342,13 +345,18 @@ function ChatHome({
     },
     [resolvedChatId, workspaceId, saveAgentConfig]
   )
+  const currentProjectAgent = agentConfigQuery.data?.agents.find(
+    (agent) => agent.id === agentConfigQuery.data?.config.agentId
+  )
   const agentSubmissionBlocked =
     !!projectOrigin &&
     (!agentConfigQuery.data ||
       isAgentConfigSaving ||
-      !agentConfigQuery.data.agents.find(
-        (agent) => agent.id === agentConfigQuery.data.config.agentId
-      )?.available)
+      !currentProjectAgent?.available ||
+      !getProjectAgentPermission(
+        currentProjectAgent?.permissions,
+        agentConfigQuery.data.config.permissionMode
+      ))
   const agentToolbar = projectOrigin ? (
     <ProjectAgentControls
       key={`${workspaceId}:${resolvedChatId}`}

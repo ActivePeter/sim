@@ -12,6 +12,7 @@ import {
   projectAgentModelIdSchema,
   projectAgentModelsSchema,
 } from '@/lib/vibe-vscode/agent-config'
+import { resolveLocalAgentPermission } from '@/lib/vibe-vscode/local-agent-permissions'
 import {
   type LocalAgentTurn,
   queryLocalAgentProcess,
@@ -129,7 +130,7 @@ export async function resolveLocalProject(
 export function localCodexArguments(
   cwd: string,
   threadId?: string,
-  settings?: Pick<ProjectAgentSettings, 'model' | 'reasoningEffort'>
+  settings?: Pick<ProjectAgentSettings, 'model' | 'reasoningEffort' | 'permissionMode'>
 ): string[] {
   const args = [
     'exec',
@@ -137,7 +138,7 @@ export function localCodexArguments(
     '--color',
     'never',
     '--sandbox',
-    env.SIM_VSCODE_CODEX_SANDBOX ?? 'read-only',
+    resolveLocalAgentPermission('local-codex', settings?.permissionMode),
     '--skip-git-repo-check',
     '-c',
     'approval_policy="never"',

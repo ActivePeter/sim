@@ -106,7 +106,7 @@ export async function startProjectChat(
         .orderBy(desc(copilotMessages.seq))
         .limit(1000)
       const origin = vscodeSessionOriginSchema.parse(row.binding.origin)
-      /** The client never chooses cwd, credentials, permissions, or the runtime thread. */
+      /** The client never chooses cwd, credentials, deployment limits, or the runtime thread. */
       const preamble =
         'You are the project agent for ' +
         origin.project.name +

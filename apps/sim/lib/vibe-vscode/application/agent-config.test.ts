@@ -56,7 +56,11 @@ const capabilities = [
     id: 'local-codex',
     label: 'Codex',
     available: true,
-    permissionLabel: 'Read only',
+    permissions: {
+      defaultMode: 'read-only',
+      description: 'Test deployment permits only reading',
+      modes: [{ id: 'read-only', label: 'Read only', description: 'Read-only sandbox' }],
+    },
     modelCatalog: {
       status: 'ready',
       models: [
@@ -215,5 +219,34 @@ describe('project Agent config internal routes', () => {
     const failure = await PATCH(request('PATCH', body), routeContext)
     expect(failure.status).toBe(500)
     expect(JSON.stringify(await failure.json())).not.toContain('private database')
+  })
+  it('does not let a stale client omit permission intent and reset a saved restriction', async () => {
+    const { permissionMode: _permission, ...legacySettings } = settings
+    const response = await PATCH(
+      request('PATCH', {
+        workspaceId: input.workspaceId,
+        expectedRevision: 0,
+        settings: legacySettings,
+      }),
+      routeContext
+    )
+    expect(response.status).toBe(400)
+    expect(mocks.validate).not.toHaveBeenCalled()
+    expect(mocks.update).not.toHaveBeenCalled()
+  })
+  it('preserves a deployment permission denial without persisting the requested escalation', async () => {
+    mocks.validate.mockRejectedValue(
+      new OrchestrationError('forbidden', 'Deployment forbids writing')
+    )
+    const response = await PATCH(
+      request('PATCH', {
+        workspaceId: input.workspaceId,
+        expectedRevision: 0,
+        settings: { ...settings, permissionMode: 'workspace-write' },
+      }),
+      routeContext
+    )
+    expect(response.status).toBe(403)
+    expect(mocks.update).not.toHaveBeenCalled()
   })
 })

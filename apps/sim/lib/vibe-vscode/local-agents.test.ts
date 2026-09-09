@@ -7,9 +7,10 @@ const mocks = vi.hoisted(() => ({
   codex: vi.fn(),
   claude: vi.fn(),
   models: vi.fn(),
+  env: { SIM_VSCODE_CODEX_SANDBOX: undefined as string | undefined },
 }))
 vi.mock('node:fs/promises', () => ({ access: mocks.access, stat: mocks.stat }))
-vi.mock('@/lib/core/config/env', () => ({ env: {} }))
+vi.mock('@/lib/core/config/env', () => ({ env: mocks.env }))
 vi.mock('@/lib/vibe-vscode/local-codex', () => ({ runLocalCodex: mocks.codex }))
 vi.mock('@/lib/vibe-vscode/local-claude', () => ({ runLocalClaude: mocks.claude }))
 vi.mock('@/lib/vibe-vscode/local-agent-models', () => ({
@@ -29,6 +30,7 @@ import {
 const { version: _version, revision: _revision, ...settings } = DEFAULT_PROJECT_AGENT_CONFIG
 beforeEach(() => {
   vi.clearAllMocks()
+  mocks.env.SIM_VSCODE_CODEX_SANDBOX = undefined
   vi.stubEnv('PATH', '/bin:/usr/bin')
   mocks.access.mockResolvedValue(undefined)
   mocks.stat.mockResolvedValue({ isFile: () => true })
@@ -141,7 +143,7 @@ describe('server-owned project Agent capabilities', () => {
     await runProjectAgent(turn)
     expect(mocks.claude).toHaveBeenCalledWith({
       ...turn,
-      settings: { ...settings, agentId: 'local-claude' },
+      settings: { ...settings, agentId: 'local-claude', permissionMode: 'read-only' },
     })
     expect(mocks.codex).not.toHaveBeenCalled()
     await runProjectAgent({ ...turn, settings: DEFAULT_PROJECT_AGENT_CONFIG })
@@ -178,9 +180,37 @@ describe('server-owned project Agent capabilities', () => {
     await runProjectAgent({ ...turn, settings: { ...settings, model: 'model-one' } })
     expect(mocks.codex).toHaveBeenCalledWith({
       ...turn,
-      settings: { ...settings, model: 'model-one', reasoningEffort: 'low' },
+      settings: {
+        ...settings,
+        model: 'model-one',
+        reasoningEffort: 'low',
+        permissionMode: 'read-only',
+      },
     })
     expect(Object.isFrozen(mocks.codex.mock.calls[0][0].settings)).toBe(true)
+  })
+  it('validates the same deployment ceiling on saving and execution, independently of model defaults', async () => {
+    mocks.env.SIM_VSCODE_CODEX_SANDBOX = 'workspace-write'
+    const selected = { ...settings, permissionMode: 'read-only' as const }
+    expect(await validateProjectAgentSettings(selected)).toEqual(selected)
+    const turn = {
+      cwd: '/projects/a',
+      prompt: 'Task',
+      signal: new AbortController().signal,
+      onEvent: vi.fn(),
+      settings: selected,
+    }
+    await runProjectAgent(turn)
+    expect(mocks.codex).toHaveBeenCalledExactlyOnceWith(turn)
+    expect(Object.isFrozen(mocks.codex.mock.calls[0][0].settings)).toBe(true)
+    mocks.env.SIM_VSCODE_CODEX_SANDBOX = 'read-only'
+    const denied = { ...settings, permissionMode: 'workspace-write' as const }
+    await expect(validateProjectAgentSettings(denied)).rejects.toMatchObject({ code: 'forbidden' })
+    await expect(runProjectAgent({ ...turn, settings: denied })).rejects.toMatchObject({
+      code: 'forbidden',
+    })
+    expect(mocks.codex).toHaveBeenCalledOnce()
+    expect(mocks.models).not.toHaveBeenCalled()
   })
   it('never starts a turn cancelled before or during model discovery', async () => {
     const controller = new AbortController()
