@@ -1,6 +1,7 @@
 'use client'
 
 import { useEffect } from 'react'
+import { getErrorMessage } from '@sim/utils/errors'
 import { useRouter } from 'next/navigation'
 import { useI18n } from '@/lib/i18n'
 import {
@@ -10,7 +11,8 @@ import {
   VIBE_VSCODE_SURFACE_PARAM,
   withVibeVscodeSurface,
 } from '@/lib/vibe-vscode/surface'
-import type { VibeVscodeHostContext } from '@/lib/vibe-vscode/types'
+import { type VibeVscodeHostContext, vscodeCreateChatRequestSchema } from '@/lib/vibe-vscode/types'
+import { useCreateProjectSessionFromSelection } from '@/hooks/queries/vscode-agents'
 
 const HOST_SOURCE = 'vibe-vscode'
 const SIM_SOURCE = 'sim'
@@ -37,7 +39,7 @@ declare global {
 interface HostBridgeMessage {
   source: typeof HOST_SOURCE
   token: string
-  type: 'context' | 'navigate' | 'ping'
+  type: 'context' | 'navigate' | 'ping' | 'createChat'
   payload?: unknown
 }
 
@@ -50,7 +52,10 @@ function isHostBridgeMessage(value: unknown, token: string): value is HostBridge
   return (
     value.source === HOST_SOURCE &&
     value.token === token &&
-    (value.type === 'context' || value.type === 'navigate' || value.type === 'ping')
+    (value.type === 'context' ||
+      value.type === 'navigate' ||
+      value.type === 'ping' ||
+      value.type === 'createChat')
   )
 }
 
@@ -148,6 +153,7 @@ function toSameOriginNavigationPath(value: string): string | null {
 export function VibeVscodeBridge() {
   const { replace: replaceRoute } = useRouter()
   const { setLocale } = useI18n()
+  const createFromSelection = useCreateProjectSessionFromSelection()
 
   useEffect(() => {
     if (window.parent === window) return
@@ -158,6 +164,8 @@ export function VibeVscodeBridge() {
 
     let hostContext: VibeVscodeHostContext | undefined
     let hostOrigin = '*'
+    const lifecycle = new AbortController()
+    const creating = new Map<string, string>()
 
     const postToHost = (type: string, payload?: Record<string, unknown>) => {
       window.parent.postMessage({ source: SIM_SOURCE, token, type, payload }, hostOrigin)
@@ -237,6 +245,53 @@ export function VibeVscodeBridge() {
         }
         return
       }
+      if (event.data.type === 'createChat' && surface === 'sidebar') {
+        const parsed = vscodeCreateChatRequestSchema.safeParse(event.data.payload)
+        if (!parsed.success) {
+          if (isRecord(event.data.payload) && typeof event.data.payload.requestId === 'string') {
+            postToHost('chatCreated', {
+              requestId: event.data.payload.requestId,
+              error: '无法创建 Sim Chat：项目或文件选区上下文无效。',
+            })
+          }
+          return
+        }
+        const request = parsed.data
+        const fingerprint = JSON.stringify(request)
+        const pending = creating.get(request.requestId)
+        if (pending) {
+          if (pending !== fingerprint) {
+            postToHost('chatCreated', {
+              requestId: request.requestId,
+              error: '此创建请求已绑定到另一份上下文，请重新选择。',
+            })
+          }
+          return
+        }
+        creating.set(request.requestId, fingerprint)
+        const signal = AbortSignal.any([lifecycle.signal, AbortSignal.timeout(20_000)])
+        void createFromSelection(request, signal)
+          .then(
+            (result) => {
+              if (!lifecycle.signal.aborted) {
+                postToHost('chatCreated', {
+                  requestId: request.requestId,
+                  path: `/workspace/${result.workspaceId}/chat/${result.id}`,
+                })
+              }
+            },
+            (error) => {
+              if (!lifecycle.signal.aborted) {
+                postToHost('chatCreated', {
+                  requestId: request.requestId,
+                  error: getErrorMessage(error, '无法创建 Sim Chat，请重试。'),
+                })
+              }
+            }
+          )
+          .finally(() => creating.delete(request.requestId))
+        return
+      }
       if (event.data.type === 'ping') postToHost('ready', { path: window.location.pathname })
     }
 
@@ -308,6 +363,7 @@ export function VibeVscodeBridge() {
     window.dispatchEvent(new Event('vibe-vscode-context'))
 
     return () => {
+      lifecycle.abort()
       window.removeEventListener('message', messageListener)
       window.removeEventListener('click', clickListener, true)
       window.removeEventListener('click', newWindowListener)
@@ -320,7 +376,7 @@ export function VibeVscodeBridge() {
       window.vibeVscode = undefined
       window.dispatchEvent(new Event('vibe-vscode-context'))
     }
-  }, [replaceRoute, setLocale])
+  }, [replaceRoute, setLocale, createFromSelection])
 
   return null
 }

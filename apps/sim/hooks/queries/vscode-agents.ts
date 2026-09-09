@@ -1,5 +1,13 @@
-import { useMutation, useQueries, useQuery, useQueryClient } from '@tanstack/react-query'
+import { useCallback } from 'react'
+import {
+  type QueryClient,
+  useMutation,
+  useQueries,
+  useQuery,
+  useQueryClient,
+} from '@tanstack/react-query'
 import { requestJson } from '@/lib/api/client/request'
+import type { ContractJsonResponse } from '@/lib/api/contracts'
 import {
   type CreateProjectSessionBody,
   createProjectSessionContract,
@@ -10,6 +18,7 @@ import {
   stopProjectSessionContract,
   syncVscodeHostContract,
 } from '@/lib/api/contracts/vscode-agents'
+import type { VscodeCreateChatRequest, VscodeHost } from '@/lib/vibe-vscode/types'
 import { mothershipChatKeys } from '@/hooks/queries/mothership-chats'
 
 export const VSCODE_HOSTS_STALE_TIME = 30_000
@@ -80,6 +89,96 @@ export function useCreateProjectSession() {
         }),
       ]),
   })
+}
+
+/** Cancels this caller's wait, not a shared query or an already-dispatched native creation. */
+async function waitForSelectionRequest<T>(
+  signal: AbortSignal,
+  operation: () => Promise<T>
+): Promise<T> {
+  signal.throwIfAborted()
+  let abort: (() => void) | undefined
+  const cancelled = new Promise<never>((_resolve, reject) => {
+    abort = () => reject(new Error('创建 Sim Chat 超时或已取消，请重试以恢复同一会话。'))
+    signal.addEventListener('abort', abort, { once: true })
+  })
+  try {
+    return await Promise.race([operation(), cancelled])
+  } finally {
+    if (abort) signal.removeEventListener('abort', abort)
+  }
+}
+
+/** Waits for the existing catalog projection; a selection request never republishes an old catalog. */
+export async function waitForProjectedVscodeHost(
+  queryClient: QueryClient,
+  request: VscodeCreateChatRequest,
+  signal: AbortSignal
+): Promise<VscodeHost> {
+  const queryKey = vscodeAgentKeys.hostList(request.workspaceId)
+  const find = (data: ContractJsonResponse<typeof listVscodeHostsContract> | undefined) =>
+    data?.hosts.find(
+      (host) =>
+        host.catalog.physicalWorkspace.id === request.catalog.physicalWorkspace.id &&
+        host.catalog.physicalWorkspace.remoteAuthority ===
+          request.catalog.physicalWorkspace.remoteAuthority
+    )
+  const data = await waitForSelectionRequest(signal, () =>
+    queryClient.fetchQuery({
+      queryKey,
+      queryFn: ({ signal: querySignal }) =>
+        requestJson(listVscodeHostsContract, {
+          query: { workspaceId: request.workspaceId },
+          signal: querySignal,
+        }),
+      staleTime: VSCODE_HOSTS_STALE_TIME,
+    })
+  )
+  signal.throwIfAborted()
+  const host = find(data)
+  if (host) return host
+
+  return new Promise((resolve, reject) => {
+    const abort = () => {
+      unsubscribe()
+      signal.removeEventListener('abort', abort)
+      reject(new Error('项目目录尚未同步到 Sim，请检查侧栏的项目同步状态后重试。'))
+    }
+    const check = () => {
+      const projected = find(queryClient.getQueryData(queryKey))
+      if (!projected) return
+      unsubscribe()
+      signal.removeEventListener('abort', abort)
+      resolve(projected)
+    }
+    const unsubscribe = queryClient.getQueryCache().subscribe(check)
+    signal.addEventListener('abort', abort, { once: true })
+    if (signal.aborted) abort()
+    else check()
+  })
+}
+
+/** Both sidebar creation and the editor-selection command enter the same native operation. */
+export function useCreateProjectSessionFromSelection() {
+  const queryClient = useQueryClient()
+  const { mutateAsync } = useCreateProjectSession()
+  return useCallback(
+    async (request: VscodeCreateChatRequest, signal: AbortSignal) => {
+      const host = await waitForProjectedVscodeHost(queryClient, request, signal)
+      signal.throwIfAborted()
+      return waitForSelectionRequest(signal, () =>
+        mutateAsync({
+          workspaceId: request.workspaceId,
+          hostId: host.id,
+          projectUri: request.projectUri,
+          logicalWorkspaceId: request.logicalWorkspaceId,
+          requestId: request.requestId,
+          selection: request.selection,
+        })
+      )
+    },
+    [queryClient, mutateAsync]
+  )
 }
 
 export function useStopProjectSession() {

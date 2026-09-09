@@ -15,9 +15,13 @@ import { useVscodeSurface } from '@/hooks/use-vscode-surface'
 
 interface ProjectLauncherProps {
   compact?: boolean
+  triggerLabel?: string
 }
 
-export function ProjectLauncher({ compact = false }: ProjectLauncherProps) {
+export function ProjectLauncher({
+  compact = false,
+  triggerLabel = '新建项目 Agent',
+}: ProjectLauncherProps) {
   const [open, setOpen] = useState(false)
   const [sidebarSelection, setSidebarSelection] = useState<string | null>(null)
   const requests = useRef(new Map<string, string>())
@@ -191,7 +195,7 @@ export function ProjectLauncher({ compact = false }: ProjectLauncherProps) {
     <Popover open={open} onOpenChange={setOpen}>
       <PopoverTrigger asChild>
         <Chip leftIcon={Plus} fullWidth active={open}>
-          新建项目 Agent
+          {triggerLabel}
         </Chip>
       </PopoverTrigger>
       <PopoverContent align='start' side='bottom' className='w-[280px] max-w-[calc(100vw-16px)]'>

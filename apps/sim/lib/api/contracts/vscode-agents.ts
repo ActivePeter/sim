@@ -1,7 +1,11 @@
 import { z } from 'zod'
 import { workspaceIdSchema } from '@/lib/api/contracts/primitives'
 import { defineRouteContract } from '@/lib/api/contracts/types'
-import { vscodeCatalogSchema, vscodeSessionOriginSchema } from '@/lib/vibe-vscode/types'
+import {
+  vscodeCatalogSchema,
+  vscodeSelectionSchema,
+  vscodeSessionIdentitySchema,
+} from '@/lib/vibe-vscode/types'
 
 export type { ProjectSession, VibeVscodeHostContext, VscodeHost } from '@/lib/vibe-vscode/types'
 
@@ -37,6 +41,7 @@ export const createProjectSessionBodySchema = scope.extend({
   projectUri: z.string().min(1).max(8192),
   logicalWorkspaceId: z.string().min(1).max(512).optional(),
   requestId: z.string().uuid(),
+  selection: vscodeSelectionSchema.optional(),
 })
 export type CreateProjectSessionBody = z.input<typeof createProjectSessionBodySchema>
 
@@ -69,7 +74,7 @@ export const listProjectSessionsContract = defineRouteContract({
             'interrupted',
             'unknown',
           ]),
-          origin: vscodeSessionOriginSchema.nullable(),
+          origin: vscodeSessionIdentitySchema.nullable(),
           runtime: z.enum(['local-codex', 'sim']),
         })
       ),

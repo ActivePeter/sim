@@ -8,12 +8,16 @@ import { getLatestRunsForChats } from '@/lib/copilot/async-runs/repository'
 import { reconcileChatStreamMarkers } from '@/lib/copilot/chat/stream-liveness'
 import { OrchestrationError } from '@/lib/core/orchestration/types'
 import {
+  isVscodeSelectionInProject,
   type ProjectSession,
   type ProjectSessionStatus,
   type VscodeCatalog,
   type VscodeHost,
+  type VscodeSelection,
   vscodeCatalogFingerprint,
   vscodeCatalogSchema,
+  vscodeSelectionFingerprint,
+  vscodeSessionIdentitySchema,
   vscodeSessionOriginSchema,
 } from '@/lib/vibe-vscode/types'
 
@@ -99,6 +103,7 @@ export interface CreateProjectSessionInput {
   projectUri: string
   logicalWorkspaceId?: string
   requestId: string
+  selection?: VscodeSelection
 }
 
 export async function createProjectSession(userId: string, input: CreateProjectSessionInput) {
@@ -132,7 +137,9 @@ export async function createProjectSession(userId: string, input: CreateProjectS
           existing.chat.deletedAt ||
           existing.binding.hostId !== input.hostId ||
           origin.project.uri !== input.projectUri ||
-          origin.logicalWorkspace?.id !== input.logicalWorkspaceId
+          origin.logicalWorkspace?.id !== input.logicalWorkspaceId ||
+          vscodeSelectionFingerprint(origin.selection) !==
+            vscodeSelectionFingerprint(input.selection)
         ) {
           throw new OrchestrationError(
             'conflict',
@@ -151,6 +158,9 @@ export async function createProjectSession(userId: string, input: CreateProjectS
           'conflict',
           'The selected project or logical workspace is no longer in the VS Code catalog'
         )
+      }
+      if (input.selection && !isVscodeSelectionInProject(input.selection, project.uri)) {
+        throw new OrchestrationError('validation', 'The selected file is outside this project')
       }
       const { folders: _folders, ...physicalWorkspace } = catalog.physicalWorkspace
       const id = generateId()
@@ -171,6 +181,7 @@ export async function createProjectSession(userId: string, input: CreateProjectS
           physicalWorkspace,
           project: { name: project.name, uri: project.uri },
           logicalWorkspace: logical,
+          ...(input.selection ? { selection: input.selection } : {}),
         },
       })
       return { id, workspaceId: input.workspaceId }
@@ -258,7 +269,7 @@ export async function listProjectSessions(
       updatedAt: chat.updatedAt.toISOString(),
       activeStreamId: marker?.streamId ?? null,
       status,
-      origin: binding ? vscodeSessionOriginSchema.parse(binding.origin) : null,
+      origin: binding ? vscodeSessionIdentitySchema.parse(binding.origin) : null,
       runtime: binding ? 'local-codex' : 'sim',
     }
   })

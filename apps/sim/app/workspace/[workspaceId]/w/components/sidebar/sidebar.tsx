@@ -1501,16 +1501,19 @@ export const Sidebar = memo(function Sidebar({
                     'flex flex-shrink-0 flex-col px-2'
                   )}
                 >
-                  {topNavItems.map((item) => (
-                    <SidebarNavItem
-                      key={item.id}
-                      item={item}
-                      active={isNavItemActive(item, pathname)}
-                      showCollapsedTooltips={showCollapsedTooltips}
-                      onContextMenu={item.href ? handleNavItemContextMenu : undefined}
-                    />
-                  ))}
-                  {fixedExpanded && isChatEnabled && <ProjectLauncher compact />}
+                  {topNavItems.map((item) =>
+                    fixedExpanded && isChatEnabled && item.id === 'home' ? (
+                      <ProjectLauncher key={item.id} compact triggerLabel={item.label} />
+                    ) : (
+                      <SidebarNavItem
+                        key={item.id}
+                        item={item}
+                        active={isNavItemActive(item, pathname)}
+                        showCollapsedTooltips={showCollapsedTooltips}
+                        onContextMenu={item.href ? handleNavItemContextMenu : undefined}
+                      />
+                    )
+                  )}
                 </div>
 
                 <div

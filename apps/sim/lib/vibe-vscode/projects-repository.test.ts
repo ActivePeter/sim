@@ -53,6 +53,12 @@ const input = {
   logicalWorkspaceId: 'logical-1',
   requestId: 'request-1',
 }
+const selection = {
+  uri: `${input.projectUri}/example.ts`,
+  language: 'typescript',
+  text: 'const value = 1',
+  range: { startLine: 1, startCharacter: 0, endLine: 1, endCharacter: 15 },
+}
 beforeEach(() => {
   vi.clearAllMocks()
   resetDbChainMock()
@@ -124,6 +130,48 @@ describe('native project session repository', () => {
     })
     expect(dbChainMockFns.insert).not.toHaveBeenCalled()
   })
+  it('persists the selected source in the same native chat binding without starting a turn', async () => {
+    dbChainMockFns.limit.mockResolvedValueOnce([host]).mockResolvedValueOnce([])
+    const result = await createProjectSession('user-1', { ...input, selection })
+    expect(dbChainMockFns.values.mock.calls[1][0]).toMatchObject({
+      chatId: result.id,
+      origin: { selection },
+    })
+    expect(dbChainMockFns.insert).toHaveBeenCalledTimes(2)
+  })
+  it('does not reuse a creation request for changed source text', async () => {
+    dbChainMockFns.limit.mockResolvedValueOnce([host]).mockResolvedValueOnce([
+      {
+        chat: { id: 'existing-chat', deletedAt: null },
+        binding: {
+          hostId: host.id,
+          origin: {
+            physicalWorkspace: catalog.physicalWorkspace,
+            project: catalog.physicalWorkspace.folders[0],
+            logicalWorkspace: catalog.logicalWorkspaces[0],
+            selection,
+          },
+        },
+      },
+    ])
+    await expect(
+      createProjectSession('user-1', {
+        ...input,
+        selection: { ...selection, text: 'a different snapshot' },
+      })
+    ).rejects.toMatchObject({ code: 'conflict' })
+    expect(dbChainMockFns.insert).not.toHaveBeenCalled()
+  })
+  it('rejects a selection from another project before inserting a chat', async () => {
+    dbChainMockFns.limit.mockResolvedValueOnce([host]).mockResolvedValueOnce([])
+    await expect(
+      createProjectSession('user-1', {
+        ...input,
+        selection: { ...selection, uri: `${catalog.physicalWorkspace.folders[1].uri}/other.ts` },
+      })
+    ).rejects.toMatchObject({ code: 'validation' })
+    expect(dbChainMockFns.insert).not.toHaveBeenCalled()
+  })
   it('rejects a project removed since the initiating snapshot', async () => {
     dbChainMockFns.limit.mockResolvedValueOnce([host]).mockResolvedValueOnce([])
     await expect(
@@ -145,6 +193,7 @@ describe('native project session repository', () => {
     const origin = {
       physicalWorkspace: catalog.physicalWorkspace,
       project: catalog.physicalWorkspace.folders[0],
+      selection,
     }
     const rows = [
       { id: 'project', binding: { origin, lastTurnId: 'turn-1', lastOutcome: 'error' } },
@@ -166,6 +215,7 @@ describe('native project session repository', () => {
       { id: 'legacy', status: 'cancelled' },
     ])
     expect(mocks.latestRuns).toHaveBeenCalledWith(['project', 'native', 'legacy'], 'user-1')
+    expect(sessions[0].origin).not.toHaveProperty('selection')
   })
 
   it('keeps unknown liveness and new interrupted turns from inheriting an older completion', async () => {

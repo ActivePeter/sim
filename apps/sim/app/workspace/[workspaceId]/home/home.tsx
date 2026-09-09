@@ -35,6 +35,7 @@ import {
 import { captureEvent } from '@/lib/posthog/client'
 import type { VscodeSessionOrigin } from '@/lib/vibe-vscode/types'
 import { persistImportedWorkflow } from '@/lib/workflows/operations/import-export'
+import { ProjectLauncher } from '@/app/workspace/[workspaceId]/agents/components/project-launcher'
 import { RESOURCE_HEADER_CLASSES } from '@/app/workspace/[workspaceId]/home/components/mothership-view/components/resource-tabs/resource-tab-controls'
 import { resolveWorkspaceResourceRef } from '@/app/workspace/[workspaceId]/home/resolve-resource-ref'
 import {
@@ -47,7 +48,7 @@ import { useMarkMothershipChatRead } from '@/hooks/queries/mothership-chats'
 import { useWorkflows } from '@/hooks/queries/workflows'
 import { getWorkspaceFilesQueryOptions, useWorkspaceFiles } from '@/hooks/queries/workspace-files'
 import { useOAuthReturnRouter } from '@/hooks/use-oauth-return'
-import { useVscodeSurface } from '@/hooks/use-vscode-surface'
+import { useVscodeEmbedded, useVscodeSurface } from '@/hooks/use-vscode-surface'
 import type { ChatContext } from '@/stores/panel'
 import {
   ChatSurfaceProvider,
@@ -92,7 +93,31 @@ interface HomeProps {
   projectOrigin?: VscodeSessionOrigin
 }
 
-export function Home({ chatId, userName, userId, projectOrigin }: HomeProps) {
+export function Home(props: HomeProps) {
+  const embedded = useVscodeEmbedded()
+  if (embedded && !props.chatId) {
+    return (
+      <div className='flex h-full items-center justify-center overflow-y-auto p-6'>
+        <div className='w-full max-w-md'>
+          <h1 className='mb-3 text-heading'>新建项目 Chat</h1>
+          <p className='mb-5 text-[var(--text-muted)] text-small'>
+            选择 VS Code 项目，创建由 Sim 管理的原生 Agent 会话。
+          </p>
+          <ProjectLauncher />
+        </div>
+      </div>
+    )
+  }
+  return <ChatHome {...props} embedded={embedded} />
+}
+
+function ChatHome({
+  chatId,
+  userName,
+  userId,
+  projectOrigin,
+  embedded,
+}: HomeProps & { embedded: boolean }) {
   useOAuthReturnRouter()
   const { workspaceId } = useParams<{ workspaceId: string }>()
   const router = useRouter()
@@ -259,6 +284,7 @@ export function Home({ chatId, userName, userId, projectOrigin }: HomeProps) {
     isChatHistoryPending,
     isSending,
     isReconnecting,
+    error,
     sendMessage,
     stopGeneration,
     resolvedChatId,
@@ -637,6 +663,40 @@ export function Home({ chatId, userName, userId, projectOrigin }: HomeProps) {
               原生会话
             </span>
           </header>
+        )}
+        {projectOrigin?.selection && !compact && (
+          <details className='shrink-0 border-[var(--border)] border-b px-5 py-3 text-small'>
+            <summary className='cursor-pointer'>
+              文件选区：{projectOrigin.selection.uri.split('/').pop()} · L
+              {projectOrigin.selection.range.startLine + 1}:C
+              {projectOrigin.selection.range.startCharacter + 1}–L
+              {projectOrigin.selection.range.endLine + 1}:C
+              {projectOrigin.selection.range.endCharacter + 1}
+            </summary>
+            <p className='mt-2 break-all text-[var(--text-muted)] text-caption'>
+              {projectOrigin.selection.uri}
+            </p>
+            <pre className='mt-2 max-h-48 overflow-auto whitespace-pre-wrap break-words text-caption'>
+              {projectOrigin.selection.text}
+            </pre>
+          </details>
+        )}
+        {embedded && !projectOrigin && !compact && (
+          <div className='shrink-0 border-[var(--border)] border-b px-5 py-3 text-small'>
+            <p className='mb-2 text-[var(--text-muted)]'>
+              这条旧会话未绑定 VS Code 项目，使用的是 Sim 云 Agent。要在本地项目工作，请新建项目
+              Chat；原会话记录会保留。
+            </p>
+            <ProjectLauncher compact triggerLabel='新建项目 Chat' />
+          </div>
+        )}
+        {error && !compact && (
+          <div
+            role='alert'
+            className='shrink-0 break-words px-5 py-3 text-[var(--text-error)] text-small'
+          >
+            {error}
+          </div>
         )}
         {showEmptyState && resourceSurfaceEnabled && (
           <div

@@ -5,14 +5,25 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 const locale = vi.hoisted(() => ({ setLocale: vi.fn() }))
 const router = vi.hoisted(() => ({ replace: vi.fn() }))
+const creation = vi.hoisted(() => ({ create: vi.fn() }))
 vi.mock('@/lib/i18n', () => ({ useI18n: () => locale }))
 vi.mock('next/navigation', () => ({ useRouter: () => ({ ...router }) }))
+vi.mock('@/hooks/queries/vscode-agents', () => ({
+  useCreateProjectSessionFromSelection: () => creation.create,
+}))
 
 import { VibeVscodeBridge } from '@/components/vibe-vscode-bridge'
 
 interface BridgeMessage {
   type: string
-  payload?: { path?: string; userInitiated?: boolean; uri?: string; title?: string }
+  payload?: {
+    path?: string
+    userInitiated?: boolean
+    uri?: string
+    title?: string
+    requestId?: string
+    error?: string
+  }
 }
 
 let container: HTMLDivElement
@@ -46,6 +57,7 @@ function navigateFromHost(path: string, token = 'test-generation', source = host
 beforeEach(() => {
   ;(globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true
   vi.clearAllMocks()
+  creation.create.mockResolvedValue({ id: 'created-chat', workspaceId: 'one' })
   messages = []
   window.history.replaceState(
     null,
@@ -63,6 +75,90 @@ beforeEach(() => {
   document.body.appendChild(container)
   root = createRoot(container)
   act(() => root.render(<VibeVscodeBridge />))
+})
+
+const selectionRequest = {
+  requestId: '00000000-0000-4000-8000-000000000001',
+  workspaceId: 'one',
+  catalog: {
+    physicalWorkspace: {
+      id: 'physical-one',
+      name: 'Projects',
+      remoteAuthority: 'host.test',
+      folders: [{ uri: 'vscode-remote://host.test/project', name: 'Project', index: 0 }],
+    },
+    logicalWorkspaces: [{ id: 'logical-one', name: 'One' }],
+  },
+  projectUri: 'vscode-remote://host.test/project',
+  logicalWorkspaceId: 'logical-one',
+  selection: {
+    uri: 'vscode-remote://host.test/project/example.ts',
+    language: 'typescript',
+    text: 'const value = 1',
+    range: { startLine: 0, startCharacter: 0, endLine: 0, endCharacter: 15 },
+  },
+}
+
+function createFromHost(payload: unknown = selectionRequest, token = 'test-generation') {
+  window.dispatchEvent(
+    new MessageEvent('message', {
+      source: host.contentWindow,
+      origin: window.location.origin,
+      data: { source: 'vibe-vscode', token, type: 'createChat', payload },
+    })
+  )
+}
+
+describe('editor selection chat handoff', () => {
+  it('creates once for repeated delivery and acknowledges the initiating request without navigating', async () => {
+    let finish!: (value: { id: string; workspaceId: string }) => void
+    creation.create.mockReturnValueOnce(
+      new Promise((resolve) => {
+        finish = resolve
+      })
+    )
+    act(() => {
+      createFromHost()
+      createFromHost()
+    })
+    window.history.replaceState(null, '', '/workspace/two/d/another-plan')
+    await act(async () => finish({ id: 'created-chat', workspaceId: 'one' }))
+    expect(creation.create).toHaveBeenCalledExactlyOnceWith(
+      selectionRequest,
+      expect.any(AbortSignal)
+    )
+    expect(messages.filter((message) => message.type === 'chatCreated')).toEqual([
+      {
+        source: 'sim',
+        token: 'test-generation',
+        type: 'chatCreated',
+        payload: {
+          requestId: selectionRequest.requestId,
+          path: '/workspace/one/chat/created-chat',
+        },
+      },
+    ])
+    expect(editorRequests()).toEqual([])
+    expect(router.replace).not.toHaveBeenCalled()
+  })
+
+  it('rejects invalid selections and obsolete bridge tokens before creating anything', () => {
+    createFromHost(selectionRequest, 'obsolete')
+    createFromHost({ ...selectionRequest, selection: { ...selectionRequest.selection, text: '' } })
+    expect(creation.create).not.toHaveBeenCalled()
+    expect(messages.filter((message) => message.type === 'chatCreated')).toMatchObject([
+      { payload: { requestId: selectionRequest.requestId, error: expect.any(String) } },
+    ])
+  })
+
+  it('returns creation failures for the host to display instead of silently losing the command', async () => {
+    creation.create.mockRejectedValueOnce(new Error('Project was removed'))
+    await act(async () => createFromHost())
+    expect(messages.at(-1)).toMatchObject({
+      type: 'chatCreated',
+      payload: { requestId: selectionRequest.requestId, error: 'Project was removed' },
+    })
+  })
 })
 
 afterEach(() => {
