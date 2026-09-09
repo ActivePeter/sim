@@ -1,5 +1,6 @@
 /** @vitest-environment jsdom */
 import { act, type ComponentProps } from 'react'
+import type { ChipSelectProps } from '@sim/emcn'
 import { createRoot, type Root } from 'react-dom/client'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import type { VibeVscodeHostContext, VscodeHost } from '@/lib/api/contracts/vscode-agents'
@@ -40,18 +41,10 @@ vi.mock('@sim/emcn', () => ({
       {children}
     </button>
   ),
-  ChipSelect: ({
-    value,
-    options,
-    onChange,
-  }: {
-    value: string
-    options: { value: string; label: string }[]
-    onChange(value: string): void
-  }) => (
-    <select value={value} onChange={(event) => onChange(event.target.value)}>
+  ChipSelect: ({ value, options = [], onChange }: ChipSelectProps) => (
+    <select value={value} onChange={(event) => onChange?.(event.target.value)}>
       {options.map((item) => (
-        <option key={item.value} value={item.value}>
+        <option key={item.value} value={item.value} title={item.tooltip}>
           {item.label}
         </option>
       ))}
@@ -146,6 +139,32 @@ describe('project Agent launch intent', () => {
     expect(
       Array.from(container.querySelectorAll('option'), (option) => option.textContent)
     ).toEqual(['A · Workspace', 'B · Workspace', 'C · Other Workspace'])
+  })
+
+  it.each([true, false])('exposes catalog paths for each project (compact=%s)', (compact) => {
+    act(() => root.render(<ProjectLauncher compact={compact} />))
+    expect(Array.from(container.querySelectorAll('option'), (option) => option.title)).toEqual(
+      compact
+        ? ['file:///project-a', 'file:///project-b']
+        : ['file:///project-a', 'file:///project-b', 'file:///project-c']
+    )
+  })
+
+  it('distinguishes same-named projects without losing remote location information', () => {
+    mocks.host!.catalog.physicalWorkspace.folders = [
+      { name: 'repo', uri: 'vscode-remote://ssh-remote+runner/worktrees/repo-a', index: 0 },
+      { name: 'repo', uri: 'vscode-remote://ssh-remote+runner/worktrees/repo-b', index: 1 },
+    ]
+    act(() => root.render(<ProjectLauncher compact />))
+    expect(
+      Array.from(container.querySelectorAll('option'), (option) => ({
+        label: option.textContent,
+        tooltip: option.title,
+      }))
+    ).toEqual([
+      { label: 'repo', tooltip: 'vscode-remote://ssh-remote+runner/worktrees/repo-a' },
+      { label: 'repo', tooltip: 'vscode-remote://ssh-remote+runner/worktrees/repo-b' },
+    ])
   })
 
   it('does not expose cached projects before the current host is resolved', () => {

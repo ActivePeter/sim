@@ -504,9 +504,13 @@ function getTooltipPosition(
  * Value for the `translate` CSS property. Kept off the `transform` property so the
  * velocity flourish (`scale` + `transform: skew()`) can stay out of the transition
  * list while the tooltip's position still eases toward the cursor.
+ * Viewport bounds also keep the bubble readable in narrow embedded sidebars,
+ * where neither side of the pointer may have enough room for its full width.
  */
 function getTooltipTranslate(state: FloatingTooltipState, offset: number): string {
-  const x = state.alignX === 'left' ? `${state.x + offset}px` : `calc(${state.x - offset}px - 100%)`
+  const preferredX =
+    state.alignX === 'left' ? `${state.x + offset}px` : `calc(${state.x - offset}px - 100%)`
+  const x = `clamp(${EDGE_GUTTER}px, ${preferredX}, calc(100vw - 100% - ${EDGE_GUTTER}px))`
   const y =
     state.alignY === 'below' ? `${state.y + offset}px` : `calc(${state.y - offset}px - 100%)`
 

@@ -145,6 +145,7 @@ export function ProjectLauncher({
           value: item.key,
           label:
             item.project.name + (compact ? '' : ` · ${item.host.catalog.physicalWorkspace.name}`),
+          tooltip: item.project.uri,
         }))}
       />
       {active && (
