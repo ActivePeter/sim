@@ -7,6 +7,7 @@ import type { VibeVscodeHostContext, VscodeHost } from '@/lib/api/contracts/vsco
 const mocks = vi.hoisted(() => ({
   create: vi.fn(),
   push: vi.fn(),
+  openEditor: vi.fn(),
   refetch: vi.fn(),
   context: undefined as VibeVscodeHostContext | undefined,
   host: undefined as VscodeHost | undefined,
@@ -57,6 +58,9 @@ vi.mock('@sim/emcn', () => ({
     </select>
   ),
   OverflowText: ({ label }: { label: string }) => <span>{label}</span>,
+  Popover: ({ children }: ComponentProps<'div'>) => <div>{children}</div>,
+  PopoverTrigger: ({ children }: ComponentProps<'div'>) => <div>{children}</div>,
+  PopoverContent: ({ children }: ComponentProps<'div'>) => <div>{children}</div>,
 }))
 
 import { ProjectLauncher } from '@/app/workspace/[workspaceId]/agents/components/project-launcher'
@@ -64,8 +68,8 @@ import { ProjectLauncher } from '@/app/workspace/[workspaceId]/agents/components
 let root: Root
 let container: HTMLDivElement
 function createButton() {
-  return Array.from(container.querySelectorAll('button')).find((button) =>
-    button.textContent?.includes('新建项目')
+  return Array.from(container.querySelectorAll('button')).find(
+    (button) => button.textContent === '新建项目 Agent 会话'
   )!
 }
 function deferred<T>() {
@@ -78,6 +82,7 @@ function deferred<T>() {
 beforeEach(() => {
   ;(globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true
   vi.clearAllMocks()
+  window.vibeVscode = undefined
   mocks.host = {
     id: 'host-1',
     revision: 1,
@@ -126,6 +131,7 @@ beforeEach(() => {
 afterEach(() => {
   act(() => root.unmount())
   container.remove()
+  window.vibeVscode = undefined
 })
 
 describe('project Agent launch intent', () => {
@@ -168,6 +174,36 @@ describe('project Agent launch intent', () => {
     expect(mocks.push).toHaveBeenCalledWith(
       '/workspace/workspace-1/chat/native-chat?_vscodeSurface=sidebar'
     )
+  })
+
+  it('opens the created native session in the VS Code editor, not in the navigation sidebar', async () => {
+    window.vibeVscode = {
+      getSurface: () => 'sidebar',
+      getContext: () => mocks.context,
+      openEditor: mocks.openEditor,
+      openMonitor: vi.fn(),
+      openFile: vi.fn(),
+      openDiff: vi.fn(),
+      openTerminal: vi.fn(),
+      openExternal: vi.fn(),
+    }
+    mocks.create.mockResolvedValueOnce({ id: 'native-chat', workspaceId: 'workspace-1' })
+    await act(async () => createButton().click())
+    expect(mocks.openEditor).toHaveBeenCalledExactlyOnceWith(
+      '/workspace/workspace-1/chat/native-chat'
+    )
+    expect(mocks.push).not.toHaveBeenCalled()
+  })
+
+  it('selects a sidebar project without navigating the current chat', async () => {
+    const select = container.querySelector('select')!
+    act(() => {
+      select.value = 'host-1:file:///project-b'
+      select.dispatchEvent(new Event('change', { bubbles: true }))
+    })
+    mocks.create.mockResolvedValueOnce({ id: 'project-b-chat', workspaceId: 'workspace-1' })
+    await act(async () => createButton().click())
+    expect(mocks.create.mock.calls[0][0].projectUri).toBe('file:///project-b')
   })
 
   it('does not navigate back to a stale project after selection changes while creating', async () => {

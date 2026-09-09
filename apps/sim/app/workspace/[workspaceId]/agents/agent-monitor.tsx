@@ -192,7 +192,17 @@ export function AgentMonitor() {
                 </td>
                 <td className='p-3'>
                   <div className='flex items-center gap-1'>
-                    <ChipLink href={`/workspace/${session.workspaceId}/chat/${session.id}`}>
+                    <ChipLink
+                      href={`/workspace/${session.workspaceId}/chat/${session.id}`}
+                      onClick={(event) => {
+                        if (window.vibeVscode) {
+                          event.preventDefault()
+                          window.vibeVscode.openEditor(
+                            `/workspace/${session.workspaceId}/chat/${session.id}`
+                          )
+                        }
+                      }}
+                    >
                       打开会话
                     </ChipLink>
                     {session.activeStreamId && (

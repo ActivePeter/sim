@@ -3,7 +3,8 @@
 Project agents use native `copilot_chats`, `copilot_messages`, `copilot_runs`, Home, `useChat`,
 stream envelopes, replay outbox, Stop and terminal finalization. There is no second
 message store or forked chat component. A project agent's native chat ID is the same
-in the VS Code sidebar, Sim's chat list and `/workspace/<workspaceId>/agents`.
+in the VS Code editor, Sim's original sidebar chat list and
+`/workspace/<workspaceId>/agents`.
 
 ## Data and lifecycle
 
@@ -22,11 +23,20 @@ chat. Browser input never selects a runtime thread or filesystem working directo
 
 The mounted iframe bridge owns sidebar/editor presentation identity. Route query
 state is only its initial projection: native Next router transitions must not turn
-a sidebar chat into the full application shell. Both workspace chrome and Home
-read the same bridge surface, and project launch passes that surface into navigation.
-Native chat-status subscription belongs to this shared workspace chrome, not to its
-optional large navigation sidebar, so all embedded surfaces receive completion and
-cross-view transcript invalidations.
+an embedded surface into the standalone application shell. Workspace chrome reuses
+the original `Sidebar` for navigation and renders only route content in VS Code
+editors. The sidebar's project launcher stays in a compact popover, and successful
+creation asks the host to open the native chat. Its transient project selection
+does not navigate or reload an existing chat. Native chat-status subscription
+belongs to the shared workspace chrome, not to its optional navigation sidebar,
+so every embedded surface receives completion and cross-view transcript invalidations.
+
+The bridge publishes committed navigation separately from passive restoration and
+query updates. Internal resource new-tab/window actions use the host editor
+capability; external documentation, OAuth windows and downloads remain browser
+actions. The host owns tab identity and keeps the monitor separate from chat and
+workflow content. Opening a monitored chat therefore leaves the monitor route and
+filters intact; there is no default full-screen application takeover.
 
 The native per-chat stream lock claims a turn; its `copilot_runs` replay identity,
 chat marker and user message commit in one transaction. A failed run registration

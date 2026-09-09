@@ -134,7 +134,11 @@ function isSafeNavigationPath(value: unknown): value is string {
 
 function toSameOriginNavigationPath(value: string): string | null {
   const url = new URL(value, window.location.href)
-  if (url.origin !== window.location.origin || !isSafeNavigationPath(url.pathname)) return null
+  if (
+    url.origin !== window.location.origin ||
+    !/^\/(?:workspace(?:\/|$)|agents(?:\/|$))/.test(url.pathname)
+  )
+    return null
   return publicVibeVscodePath(url)
 }
 
@@ -155,10 +159,10 @@ export function VibeVscodeBridge() {
     const postToHost = (type: string, payload?: Record<string, unknown>) => {
       window.parent.postMessage({ source: SIM_SOURCE, token, type, payload }, hostOrigin)
     }
-    const publishRoute = () => {
+    const publishRoute = (userInitiated = false) => {
       postToHost('routeChanged', {
         path: publicVibeVscodePath(new URL(window.location.href)),
-        userInitiated: Date.now() <= userNavigationDeadline,
+        userInitiated,
       })
     }
     const preserveSurface = (url: string | URL | null | undefined) => {
@@ -167,21 +171,48 @@ export function VibeVscodeBridge() {
       if (target.origin !== window.location.origin) return url
       return withVibeVscodeSurface(`${target.pathname}${target.search}${target.hash}`, surface)
     }
-    let userNavigationDeadline = 0
     const clickListener = (event: MouseEvent) => {
       if (event.button !== 0) return
-      if (surface === 'sidebar') userNavigationDeadline = Date.now() + 1000
       if (event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return
       const target = event.target
       if (!(target instanceof Element)) return
+      if (target.closest('button, [role="button"]')) return
       const anchor = target.closest<HTMLAnchorElement>('a[href]')
-      if (!anchor || anchor.target === '_blank' || anchor.hasAttribute('download')) return
+      if (
+        !anchor ||
+        (anchor.target && anchor.target !== '_self') ||
+        anchor.hasAttribute('download')
+      )
+        return
       const path = toSameOriginNavigationPath(anchor.href)
       if (!path) return
 
+      /** Re-selecting the current row must also reveal a closed/background editor. */
+      if (surface === 'sidebar' && path === publicVibeVscodePath(new URL(window.location.href))) {
+        postToHost('openEditor', { path })
+      }
       const embeddedHref = new URL(withVibeVscodeSurface(path, surface), window.location.origin)
       embeddedHref.hash = `${VIBE_VSCODE_EMBED_HASH_PREFIX.slice(1)}${encodeURIComponent(token)}`
       anchor.href = embeddedHref.toString()
+    }
+    /** Preserve native range selection, but keep new-tab/window resource actions in VS Code. */
+    const newWindowListener = (event: MouseEvent) => {
+      if (event.defaultPrevented || event.altKey || (event.button !== 0 && event.button !== 1))
+        return
+      const target = event.target
+      if (!(target instanceof Element) || target.closest('button, [role="button"]')) return
+      const anchor = target.closest<HTMLAnchorElement>('a[href]')
+      if (!anchor || anchor.hasAttribute('download')) return
+      const opensWindow =
+        event.button === 1 ||
+        event.ctrlKey ||
+        event.metaKey ||
+        event.shiftKey ||
+        (anchor.target && anchor.target !== '_self')
+      const path = opensWindow ? toSameOriginNavigationPath(anchor.href) : null
+      if (!path) return
+      event.preventDefault()
+      postToHost('openEditor', { path })
     }
     const messageListener = (event: MessageEvent<unknown>) => {
       if (event.source !== window.parent || !isHostBridgeMessage(event.data, token)) return
@@ -207,14 +238,27 @@ export function VibeVscodeBridge() {
 
     const originalPushState = window.history.pushState.bind(window.history)
     const originalReplaceState = window.history.replaceState.bind(window.history)
+    const originalOpen = window.open.bind(window)
     window.history.pushState = (...args) => {
+      const previousPathname = window.location.pathname
       originalPushState(args[0], args[1], preserveSurface(args[2]))
-      publishRoute()
+      /** Navigation commits carry intent, even when a slow server took longer than a click timer. */
+      publishRoute(previousPathname !== window.location.pathname)
     }
     window.history.replaceState = (...args) => {
       originalReplaceState(args[0], args[1], preserveSurface(args[2]))
       publishRoute()
     }
+    window.open = (url, target, features) => {
+      const path = url ? toSameOriginNavigationPath(url.toString()) : null
+      if (path) {
+        postToHost('openEditor', { path })
+        return null
+      }
+      return originalOpen(url, target, features)
+    }
+    const popStateListener = () => publishRoute(true)
+    const hashChangeListener = () => publishRoute()
 
     window.vibeVscode = {
       getContext: () => (hostContext ? structuredClone(hostContext) : undefined),
@@ -227,14 +271,20 @@ export function VibeVscodeBridge() {
       openDiff: (originalUri, modifiedUri, title) =>
         postToHost('openDiff', { originalUri, modifiedUri, title }),
       openTerminal: (uri) => postToHost('openTerminal', { uri }),
-      openExternal: (uri) => postToHost('openExternal', { uri }),
+      openExternal: (uri) => {
+        const path = toSameOriginNavigationPath(uri)
+        if (path) postToHost('openEditor', { path })
+        else postToHost('openExternal', { uri })
+      },
     }
     window.dispatchEvent(new Event('vibe-vscode-context'))
 
     window.addEventListener('message', messageListener)
     window.addEventListener('click', clickListener, true)
-    window.addEventListener('popstate', publishRoute)
-    window.addEventListener('hashchange', publishRoute)
+    window.addEventListener('click', newWindowListener)
+    window.addEventListener('auxclick', newWindowListener)
+    window.addEventListener('popstate', popStateListener)
+    window.addEventListener('hashchange', hashChangeListener)
     postToHost('ready', {
       path: window.location.pathname,
       capabilities: [
@@ -251,10 +301,13 @@ export function VibeVscodeBridge() {
     return () => {
       window.removeEventListener('message', messageListener)
       window.removeEventListener('click', clickListener, true)
-      window.removeEventListener('popstate', publishRoute)
-      window.removeEventListener('hashchange', publishRoute)
+      window.removeEventListener('click', newWindowListener)
+      window.removeEventListener('auxclick', newWindowListener)
+      window.removeEventListener('popstate', popStateListener)
+      window.removeEventListener('hashchange', hashChangeListener)
       window.history.pushState = originalPushState
       window.history.replaceState = originalReplaceState
+      window.open = originalOpen
       window.vibeVscode = undefined
       window.dispatchEvent(new Event('vibe-vscode-context'))
     }

@@ -1,7 +1,7 @@
 'use client'
 
-import { useCallback, useEffect, useMemo, useRef } from 'react'
-import { Chip, ChipSelect, OverflowText } from '@sim/emcn'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { Chip, ChipSelect, OverflowText, Popover, PopoverContent, PopoverTrigger } from '@sim/emcn'
 import { Plus } from '@sim/emcn/icons'
 import { generateId } from '@sim/utils/id'
 import { useParams, useRouter } from 'next/navigation'
@@ -18,6 +18,8 @@ interface ProjectLauncherProps {
 }
 
 export function ProjectLauncher({ compact = false }: ProjectLauncherProps) {
+  const [open, setOpen] = useState(false)
+  const [sidebarSelection, setSidebarSelection] = useState<string | null>(null)
   const requests = useRef(new Map<string, string>())
   const creating = useRef(false)
   const mounted = useRef(true)
@@ -30,10 +32,11 @@ export function ProjectLauncher({ compact = false }: ProjectLauncherProps) {
   const router = useRouter()
   const surface = useVscodeSurface()
   const { workspaceId } = useParams<{ workspaceId: string }>()
-  const [selection, setSelection] = useQueryState(
+  const [querySelection, setQuerySelection] = useQueryState(
     projectSelectionParam.key,
     projectSelectionParam.parser
   )
+  const selection = compact ? sidebarSelection : querySelection
   const hostsQuery = useVscodeHosts(workspaceId)
   const { mutateAsync, isPending, error } = useCreateProjectSession()
   const context = useVscodeHostContext()
@@ -89,9 +92,13 @@ export function ProjectLauncher({ compact = false }: ProjectLauncherProps) {
       })
       requests.current.delete(identity)
       if (mounted.current && latestIdentity.current === identity) {
-        router.push(
-          withVibeVscodeSurface(`/workspace/${result.workspaceId}/chat/${result.id}`, surface)
-        )
+        const path = `/workspace/${result.workspaceId}/chat/${result.id}`
+        setOpen(false)
+        if (window.vibeVscode) {
+          window.vibeVscode.openEditor(path)
+        } else {
+          router.push(withVibeVscodeSurface(path, surface))
+        }
       }
     } catch {
       // Keep the request ID after an unknown outcome: retry opens the same native chat.
@@ -110,7 +117,7 @@ export function ProjectLauncher({ compact = false }: ProjectLauncherProps) {
     surface,
   ])
 
-  return (
+  const launcher = (
     <section aria-label='项目 Agent' className='flex min-w-0 flex-col gap-2'>
       <div className='flex items-center justify-between gap-2'>
         <span className='text-[var(--text-muted)] text-caption'>项目 Agent · Sim</span>
@@ -125,7 +132,10 @@ export function ProjectLauncher({ compact = false }: ProjectLauncherProps) {
         fullWidth
         dropdownWidth='trigger'
         value={active?.key ?? ''}
-        onChange={(value) => void setSelection(value)}
+        onChange={(value) => {
+          if (compact) setSidebarSelection(value)
+          else void setQuerySelection(value)
+        }}
         placeholder={hostsQuery.isPending ? '正在读取项目…' : '尚无 VS Code 项目'}
         options={projects.map((item) => ({
           value: item.key,
@@ -173,5 +183,20 @@ export function ProjectLauncher({ compact = false }: ProjectLauncherProps) {
         </p>
       )}
     </section>
+  )
+
+  if (!compact) return launcher
+
+  return (
+    <Popover open={open} onOpenChange={setOpen}>
+      <PopoverTrigger asChild>
+        <Chip leftIcon={Plus} fullWidth active={open}>
+          新建项目 Agent
+        </Chip>
+      </PopoverTrigger>
+      <PopoverContent align='start' side='bottom' className='w-[280px] max-w-[calc(100vw-16px)]'>
+        <div className='p-2'>{launcher}</div>
+      </PopoverContent>
+    </Popover>
   )
 }

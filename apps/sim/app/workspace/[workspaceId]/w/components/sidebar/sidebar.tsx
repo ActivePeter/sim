@@ -43,6 +43,7 @@ import { isMacPlatform } from '@/lib/core/utils/platform'
 import { buildFolderTree, getFolderPathNames } from '@/lib/folders/tree'
 import { useI18n } from '@/lib/i18n'
 import { captureEvent } from '@/lib/posthog/client'
+import { ProjectLauncher } from '@/app/workspace/[workspaceId]/agents/components/project-launcher'
 import { CONNECT_MODE } from '@/app/workspace/[workspaceId]/integrations/connect-route'
 import { useRegisterGlobalCommands } from '@/app/workspace/[workspaceId]/providers/global-commands-provider'
 import { useWorkspaceHostContext } from '@/app/workspace/[workspaceId]/providers/workspace-host-provider'
@@ -803,7 +804,7 @@ export const Sidebar = memo(function Sidebar({
         },
         {
           id: 'agent-monitor',
-          label: 'Agent 工作台 / 全局监控',
+          label: '全局 Agent 监控',
           icon: Home,
           href: `/workspace/${workspaceId}/agents`,
           hidden: !isChatEnabled,
@@ -1509,6 +1510,7 @@ export const Sidebar = memo(function Sidebar({
                       onContextMenu={item.href ? handleNavItemContextMenu : undefined}
                     />
                   ))}
+                  {fixedExpanded && isChatEnabled && <ProjectLauncher compact />}
                 </div>
 
                 <div

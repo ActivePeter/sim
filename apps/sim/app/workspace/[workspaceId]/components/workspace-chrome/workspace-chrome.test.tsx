@@ -24,12 +24,6 @@ vi.mock('@/hooks/use-mothership-chat-events', () => ({
   },
 }))
 
-vi.mock('@/app/workspace/[workspaceId]/agents/components/agent-sidebar', () => ({
-  AgentSidebar: ({ children }: { children: React.ReactNode }) => (
-    <aside data-testid='agent-sidebar'>{children}</aside>
-  ),
-}))
-
 vi.mock('@/app/workspace/[workspaceId]/w/components/sidebar/sidebar', () => ({
   Sidebar: ({ fixedExpanded, isPeeking }: { fixedExpanded?: boolean; isPeeking?: boolean }) => (
     <div
@@ -59,7 +53,7 @@ afterEach(() => {
 })
 
 describe('WorkspaceChrome host surfaces', () => {
-  it('delegates native chat to the project sidebar without mounting the full Sim navigation', () => {
+  it('reuses the original Sim sidebar without rendering chat or canvas content inside it', () => {
     act(() => {
       root.render(
         <WorkspaceChrome>
@@ -68,15 +62,28 @@ describe('WorkspaceChrome host surfaces', () => {
       )
     })
 
-    const sidebar = container.querySelector<HTMLElement>('[data-testid="agent-sidebar"]')
+    const sidebar = container.querySelector<HTMLElement>('[data-testid="sidebar"]')
     const host = sidebar?.parentElement
 
     expect(sidebar).not.toBeNull()
-    expect(container.querySelector('[data-testid="sidebar"]')).toBeNull()
+    expect(sidebar?.dataset.fixedExpanded).toBe('true')
     expect(host?.classList).toContain('flex')
     expect(host?.classList).toContain('w-full')
     expect(host?.classList).toContain('overflow-hidden')
-    expect(sidebar?.querySelector('[data-testid="canvas"]')).not.toBeNull()
+    expect(container.querySelector('[data-testid="canvas"]')).toBeNull()
+  })
+
+  it('renders content in the VS Code editor without duplicating the Sim navigation', () => {
+    navigation.searchParams = new URLSearchParams('_vscodeSurface=editor')
+    act(() => {
+      root.render(
+        <WorkspaceChrome>
+          <main data-testid='content'>chat or monitor</main>
+        </WorkspaceChrome>
+      )
+    })
+    expect(container.querySelector('[data-testid="sidebar"]')).toBeNull()
+    expect(container.querySelectorAll('[data-testid="content"]')).toHaveLength(1)
   })
 
   it('keeps one native chat event subscription when embedded presentation changes', () => {
