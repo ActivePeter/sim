@@ -275,6 +275,22 @@ function ModalBodyLockReleaser() {
  */
 const InsideModalContext = React.createContext(false)
 
+const ModalLayoutContext = React.createContext<'content' | 'viewport'>('content')
+
+export interface ModalLayoutProviderProps {
+  center: 'content' | 'viewport'
+  children: React.ReactNode
+}
+
+/**
+ * The shell owns the area in which portaled modals center. Embedded surfaces
+ * have no adjacent in-document sidebar; viewport alignment avoids applying
+ * standalone sidebar offsets without changing persisted sidebar geometry.
+ */
+export function ModalLayoutProvider({ center, children }: ModalLayoutProviderProps) {
+  return <ModalLayoutContext.Provider value={center}>{children}</ModalLayoutContext.Provider>
+}
+
 /**
  * Broadcasts {@link ModalContentProps.dismissDisabled} to every dismiss control
  * in the subtree, so a modal states the interlock once on the content rather
@@ -439,9 +455,9 @@ export interface ModalContentProps
    * - xl: max 800px (complex editors)
    * - full: max 1200px (dashboards, large content)
    *
-   * Sizes up to `xl` center within the content area (offset for the sidebar,
-   * and the panel on workflow pages). `full` modals span most of the viewport,
-   * so they center against the full viewport instead.
+   * Sizes up to `xl` default to the content area (offset for the sidebar,
+   * and the panel on workflow pages). A shell can select viewport alignment
+   * with `ModalLayoutProvider`; `full` always centers against the viewport.
    * @default 'md'
    */
   size?: ModalSize
@@ -505,6 +521,7 @@ const ModalContent = React.forwardRef<
   ) => {
     const pathname = usePathname()
     const isWorkflowPage = pathname?.includes('/w/') ?? false
+    const modalCenter = React.useContext(ModalLayoutContext)
     // Ready-by-default preserves the exact pre-desktop/web render path. A
     // claimed native listener flips this false in the gate's layout effect,
     // still before the browser can paint the opening surface.
@@ -573,7 +590,7 @@ const ModalContent = React.forwardRef<
           )}
           data-native-surface-modal-content-layer=''
           style={{
-            ...(size === 'full'
+            ...(size === 'full' || modalCenter === 'viewport'
               ? {}
               : {
                   paddingLeft: isWorkflowPage

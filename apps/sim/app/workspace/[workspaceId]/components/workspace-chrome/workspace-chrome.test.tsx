@@ -2,6 +2,7 @@
  * @vitest-environment jsdom
  */
 import { act, useEffect } from 'react'
+import { Modal, ModalContent } from '@sim/emcn'
 import { createRoot, type Root } from 'react-dom/client'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { WorkspaceChrome } from '@/app/workspace/[workspaceId]/components/workspace-chrome/workspace-chrome'
@@ -93,5 +94,25 @@ describe('WorkspaceChrome host surfaces', () => {
     }
     expect(chatEvents.subscribe).toHaveBeenCalledExactlyOnceWith('workspace-1')
     expect(chatEvents.unsubscribe).not.toHaveBeenCalled()
+  })
+
+  it('centers native modal portals inside the embedded viewport without a second sidebar offset', () => {
+    navigation.searchParams = new URLSearchParams('_vscodeSurface=editor')
+    act(() => {
+      root.render(
+        <WorkspaceChrome>
+          <Modal open>
+            <ModalContent srTitle='Embedded native dialog'>
+              <button type='button'>Confirm</button>
+            </ModalContent>
+          </Modal>
+        </WorkspaceChrome>
+      )
+    })
+
+    const layer = document.querySelector<HTMLElement>('[data-native-surface-modal-content-layer]')
+    expect(layer).not.toBeNull()
+    expect(layer?.style.paddingLeft).toBe('')
+    expect(document.querySelector('[role="dialog"]')?.textContent).toContain('Confirm')
   })
 })

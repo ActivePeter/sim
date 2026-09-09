@@ -1,7 +1,7 @@
 'use client'
 
 import { useEffect, useLayoutEffect, useRef, useState } from 'react'
-import { cn } from '@sim/emcn'
+import { cn, ModalLayoutProvider } from '@sim/emcn'
 import { ArrowLeft, ArrowRight, PanelLeft } from '@sim/emcn/icons'
 import { useParams, usePathname } from 'next/navigation'
 import { getDesktopBridge } from '@/lib/desktop'
@@ -186,17 +186,18 @@ export function WorkspaceChrome({ children, initialSidebarCollapsed }: Workspace
   useMothershipChatEvents(workspaceId)
   const surface = useVscodeSurface()
 
-  if (surface === 'sidebar') {
+  if (surface === 'sidebar' || surface === 'editor') {
     return (
-      <div className='flex min-h-0 w-full flex-1 overflow-hidden bg-[var(--surface-1)]'>
-        <Sidebar isCollapsed={false} fixedExpanded />
-      </div>
-    )
-  }
-
-  if (surface === 'editor') {
-    return (
-      <div className='flex min-h-0 w-full flex-1 overflow-hidden bg-[var(--bg)]'>{children}</div>
+      <ModalLayoutProvider center='viewport'>
+        <div
+          className={cn(
+            'flex min-h-0 w-full flex-1 overflow-hidden',
+            surface === 'sidebar' ? 'bg-[var(--surface-1)]' : 'bg-[var(--bg)]'
+          )}
+        >
+          {surface === 'sidebar' ? <Sidebar isCollapsed={false} fixedExpanded /> : children}
+        </div>
+      </ModalLayoutProvider>
     )
   }
 
