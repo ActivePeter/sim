@@ -2,7 +2,11 @@ import { z } from 'zod'
 import { OrchestrationError } from '@/lib/core/orchestration/types'
 
 export const projectAgentIdSchema = z.enum(['local-codex', 'local-claude'])
-export const projectAgentPermissionModeSchema = z.enum(['read-only', 'workspace-write'])
+export const projectAgentPermissionModeSchema = z.enum([
+  'read-only',
+  'workspace-write',
+  'danger-full-access',
+])
 /** Runners own the effort vocabulary; catalog membership is checked before saving or executing. */
 export const projectAgentEffortSchema = z
   .string()
@@ -100,7 +104,7 @@ export type ProjectAgentModelCatalog = z.infer<typeof projectAgentModelCatalogSc
 
 export const projectAgentPermissionPolicySchema = z
   .object({
-    defaultMode: projectAgentPermissionModeSchema,
+    defaultMode: projectAgentPermissionModeSchema.exclude(['danger-full-access']),
     description: z.string().min(1).max(500),
     modes: z
       .array(
@@ -111,7 +115,7 @@ export const projectAgentPermissionPolicySchema = z
         })
       )
       .min(1)
-      .max(2),
+      .max(3),
   })
   .refine(
     (policy) =>

@@ -1,5 +1,6 @@
 /** @vitest-environment jsdom */
 import { act, type ComponentProps, type PropsWithChildren, type ReactNode } from 'react'
+import type { ChipConfirmModalProps } from '@sim/emcn'
 import { createRoot, type Root } from 'react-dom/client'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
@@ -44,6 +45,27 @@ vi.mock('@sim/emcn', () => {
     ),
     ChipModal: ({ open, children }: PropsWithChildren<{ open: boolean }>) =>
       open ? <div role='dialog'>{children}</div> : null,
+    ChipConfirmModal: ({
+      open,
+      title,
+      text,
+      defaultAction,
+      dismissLabel,
+      onOpenChange,
+      confirm,
+    }: ChipConfirmModalProps) =>
+      open ? (
+        <div role='dialog' data-default-action={defaultAction}>
+          {title}
+          {typeof text === 'string' ? <p>{text}</p> : null}
+          <button onClick={() => onOpenChange(false)} disabled={confirm.pending}>
+            {dismissLabel}
+          </button>
+          <button onClick={confirm.onClick} disabled={confirm.disabled || confirm.pending}>
+            {confirm.label}
+          </button>
+        </div>
+      ) : null,
     ChipModalHeader: Wrap,
     ChipModalBody: Wrap,
     ChipModalError: Wrap,
@@ -188,6 +210,19 @@ const data: NonNullable<Props['data']> = {
       },
     },
   ],
+}
+const unrestrictedData: NonNullable<Props['data']> = {
+  ...data,
+  agents: data.agents.map((agent) => ({
+    ...agent,
+    permissions: {
+      ...agent.permissions,
+      modes: [
+        ...agent.permissions.modes,
+        { id: 'danger-full-access', label: '不限制', description: 'No execution sandbox' },
+      ],
+    },
+  })),
 }
 let root: Root
 let container: HTMLDivElement
@@ -527,6 +562,199 @@ describe('native composer Agent controls', () => {
     expect(dropdown('切换执行权限').value).toBe('__deployment_default__')
     expect(container.textContent).toContain('Permission save failed')
   })
+  it('offers unrestricted only from the server catalog and keeps the saved permission when cancelled', async () => {
+    render({ data: unrestrictedData, hasMessages: true })
+    expect(optionValues('切换执行权限')).toEqual([
+      '__deployment_default__',
+      'read-only',
+      'workspace-write',
+      'danger-full-access',
+    ])
+    await act(async () => select('切换执行权限', 'danger-full-access'))
+    expect(props.onSave).not.toHaveBeenCalled()
+    expect(dropdown('切换执行权限').value).toBe('__deployment_default__')
+    expect(container.textContent).toContain('启用“不限制”权限？')
+    expect(container.textContent).toContain('项目外文件并执行命令')
+    expect(container.textContent).toContain('不会修改其他会话或部署默认')
+    expect(container.querySelector('[role="dialog"]')?.getAttribute('data-default-action')).toBe(
+      'dismiss'
+    )
+    act(() => button('保持当前权限').click())
+    expect(container.querySelector('[role="dialog"]')).toBeNull()
+    expect(dropdown('切换执行权限').value).toBe('__deployment_default__')
+    expect(props.onSave).not.toHaveBeenCalled()
+  })
+  it('saves an explicitly confirmed inline permission without changing the runtime or model', async () => {
+    render({
+      data: { ...unrestrictedData, config: { ...data.config, revision: 5 } },
+      hasMessages: true,
+    })
+    await act(async () => select('切换执行权限', 'danger-full-access'))
+    expect(props.onSave).not.toHaveBeenCalled()
+    await act(async () => button('确认启用不限制').click())
+    const { version: _version, revision: _revision, ...settings } = data.config
+    expect(props.onSave).toHaveBeenCalledExactlyOnceWith(
+      { ...settings, permissionMode: 'danger-full-access' },
+      5
+    )
+    expect(container.querySelector('[role="dialog"]')).toBeNull()
+    render({
+      data: {
+        ...unrestrictedData,
+        config: { ...data.config, permissionMode: 'danger-full-access', revision: 6 },
+      },
+    })
+    expect(dropdown('切换执行权限').value).toBe('danger-full-access')
+  })
+  it('preserves the configuration draft after dismissing confirmation and closes it only after a confirmed save', async () => {
+    render({ data: unrestrictedData })
+    act(() => button('项目 Agent 配置').click())
+    select('配置执行权限', 'danger-full-access')
+    type('会话指令', 'Keep my edited instructions')
+    await act(async () => button('保存配置').click())
+    expect(props.onSave).not.toHaveBeenCalled()
+    act(() => button('保持当前权限').click())
+    expect(dropdown('配置执行权限').value).toBe('danger-full-access')
+    expect(input('会话指令').value).toBe('Keep my edited instructions')
+    expect(dropdown('切换执行权限').value).toBe('__deployment_default__')
+    await act(async () => button('保存配置').click())
+    await act(async () => button('确认启用不限制').click())
+    expect(props.onSave).toHaveBeenCalledExactlyOnceWith(
+      expect.objectContaining({
+        permissionMode: 'danger-full-access',
+        instructions: 'Keep my edited instructions',
+      }),
+      0
+    )
+    expect(container.querySelector('[role="dialog"]')).toBeNull()
+  })
+  it.each(['inline', 'configuration'])(
+    'retains the initiating settings and revision across a background update while confirming: %s',
+    async (source) => {
+      render({ data: unrestrictedData })
+      if (source === 'configuration') {
+        act(() => button('项目 Agent 配置').click())
+        select('配置执行权限', 'danger-full-access')
+        await act(async () => button('保存配置').click())
+      } else {
+        await act(async () => select('切换执行权限', 'danger-full-access'))
+      }
+      render({
+        data: {
+          ...unrestrictedData,
+          config: {
+            ...data.config,
+            revision: 3,
+            model: 'different-model',
+            reasoningEffort: 'ultra',
+            permissionMode: 'read-only',
+          },
+        },
+        onSave: vi.fn().mockRejectedValue(new Error('Configuration changed')),
+      })
+      await act(async () => button('确认启用不限制').click())
+      const { version: _version, revision, ...settings } = data.config
+      expect(props.onSave).toHaveBeenCalledExactlyOnceWith(
+        { ...settings, permissionMode: 'danger-full-access' },
+        revision
+      )
+      expect(dropdown('切换执行权限').value).toBe('read-only')
+      expect(container.textContent).toContain('Configuration changed')
+      if (source === 'configuration') {
+        expect(dropdown('配置执行权限').value).toBe('danger-full-access')
+        expect(dropdown('模型').value).toBe('codex-model')
+      }
+    }
+  )
+  it.each(['deployment', 'workspace', 'runtime', 'saving'])(
+    'cannot confirm after the current permission or availability is withdrawn: %s',
+    async (reason) => {
+      render({ data: unrestrictedData })
+      await act(async () => select('切换执行权限', 'danger-full-access'))
+      if (reason === 'deployment') render({ data })
+      if (reason === 'workspace') {
+        permissions.canEdit = false
+        render()
+      }
+      if (reason === 'runtime') {
+        render({
+          data: {
+            ...unrestrictedData,
+            agents: unrestrictedData.agents.map((agent) => ({ ...agent, available: false })),
+          },
+        })
+      }
+      if (reason === 'saving') render({ saving: true })
+      expect(button('确认启用不限制').disabled).toBe(true)
+      await act(async () => button('确认启用不限制').click())
+      expect(props.onSave).not.toHaveBeenCalled()
+    }
+  )
+  it('does not reconfirm an unrestricted session when only its model changes', async () => {
+    render({
+      data: {
+        ...unrestrictedData,
+        config: { ...data.config, permissionMode: 'danger-full-access' },
+      },
+      hasMessages: true,
+    })
+    act(() => button('项目 Agent 配置').click())
+    select('模型', 'different-model')
+    await act(async () => button('保存配置').click())
+    expect(props.onSave).toHaveBeenCalledExactlyOnceWith(
+      expect.objectContaining({ model: 'different-model', permissionMode: 'danger-full-access' }),
+      0
+    )
+    expect(container.querySelector('[role="dialog"]')).toBeNull()
+  })
+  it.each(['inline', 'configuration'])(
+    'requires a new confirmation before moving unrestricted execution to another runtime: %s',
+    async (source) => {
+      render({
+        data: {
+          ...unrestrictedData,
+          config: { ...data.config, permissionMode: 'danger-full-access' },
+        },
+      })
+      if (source === 'configuration') {
+        act(() => button('项目 Agent 配置').click())
+        select('配置 Agent', 'local-claude')
+        await act(async () => button('保存配置').click())
+      } else {
+        await act(async () => select('切换项目 Agent', 'local-claude'))
+      }
+      expect(props.onSave).not.toHaveBeenCalled()
+      expect(container.textContent).toContain('Configured Claude 将不使用执行沙箱')
+      await act(async () => button('确认启用不限制').click())
+      expect(props.onSave).toHaveBeenCalledExactlyOnceWith(
+        {
+          agentId: 'local-claude',
+          model: null,
+          reasoningEffort: null,
+          permissionMode: 'danger-full-access',
+          instructions: 'Use Chinese.',
+        },
+        0
+      )
+    }
+  )
+  it.each([null, 'read-only', 'workspace-write'] as const)(
+    'does not require confirmation to narrow an unrestricted session: %s',
+    async (permissionMode) => {
+      render({
+        data: {
+          ...unrestrictedData,
+          config: { ...data.config, permissionMode: 'danger-full-access' },
+        },
+      })
+      await act(async () => select('切换执行权限', permissionMode ?? '__deployment_default__'))
+      expect(props.onSave).toHaveBeenCalledExactlyOnceWith(
+        expect.objectContaining({ permissionMode }),
+        0
+      )
+      expect(container.querySelector('[role="dialog"]')).toBeNull()
+    }
+  )
   it('keeps an explicit read-only choice when changing models or inheriting the runner model', async () => {
     render({ data: { ...data, config: { ...data.config, permissionMode: 'read-only' } } })
     act(() => button('项目 Agent 配置').click())
@@ -572,28 +800,35 @@ describe('native composer Agent controls', () => {
       0
     )
   })
-  it('requires explicit repair of a previously saved permission removed by the deployment', async () => {
-    render({
-      data: {
-        ...data,
-        config: { ...data.config, permissionMode: 'workspace-write' },
-        agents: data.agents.map((agent) => ({ ...agent, permissions: data.agents[1].permissions })),
-      },
-    })
-    expect(dropdown('切换执行权限').value).toBe('workspace-write')
-    expect(container.textContent).toContain('已保存的执行权限不被当前部署允许')
-    expect(props.onSave).not.toHaveBeenCalled()
-    act(() => button('项目 Agent 配置').click())
-    expect(button('保存配置').disabled).toBe(true)
-    expect(
-      dropdown('配置执行权限').querySelector<HTMLOptionElement>('option[value="workspace-write"]')!
-        .disabled
-    ).toBe(true)
-    select('配置执行权限', 'read-only')
-    await act(async () => button('保存配置').click())
-    expect(props.onSave).toHaveBeenCalledWith(
-      expect.objectContaining({ permissionMode: 'read-only' }),
-      0
-    )
-  })
+  it.each(['workspace-write', 'danger-full-access'] as const)(
+    'requires explicit repair of a previously saved permission removed by the deployment: %s',
+    async (permissionMode) => {
+      render({
+        data: {
+          ...data,
+          config: { ...data.config, permissionMode },
+          agents: data.agents.map((agent) => ({
+            ...agent,
+            permissions: data.agents[1].permissions,
+          })),
+        },
+      })
+      expect(dropdown('切换执行权限').value).toBe(permissionMode)
+      expect(container.textContent).toContain('已保存的执行权限不被当前部署允许')
+      expect(props.onSave).not.toHaveBeenCalled()
+      act(() => button('项目 Agent 配置').click())
+      expect(button('保存配置').disabled).toBe(true)
+      expect(
+        dropdown('配置执行权限').querySelector<HTMLOptionElement>(
+          `option[value="${permissionMode}"]`
+        )!.disabled
+      ).toBe(true)
+      select('配置执行权限', 'read-only')
+      await act(async () => button('保存配置').click())
+      expect(props.onSave).toHaveBeenCalledWith(
+        expect.objectContaining({ permissionMode: 'read-only' }),
+        0
+      )
+    }
+  )
 })

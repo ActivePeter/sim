@@ -127,6 +127,14 @@ Both fresh and resumed invocations receive the chosen mode; an explicit read-onl
 survives model changes. A profile removed by a later deployment stays visible but cannot
 be saved or executed until the user explicitly chooses an allowed replacement.
 
+Choosing `danger-full-access` ("不限制") requires a risk confirmation before saving,
+including when moving an unrestricted empty chat to a different runtime. The confirmation
+names the runtime and warns about project-external file access and command execution
+without sandboxing or individual approval. Dismissal leaves the saved configuration unchanged;
+confirming submits the captured settings and revision, never a newer tab's configuration.
+Changing models within an already unrestricted runtime does not prompt again, and narrowing
+permissions needs no confirmation. The server still authorizes every save and execution.
+
 `permissionMode: null` follows the deployment default. Legacy stored configurations without
 the field retain that behavior without a database migration. Configuration writes require
 the field, including an explicit `null` when desired: an older browser must reload instead
@@ -155,30 +163,48 @@ SIM_VSCODE_REMOTE_AUTHORITIES='["<browser-visible-vscode-host:port>"]'
 SIM_VSCODE_CODEX_BINARY='<absolute-codex-executable>'
 SIM_VSCODE_CODEX_HOME='<private-writable-codex-state-directory>'
 SIM_VSCODE_CODEX_SANDBOX=read-only
+SIM_VSCODE_ALLOW_UNRESTRICTED=false
 SIM_VSCODE_CLAUDE_BINARY='<absolute-claude-code-executable>'
 SIM_VSCODE_CLAUDE_HOME='<private-writable-claude-code-state-directory>'
 ```
 
-The runner defaults to `read-only`. An operator can explicitly select
-`workspace-write`; unrestricted execution is not supported. Use a dedicated writable
-Codex home with configured credentials and thread storage; do not reuse a running
-agent's mutable session database. Verify both an initial execution and `exec resume`
-before enabling it. Binary paths, credential homes and maximum permissions belong
+`SIM_VSCODE_CODEX_SANDBOX` accepts only `read-only` (the fallback) or `workspace-write`.
+It controls the Codex default and, without the separate opt-in, its permission ceiling.
+Claude Code defaults to read-only tools. Only an exact `SIM_VSCODE_ALLOW_UNRESTRICTED=true`
+adds the explicit "不限制" choice to both runtimes; Codex also offers `workspace-write`
+as an intermediate restriction. Enabling this flag does not change either runtime's default
+or any saved session. An unrestricted Codex deployment default is rejected even with this
+flag enabled. Removing the opt-in rejects saved unrestricted choices at execution rather
+than silently changing them.
+
+| Session profile | Codex | Claude Code |
+| --- | --- | --- |
+| `read-only` | `--sandbox read-only` | `dontAsk` with only Read/Grep/Glob |
+| `workspace-write` | `--sandbox workspace-write` | Not offered; the adapter has no equivalent project-write sandbox |
+| `danger-full-access` ("不限制") | `--sandbox danger-full-access` | `bypassPermissions`, default built-in tools and sandbox disabled |
+
+Codex always uses `approval_policy="never"`; Claude Code explicitly allows its bypass mode
+only for an unrestricted turn. "不限制" disables execution sandboxing and individual
+approval: the agent may read or write files outside the project and execute commands with
+the service account's permissions, including access to service-account-readable credentials.
+Enable it only for trusted users and tasks. There is no interactive permission-request bridge.
+
+Use a dedicated writable Codex home with configured credentials and thread storage; do not
+reuse a running agent's mutable session database. Verify both an initial execution and
+`exec resume` before enabling it. Binary paths, credential homes and deployment limits belong
 to this environment surface, never to a browser request or project catalog.
-Per-chat preferences can narrow this ceiling through the bounded settings described above.
 
 Claude Code uses its print/stream-json protocol and an exact persisted resume ID.
-The current adapter allows only Read/Grep/Glob, never shell or write tools. Hooks,
-project settings, MCP servers, Chrome and slash-command customization are disabled
-for this non-interactive adapter. It does not bypass permission checks. Configure a
-dedicated Claude Code credential/state directory; the process receives
-`CLAUDE_CONFIG_DIR`, not Sim's application-level Anthropic API key. A different
-permission mode or an interactive permission-request bridge is out of scope.
+Hooks, project settings, MCP servers, Chrome and slash-command customization remain disabled
+in every profile. Catalog discovery remains tool-free and non-persistent, independent of
+the opt-in or saved session profile. Configure a dedicated Claude Code credential/state
+directory; the process receives `CLAUDE_CONFIG_DIR`, not Sim's application-level Anthropic API key.
 
 Local `file:` project URIs are accepted only for a local physical workspace.
 `vscode-remote:` URIs must match the captured remote authority and an explicit
 environment mapping to this runner. Real paths must remain within an allowed root,
 including symlink resolution. Unknown remote machines are never treated as local.
+These checks admit the starting project; they do not confine an unrestricted turn's file access.
 The child receives a bounded environment, not Sim's database or application secrets.
 Redis-backed native stream ownership is required for sustained local turns.
 
@@ -213,7 +239,8 @@ remote/root policy, runtime arguments, native persistence and replay, browser
 disconnect, cancellation, lost ownership, failed finalization, monitor authority,
 configuration CAS, frozen turn settings, runtime locking, provider protocols,
 model-specific levels and defaults, bounded discovery and cache recovery,
-permission ceilings, legacy permission reads, explicit writes and resumed-run arguments,
-composer draft recovery and keyboard history precedence.
+permission ceilings and opt-in revocation, legacy permission reads, explicit writes and
+resumed-run arguments, risk confirmation and stale revisions, composer draft recovery
+and keyboard history precedence.
 Integration validation should use a dedicated test chat and a read-only prompt,
 not production workflows or the planning DAG.

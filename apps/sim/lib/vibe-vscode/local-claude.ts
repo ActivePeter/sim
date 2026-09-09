@@ -18,22 +18,24 @@ import {
   runLocalAgentProcess,
 } from '@/lib/vibe-vscode/local-agent-process'
 
-/** Claude's non-interactive adapter is read-only; browser settings cannot widen permissions. */
+/** Discovery stays tool-free; unrestricted turns require the same explicit deployment opt-in. */
 export function localClaudeArguments(
   settings: ProjectAgentSettings,
   threadId?: string,
   mode: 'turn' | 'catalog' = 'turn'
 ): string[] {
-  resolveLocalAgentPermission('local-claude', settings.permissionMode)
+  const unrestricted =
+    mode === 'turn' &&
+    resolveLocalAgentPermission('local-claude', settings.permissionMode) === 'danger-full-access'
   const args = [
     '--print',
     '--output-format',
     'stream-json',
     '--verbose',
     '--permission-mode',
-    'dontAsk',
+    unrestricted ? 'bypassPermissions' : 'dontAsk',
     '--tools',
-    mode === 'catalog' ? '' : 'Read,Grep,Glob',
+    mode === 'catalog' ? '' : unrestricted ? 'default' : 'Read,Grep,Glob',
     '--disable-slash-commands',
     '--strict-mcp-config',
     '--mcp-config',
@@ -41,9 +43,12 @@ export function localClaudeArguments(
     '--setting-sources',
     'user',
     '--settings',
-    '{"disableAllHooks":true}',
+    unrestricted
+      ? '{"disableAllHooks":true,"sandbox":{"enabled":false}}'
+      : '{"disableAllHooks":true}',
     '--no-chrome',
   ]
+  if (unrestricted) args.push('--allow-dangerously-skip-permissions')
   if (settings.model) args.push('--model', settings.model)
   if (settings.reasoningEffort) args.push('--effort', settings.reasoningEffort)
   if (threadId) args.push('--resume', threadId)
@@ -122,7 +127,7 @@ export function createClaudeEventParser(): (line: string) => LocalAgentEvent[] {
           {
             type: 'error',
             message:
-              'Claude Code could not complete the turn. Check its authentication, model and read-only tool permissions.',
+              'Claude Code could not complete the turn. Check its authentication, model and selected tool permissions.',
           },
         ]
       }

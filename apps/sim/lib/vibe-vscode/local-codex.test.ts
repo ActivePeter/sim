@@ -5,7 +5,10 @@ import { join } from 'node:path'
 import { pathToFileURL } from 'node:url'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
-const deployment = vi.hoisted(() => ({ SIM_VSCODE_CODEX_SANDBOX: undefined as string | undefined }))
+const deployment = vi.hoisted(() => ({
+  SIM_VSCODE_CODEX_SANDBOX: undefined as string | undefined,
+  SIM_VSCODE_ALLOW_UNRESTRICTED: undefined as string | undefined,
+}))
 vi.mock('@/lib/core/config/env', () => ({ env: deployment }))
 
 import {
@@ -22,6 +25,7 @@ const origin = (uri: string, remoteAuthority = ''): VscodeSessionOrigin => ({
 })
 beforeEach(() => {
   deployment.SIM_VSCODE_CODEX_SANDBOX = undefined
+  deployment.SIM_VSCODE_ALLOW_UNRESTRICTED = undefined
 })
 afterEach(async () => {
   await Promise.all(temporary.splice(0).map((path) => rm(path, { recursive: true, force: true })))
@@ -36,7 +40,7 @@ describe('local project runner boundary', () => {
       ).toThrow(expect.objectContaining({ code: 'validation' }))
     }
   )
-  it('never enables an unrestricted sandbox or a shell-evaluated command', () => {
+  it('defaults to a read-only sandbox and never constructs a shell-evaluated command', () => {
     const path = '/tmp/project with spaces;$(not-a-command)'
     const args = localCodexArguments(path, 'thread-1')
     expect(args).toEqual([
@@ -112,6 +116,37 @@ describe('local project runner boundary', () => {
           permissionMode: 'workspace-write',
         })
       ).toThrow(expect.objectContaining({ code: 'forbidden' }))
+    }
+  )
+  it.each([undefined, 'stored-thread'])(
+    'requires opt-in and an explicit unrestricted choice on fresh and resumed turns: %s',
+    (threadId) => {
+      const settings = {
+        model: null,
+        reasoningEffort: null,
+        permissionMode: 'danger-full-access' as const,
+      }
+      expect(() => localCodexArguments('/projects/a', threadId, settings)).toThrow(
+        expect.objectContaining({ code: 'forbidden' })
+      )
+      deployment.SIM_VSCODE_ALLOW_UNRESTRICTED = 'true'
+      const args = localCodexArguments('/projects/a', threadId, settings)
+      expect({
+        sandbox: args[args.indexOf('--sandbox') + 1],
+        approval: args.includes('approval_policy="never"'),
+        tail: args.slice(threadId ? -3 : -1),
+      }).toEqual({
+        sandbox: 'danger-full-access',
+        approval: true,
+        tail: threadId ? ['resume', threadId, '-'] : ['-'],
+      })
+      for (const permissionMode of [null, 'read-only'] as const) {
+        const restricted = localCodexArguments('/projects/a', threadId, {
+          ...settings,
+          permissionMode,
+        })
+        expect(restricted[restricted.indexOf('--sandbox') + 1]).toBe('read-only')
+      }
     }
   )
   it('preserves the port and Unicode path in a real VS Code remote URI', () => {

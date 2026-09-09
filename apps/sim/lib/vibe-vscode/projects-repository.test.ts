@@ -113,32 +113,35 @@ describe('native project session repository', () => {
     })
     expect(dbChainMockFns.update).not.toHaveBeenCalled()
   })
-  it('allows next-turn configuration changes without resetting an existing runtime thread', async () => {
-    dbChainMockFns.limit.mockResolvedValueOnce([
-      { binding: { ...binding, lastTurnId: 'turn', runtimeThreadId: 'thread' } },
-    ])
-    const result = await updateProjectAgentConfig('user-1', {
-      ...configInput,
-      settings: {
-        ...defaultSettings,
-        model: 'configured-model',
-        reasoningEffort: 'high',
-        permissionMode: 'read-only',
-      },
-    })
-    expect(result.agentLocked).toBe(true)
-    expect(dbChainMockFns.set).toHaveBeenCalledWith({
-      agentConfig: {
-        ...defaultSettings,
-        model: 'configured-model',
-        reasoningEffort: 'high',
-        permissionMode: 'read-only',
-        version: 1,
-        revision: 1,
-      },
-    })
-    expect(dbChainMockFns.update).toHaveBeenCalledWith(vscodeProjectSessions)
-  })
+  it.each(['read-only', 'danger-full-access'] as const)(
+    'allows next-turn permission changes without resetting an existing runtime thread: %s',
+    async (permissionMode) => {
+      dbChainMockFns.limit.mockResolvedValueOnce([
+        { binding: { ...binding, lastTurnId: 'turn', runtimeThreadId: 'thread' } },
+      ])
+      const result = await updateProjectAgentConfig('user-1', {
+        ...configInput,
+        settings: {
+          ...defaultSettings,
+          model: 'configured-model',
+          reasoningEffort: 'high',
+          permissionMode,
+        },
+      })
+      expect(result.agentLocked).toBe(true)
+      expect(dbChainMockFns.set).toHaveBeenCalledWith({
+        agentConfig: {
+          ...defaultSettings,
+          model: 'configured-model',
+          reasoningEffort: 'high',
+          permissionMode,
+          version: 1,
+          revision: 1,
+        },
+      })
+      expect(dbChainMockFns.update).toHaveBeenCalledWith(vscodeProjectSessions)
+    }
+  )
   it('does not bump the revision for a no-op', async () => {
     dbChainMockFns.limit.mockResolvedValueOnce([{ binding }])
     expect(

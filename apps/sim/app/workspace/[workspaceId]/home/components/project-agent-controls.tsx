@@ -3,6 +3,7 @@
 import { useState } from 'react'
 import {
   Chip,
+  ChipConfirmModal,
   ChipModal,
   ChipModalBody,
   ChipModalError,
@@ -33,6 +34,12 @@ interface ProjectAgentControlsProps {
   hasMessages: boolean
   onRefresh(): void
   onSave(settings: ProjectAgentSettings, expectedRevision: number): Promise<unknown>
+}
+
+interface PendingPermissionConfirmation {
+  settings: ProjectAgentSettings
+  revision: number
+  close: boolean
 }
 
 const RUNTIME_DEFAULT = '__runtime_default__'
@@ -73,8 +80,21 @@ export function ProjectAgentControls({
   const { canEdit } = useUserPermissionsContext()
   const [draft, setDraft] = useState<ProjectAgentConfig | null>(null)
   const [saveError, setSaveError] = useState<string | null>(null)
+  const [permissionConfirmation, setPermissionConfirmation] =
+    useState<PendingPermissionConfirmation | null>(null)
   const currentAgent = data?.agents.find((agent) => agent.id === data.config.agentId)
   const draftAgent = data?.agents.find((agent) => agent.id === draft?.agentId)
+  const confirmationAgent = data?.agents.find(
+    (agent) => agent.id === permissionConfirmation?.settings.agentId
+  )
+  const confirmationAllowed =
+    !!permissionConfirmation &&
+    canEdit &&
+    !!confirmationAgent?.available &&
+    !!getProjectAgentPermission(
+      confirmationAgent.permissions,
+      permissionConfirmation.settings.permissionMode
+    )
   const catalog = draftAgent?.modelCatalog
   const draftModel = getProjectAgentModel(catalog, draft?.model)
   const permissionInvalid =
@@ -112,9 +132,23 @@ export function ProjectAgentControls({
       label: agent.label + (agent.available ? '' : ' · 未配置'),
       disabled: !agent.available,
     })) ?? []
-  const save = async (settings: ProjectAgentSettings, revision: number, close: boolean) => {
+  const save = async (
+    settings: ProjectAgentSettings,
+    revision: number,
+    close: boolean,
+    confirmed = false
+  ) => {
     if (saving || !canEdit) return
     setSaveError(null)
+    if (
+      !confirmed &&
+      settings.permissionMode === 'danger-full-access' &&
+      (data?.config.permissionMode !== 'danger-full-access' ||
+        data.config.agentId !== settings.agentId)
+    ) {
+      setPermissionConfirmation({ settings: { ...settings }, revision, close })
+      return
+    }
     try {
       await onSave(settings, revision)
       if (close) setDraft(null)
@@ -450,6 +484,28 @@ export function ProjectAgentControls({
           }}
         />
       </ChipModal>
+      <ChipConfirmModal
+        open={!!permissionConfirmation}
+        onOpenChange={(open) => {
+          if (!open) setPermissionConfirmation(null)
+        }}
+        title='启用“不限制”权限？'
+        text={`${confirmationAgent?.label ?? 'Agent'} 将不使用执行沙箱，也不逐项询问权限，可读写服务账号有权限访问的项目外文件并执行命令。仅对本会话后续任务生效，不会修改其他会话或部署默认。`}
+        defaultAction='dismiss'
+        dismissLabel='保持当前权限'
+        confirm={{
+          label: '确认启用不限制',
+          pending: saving,
+          disabled: !confirmationAllowed,
+          disabledTooltip: '当前工作区权限或部署策略已不允许此操作，请取消并刷新配置。',
+          onClick: () => {
+            if (!permissionConfirmation || !confirmationAllowed || saving) return
+            const { settings, revision, close } = permissionConfirmation
+            setPermissionConfirmation(null)
+            void save(settings, revision, close, true)
+          },
+        }}
+      />
     </div>
   )
 }

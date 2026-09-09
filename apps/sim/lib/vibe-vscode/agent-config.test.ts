@@ -4,6 +4,7 @@ import {
   DEFAULT_PROJECT_AGENT_CONFIG,
   getProjectAgentModel,
   isProjectAgentLocked,
+  projectAgentPermissionPolicySchema,
   projectAgentSettingsSchema,
   readProjectAgentConfig,
 } from '@/lib/vibe-vscode/agent-config'
@@ -38,8 +39,25 @@ describe('project Agent configuration authority', () => {
       'read-only'
     )
   })
-  it.each(['danger-full-access', 'bypassPermissions', '--full-auto', ''])(
-    'rejects unbounded permission modes: %s',
+  it('round-trips an explicit unrestricted choice without making it a deployment default', () => {
+    const stored = {
+      ...DEFAULT_PROJECT_AGENT_CONFIG,
+      permissionMode: 'danger-full-access',
+      revision: 2,
+    }
+    const { version: _version, revision: _revision, ...settings } = stored
+    expect(projectAgentSettingsSchema.parse(settings)).toEqual(settings)
+    expect(readProjectAgentConfig(stored)).toEqual(stored)
+    expect(
+      projectAgentPermissionPolicySchema.safeParse({
+        defaultMode: 'danger-full-access',
+        description: 'Invalid deployment default',
+        modes: [{ id: 'danger-full-access', label: '不限制', description: 'Unrestricted' }],
+      }).success
+    ).toBe(false)
+  })
+  it.each(['bypassPermissions', '--full-auto', '--dangerously-skip-permissions', ''])(
+    'rejects runner flags and unknown permission modes: %s',
     (permissionMode) => {
       const { version: _version, revision: _revision, ...settings } = DEFAULT_PROJECT_AGENT_CONFIG
       expect(projectAgentSettingsSchema.safeParse({ ...settings, permissionMode }).success).toBe(

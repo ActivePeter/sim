@@ -186,49 +186,52 @@ describe('project agent uses the native chat lifecycle', () => {
     expect(mocks.run.mock.calls[0][0].prompt).toContain('Project A')
   })
 
-  it('captures runtime, model, permissions and instructions atomically and keeps them stable during a turn', async () => {
-    const settings: ProjectAgentConfig = {
-      ...DEFAULT_PROJECT_AGENT_CONFIG,
-      agentId: 'local-claude',
-      revision: 4,
-      model: 'test-model',
-      reasoningEffort: 'high',
-      instructions: 'Answer in Chinese.',
-      permissionMode: 'read-only',
+  it.each(['read-only', 'danger-full-access'] as const)(
+    'captures runtime, model, permissions and instructions atomically and keeps them stable during a turn: %s',
+    async (permissionMode) => {
+      const settings: ProjectAgentConfig = {
+        ...DEFAULT_PROJECT_AGENT_CONFIG,
+        agentId: 'local-claude',
+        revision: 4,
+        model: 'test-model',
+        reasoningEffort: 'high',
+        instructions: 'Answer in Chinese.',
+        permissionMode,
+      }
+      prepareTurn('claude-thread', undefined, settings)
+      const started = deferred<RunOptions>()
+      const finish = deferred()
+      mocks.run.mockImplementation(async (options: RunOptions) => {
+        started.resolve(options)
+        await finish.promise
+        await complete(options)
+      })
+      const response = await startProjectChat('user-1', input, '/projects/a')
+      const options = await started.promise
+      settings.model = 'changed-after-start'
+      settings.instructions = 'Changed for the next turn.'
+      settings.permissionMode = 'workspace-write'
+      expect(options.settings).toMatchObject({
+        agentId: 'local-claude',
+        model: 'test-model',
+        revision: 4,
+        permissionMode,
+      })
+      expect(Object.isFrozen(options.settings)).toBe(true)
+      expect(options.threadId).toBe('claude-thread')
+      expect(options.prompt).toContain('Answer in Chinese.')
+      expect(options.prompt).not.toContain(settings.instructions)
+      expect(mocks.createRun.mock.calls[0][0]).toMatchObject({
+        agent: 'local-claude',
+        provider: 'local-claude',
+        model: 'test-model',
+        requestContext: { projectAgentConfig: { revision: 4, permissionMode } },
+      })
+      expect(mocks.append.mock.calls[0][2].chatModel).toBe('test-model')
+      finish.resolve()
+      expect(await response.text()).toContain('"model":"test-model"')
     }
-    prepareTurn('claude-thread', undefined, settings)
-    const started = deferred<RunOptions>()
-    const finish = deferred()
-    mocks.run.mockImplementation(async (options: RunOptions) => {
-      started.resolve(options)
-      await finish.promise
-      await complete(options)
-    })
-    const response = await startProjectChat('user-1', input, '/projects/a')
-    const options = await started.promise
-    settings.model = 'changed-after-start'
-    settings.instructions = 'Changed for the next turn.'
-    settings.permissionMode = 'workspace-write'
-    expect(options.settings).toMatchObject({
-      agentId: 'local-claude',
-      model: 'test-model',
-      revision: 4,
-      permissionMode: 'read-only',
-    })
-    expect(Object.isFrozen(options.settings)).toBe(true)
-    expect(options.threadId).toBe('claude-thread')
-    expect(options.prompt).toContain('Answer in Chinese.')
-    expect(options.prompt).not.toContain(settings.instructions)
-    expect(mocks.createRun.mock.calls[0][0]).toMatchObject({
-      agent: 'local-claude',
-      provider: 'local-claude',
-      model: 'test-model',
-      requestContext: { projectAgentConfig: { revision: 4, permissionMode: 'read-only' } },
-    })
-    expect(mocks.append.mock.calls[0][2].chatModel).toBe('test-model')
-    finish.resolve()
-    expect(await response.text()).toContain('"model":"test-model"')
-  })
+  )
   it('uses the stored selection as reference context only when the user starts the first turn', async () => {
     const selection = {
       uri: 'file:///projects/a/example.ts',

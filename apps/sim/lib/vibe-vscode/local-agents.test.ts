@@ -7,7 +7,10 @@ const mocks = vi.hoisted(() => ({
   codex: vi.fn(),
   claude: vi.fn(),
   models: vi.fn(),
-  env: { SIM_VSCODE_CODEX_SANDBOX: undefined as string | undefined },
+  env: {
+    SIM_VSCODE_CODEX_SANDBOX: undefined as string | undefined,
+    SIM_VSCODE_ALLOW_UNRESTRICTED: undefined as string | undefined,
+  },
 }))
 vi.mock('node:fs/promises', () => ({ access: mocks.access, stat: mocks.stat }))
 vi.mock('@/lib/core/config/env', () => ({ env: mocks.env }))
@@ -31,6 +34,7 @@ const { version: _version, revision: _revision, ...settings } = DEFAULT_PROJECT_
 beforeEach(() => {
   vi.clearAllMocks()
   mocks.env.SIM_VSCODE_CODEX_SANDBOX = undefined
+  mocks.env.SIM_VSCODE_ALLOW_UNRESTRICTED = undefined
   vi.stubEnv('PATH', '/bin:/usr/bin')
   mocks.access.mockResolvedValue(undefined)
   mocks.stat.mockResolvedValue({ isFile: () => true })
@@ -212,6 +216,42 @@ describe('server-owned project Agent capabilities', () => {
     expect(mocks.codex).toHaveBeenCalledOnce()
     expect(mocks.models).not.toHaveBeenCalled()
   })
+  it.each(['local-codex', 'local-claude'] as const)(
+    'checks unrestricted permission at both save and execution, including after revocation: %s',
+    async (agentId) => {
+      const selected = { ...settings, agentId, permissionMode: 'danger-full-access' as const }
+      const turn = {
+        cwd: '/projects/a',
+        prompt: 'Task',
+        signal: new AbortController().signal,
+        onEvent: vi.fn(),
+        settings: selected,
+      }
+      await expect(validateProjectAgentSettings(selected)).rejects.toMatchObject({
+        code: 'forbidden',
+      })
+      await expect(runProjectAgent(turn)).rejects.toMatchObject({ code: 'forbidden' })
+      expect(mocks.codex).not.toHaveBeenCalled()
+      expect(mocks.claude).not.toHaveBeenCalled()
+
+      mocks.env.SIM_VSCODE_ALLOW_UNRESTRICTED = 'true'
+      expect(await validateProjectAgentSettings(selected)).toEqual(selected)
+      await runProjectAgent(turn)
+      const runner = agentId === 'local-codex' ? mocks.codex : mocks.claude
+      const otherRunner = agentId === 'local-codex' ? mocks.claude : mocks.codex
+      expect(runner).toHaveBeenCalledExactlyOnceWith(turn)
+      expect(Object.isFrozen(runner.mock.calls[0][0].settings)).toBe(true)
+
+      mocks.env.SIM_VSCODE_ALLOW_UNRESTRICTED = 'false'
+      await expect(validateProjectAgentSettings(selected)).rejects.toMatchObject({
+        code: 'forbidden',
+      })
+      await expect(runProjectAgent(turn)).rejects.toMatchObject({ code: 'forbidden' })
+      expect(runner).toHaveBeenCalledOnce()
+      expect(otherRunner).not.toHaveBeenCalled()
+      expect(mocks.models).not.toHaveBeenCalled()
+    }
+  )
   it('never starts a turn cancelled before or during model discovery', async () => {
     const controller = new AbortController()
     const turn = {
