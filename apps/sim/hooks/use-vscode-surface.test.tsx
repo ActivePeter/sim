@@ -13,6 +13,7 @@ function installBridge(surface: VibeVscodeSurface | null) {
     getSurface: () => surface,
     getContext: () => undefined,
     openEditor: vi.fn(),
+    setEditorTitle: vi.fn(),
     openMonitor: vi.fn(),
     openFile: vi.fn(),
     openDiff: vi.fn(),

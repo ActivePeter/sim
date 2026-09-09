@@ -181,6 +181,7 @@ describe('project Agent launch intent', () => {
       getSurface: () => 'sidebar',
       getContext: () => mocks.context,
       openEditor: mocks.openEditor,
+      setEditorTitle: vi.fn(),
       openMonitor: vi.fn(),
       openFile: vi.fn(),
       openDiff: vi.fn(),

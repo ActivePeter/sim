@@ -7,6 +7,7 @@ import { useParams, usePathname } from 'next/navigation'
 import { getDesktopBridge } from '@/lib/desktop'
 import { applyDesktopTitleBarMode, type DesktopTitleBarMode } from '@/app/_shell/desktop-title-bar'
 import { useSidebarPeek } from '@/app/workspace/[workspaceId]/components/workspace-chrome/use-sidebar-peek'
+import { VscodeEditorTitle } from '@/app/workspace/[workspaceId]/components/workspace-chrome/vscode-editor-title'
 import { Sidebar, SidebarTooltip } from '@/app/workspace/[workspaceId]/w/components/sidebar/sidebar'
 import { useMothershipChatEvents } from '@/hooks/use-mothership-chat-events'
 import { useVscodeSurface } from '@/hooks/use-vscode-surface'
@@ -195,7 +196,14 @@ export function WorkspaceChrome({ children, initialSidebarCollapsed }: Workspace
             surface === 'sidebar' ? 'bg-[var(--surface-1)]' : 'bg-[var(--bg)]'
           )}
         >
-          {surface === 'sidebar' ? <Sidebar isCollapsed={false} fixedExpanded /> : children}
+          {surface === 'sidebar' ? (
+            <Sidebar isCollapsed={false} fixedExpanded />
+          ) : (
+            <>
+              <VscodeEditorTitle />
+              {children}
+            </>
+          )}
         </div>
       </ModalLayoutProvider>
     )

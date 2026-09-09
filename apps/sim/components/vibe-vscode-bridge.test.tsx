@@ -10,7 +10,7 @@ import { VibeVscodeBridge } from '@/components/vibe-vscode-bridge'
 
 interface BridgeMessage {
   type: string
-  payload?: { path?: string; userInitiated?: boolean; uri?: string }
+  payload?: { path?: string; userInitiated?: boolean; uri?: string; title?: string }
 }
 
 let container: HTMLDivElement
@@ -168,6 +168,38 @@ describe('embedded Sim navigation', () => {
       { type: 'openEditor', payload: { path: '/workspace/one/chat/session' } },
       { type: 'openExternal', payload: { uri: 'https://docs.example.test/help' } },
     ])
+  })
+
+  it('publishes resource titles independently of navigation intent', () => {
+    window.vibeVscode!.setEditorTitle('/workspace/one/chat/session', 'Title from Sim')
+    window.vibeVscode!.setEditorTitle('//other.invalid', 'Unsafe')
+    window.vibeVscode!.setEditorTitle('/workspace/one/chat/session', ' ')
+    expect(messages.filter((message) => message.type === 'titleChanged')).toEqual([
+      {
+        source: 'sim',
+        token: 'test-generation',
+        type: 'titleChanged',
+        payload: { path: '/workspace/one/chat/session', title: 'Title from Sim' },
+      },
+    ])
+    expect(editorRequests()).toEqual([])
+  })
+
+  it('announces readiness before consumers can send their initial title', () => {
+    act(() => root.render(null))
+    messages = []
+    const publish = () => window.vibeVscode?.setEditorTitle('/workspace/one/home', 'Ready title')
+    window.addEventListener('vibe-vscode-context', publish)
+    try {
+      act(() => root.render(<VibeVscodeBridge />))
+      expect(messages.map((message) => message.type)).toEqual([
+        'ready',
+        'routeChanged',
+        'titleChanged',
+      ])
+    } finally {
+      window.removeEventListener('vibe-vscode-context', publish)
+    }
   })
 
   it('releases window navigation interception when the host bridge unmounts', () => {

@@ -34,9 +34,13 @@ so every embedded surface receives completion and cross-view transcript invalida
 The bridge publishes committed navigation separately from passive restoration and
 query updates. Internal resource new-tab/window actions use the host editor
 capability; external documentation, OAuth windows and downloads remain browser
-actions. The host owns tab identity and keeps the monitor separate from chat and
-workflow content. Opening a monitored chat therefore leaves the monitor route and
-filters intact; there is no default full-screen application takeover.
+actions. The host owns resource-keyed tab identity: each workflow, DAG and native
+chat opens independently, and opening it again reveals the existing tab. Its
+editor serializer owns tab restoration, not a second Sim catalog. `VscodeEditorTitle`
+projects names from the existing native queries through the bridge's `titleChanged`
+message; previous-workspace query placeholders are not authoritative names.
+Opening a monitored chat leaves the monitor route and filters intact; there is no
+default full-screen application takeover.
 
 The native per-chat stream lock claims a turn; its `copilot_runs` replay identity,
 chat marker and user message commit in one transaction. A failed run registration

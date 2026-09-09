@@ -25,6 +25,10 @@ vi.mock('@/hooks/use-mothership-chat-events', () => ({
   },
 }))
 
+vi.mock('@/app/workspace/[workspaceId]/components/workspace-chrome/vscode-editor-title', () => ({
+  VscodeEditorTitle: () => <span data-testid='editor-title' />,
+}))
+
 vi.mock('@/app/workspace/[workspaceId]/w/components/sidebar/sidebar', () => ({
   Sidebar: ({ fixedExpanded, isPeeking }: { fixedExpanded?: boolean; isPeeking?: boolean }) => (
     <div
@@ -72,6 +76,7 @@ describe('WorkspaceChrome host surfaces', () => {
     expect(host?.classList).toContain('w-full')
     expect(host?.classList).toContain('overflow-hidden')
     expect(container.querySelector('[data-testid="canvas"]')).toBeNull()
+    expect(container.querySelector('[data-testid="editor-title"]')).toBeNull()
   })
 
   it('renders content in the VS Code editor without duplicating the Sim navigation', () => {
@@ -85,6 +90,7 @@ describe('WorkspaceChrome host surfaces', () => {
     })
     expect(container.querySelector('[data-testid="sidebar"]')).toBeNull()
     expect(container.querySelectorAll('[data-testid="content"]')).toHaveLength(1)
+    expect(container.querySelectorAll('[data-testid="editor-title"]')).toHaveLength(1)
   })
 
   it('keeps one native chat event subscription when embedded presentation changes', () => {

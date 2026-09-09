@@ -19,6 +19,7 @@ interface VibeVscodeBridgeApi {
   getContext: () => VibeVscodeHostContext | undefined
   getSurface: () => ReturnType<typeof parseVibeVscodeSurface>
   openEditor: (path: string) => void
+  setEditorTitle: (path: string, title: string) => void
   openMonitor: () => void
   openFile: (uri: string, line?: number, character?: number) => void
   openDiff: (originalUri: string, modifiedUri: string, title?: string) => void
@@ -266,6 +267,11 @@ export function VibeVscodeBridge() {
       openEditor: (path) => {
         if (isSafeNavigationPath(path)) postToHost('openEditor', { path })
       },
+      setEditorTitle: (path, title) => {
+        if (isSafeNavigationPath(path) && title.trim()) {
+          postToHost('titleChanged', { path, title })
+        }
+      },
       openMonitor: () => postToHost('openMonitor'),
       openFile: (uri, line, character) => postToHost('openFile', { uri, line, character }),
       openDiff: (originalUri, modifiedUri, title) =>
@@ -277,8 +283,6 @@ export function VibeVscodeBridge() {
         else postToHost('openExternal', { uri })
       },
     }
-    window.dispatchEvent(new Event('vibe-vscode-context'))
-
     window.addEventListener('message', messageListener)
     window.addEventListener('click', clickListener, true)
     window.addEventListener('click', newWindowListener)
@@ -297,6 +301,8 @@ export function VibeVscodeBridge() {
       ],
     })
     publishRoute()
+    /** Consumers may publish metadata as soon as they observe the bridge. Admit it first. */
+    window.dispatchEvent(new Event('vibe-vscode-context'))
 
     return () => {
       window.removeEventListener('message', messageListener)
