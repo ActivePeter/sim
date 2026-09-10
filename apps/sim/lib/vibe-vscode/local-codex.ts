@@ -1,4 +1,4 @@
-import { realpath, stat } from 'node:fs/promises'
+import { open, realpath, stat } from 'node:fs/promises'
 import { isAbsolute, relative, sep } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { toRecordOrNull } from '@sim/utils/object'
@@ -18,7 +18,7 @@ import {
   queryLocalAgentProcess,
   runLocalAgentProcess,
 } from '@/lib/vibe-vscode/local-agent-process'
-import type { VscodeSessionOrigin } from '@/lib/vibe-vscode/types'
+import { type VscodeSessionOrigin, vscodeCatalogSchema } from '@/lib/vibe-vscode/types'
 import { parseCodexJsonLine } from '@/executor/handlers/codex/core/events'
 
 function stringArray(value: string | undefined): string[] {
@@ -40,9 +40,42 @@ function stringArray(value: string | undefined): string[] {
 export interface LocalProjectPolicy {
   roots: string[]
   remoteAuthorities: string[]
+  physicalWorkspaceId?: string
+  projectUris?: string[]
 }
 
-export function getLocalProjectPolicy(): LocalProjectPolicy {
+/** Plugin admission reads an atomic projection written only by the ready Vibe public API consumer. */
+export async function getLocalProjectPolicy(): Promise<LocalProjectPolicy> {
+  if (process.env.SIM_VSCODE_PLUGIN === 'true') {
+    const file = process.env.SIM_VSCODE_PROJECT_CONTEXT_FILE
+    if (!file || !isAbsolute(file)) {
+      throw new OrchestrationError('forbidden', 'The plugin project context is not ready.')
+    }
+    const handle = await open(file, 'r')
+    try {
+      const metadata = await handle.stat()
+      if (!metadata.isFile() || metadata.size > 2 * 1024 * 1024) {
+        throw new OrchestrationError('forbidden', 'The plugin project context is invalid.')
+      }
+      const { physicalWorkspace } = vscodeCatalogSchema.parse(
+        JSON.parse(await handle.readFile('utf8'))
+      )
+      const policy: LocalProjectPolicy = {
+        roots: [],
+        remoteAuthorities: physicalWorkspace.remoteAuthority
+          ? [physicalWorkspace.remoteAuthority]
+          : [],
+        physicalWorkspaceId: physicalWorkspace.id,
+        projectUris: physicalWorkspace.folders.map((folder) => folder.uri),
+      }
+      policy.roots = physicalWorkspace.folders.map((project) =>
+        projectPathFromUri({ physicalWorkspace, project }, policy)
+      )
+      return policy
+    } finally {
+      await handle.close()
+    }
+  }
   return {
     roots: stringArray(env.SIM_VSCODE_PROJECT_ROOTS),
     remoteAuthorities: stringArray(env.SIM_VSCODE_REMOTE_AUTHORITIES),
@@ -53,6 +86,15 @@ export function projectPathFromUri(
   origin: VscodeSessionOrigin,
   policy: LocalProjectPolicy
 ): string {
+  if (
+    (policy.physicalWorkspaceId && policy.physicalWorkspaceId !== origin.physicalWorkspace.id) ||
+    (policy.projectUris && !policy.projectUris.includes(origin.project.uri))
+  ) {
+    throw new OrchestrationError(
+      'forbidden',
+      'The project does not belong to this plugin workspace.'
+    )
+  }
   let uri: URL
   try {
     uri = new URL(origin.project.uri)
@@ -92,8 +134,9 @@ export function projectPathFromUri(
 
 export async function resolveLocalProject(
   origin: VscodeSessionOrigin,
-  policy = getLocalProjectPolicy()
+  suppliedPolicy?: LocalProjectPolicy
 ): Promise<string> {
+  const policy = suppliedPolicy ?? (await getLocalProjectPolicy())
   const projectPath = projectPathFromUri(origin, policy)
   if (!isAbsolute(projectPath) || projectPath.includes('\0') || !policy.roots.length) {
     throw new OrchestrationError(

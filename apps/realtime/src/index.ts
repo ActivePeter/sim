@@ -107,9 +107,13 @@ async function main() {
 
   await assertSchemaCompatibility()
 
-  httpServer.listen(PORT, '0.0.0.0', () => {
-    logger.info(`Socket.IO server running on port ${PORT}`)
-    logger.info(`Health check available at: http://localhost:${PORT}/health`)
+  httpServer.listen(PORT, env.SIM_VSCODE_PLUGIN === 'true' ? '127.0.0.1' : '0.0.0.0', () => {
+    const address = httpServer.address()
+    const port = address && typeof address !== 'string' ? address.port : PORT
+    logger.info(`Socket.IO server running on port ${port}`)
+    if (env.SIM_VSCODE_PLUGIN === 'true') {
+      process.send?.({ type: 'listening', port })
+    }
   })
 
   let shuttingDown = false
@@ -173,6 +177,7 @@ async function main() {
 
   process.on('SIGINT', shutdown)
   process.on('SIGTERM', shutdown)
+  if (env.SIM_VSCODE_PLUGIN === 'true') process.once('disconnect', shutdown)
 }
 
 // Start the server

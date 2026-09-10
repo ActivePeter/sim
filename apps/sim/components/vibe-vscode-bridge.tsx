@@ -33,6 +33,12 @@ interface VibeVscodeBridgeApi {
 declare global {
   interface Window {
     vibeVscode?: VibeVscodeBridgeApi
+    /** Installed before hydration only by the packaged VS Code Webview. */
+    vibeVscodeTransport?: {
+      readonly token: string
+      postMessage(message: Record<string, unknown>): void
+      onMessage(listener: (message: unknown) => void): () => void
+    }
   }
 }
 
@@ -142,7 +148,8 @@ function isSafeNavigationPath(value: unknown): value is string {
 function toSameOriginNavigationPath(value: string): string | null {
   const url = new URL(value, window.location.href)
   if (
-    url.origin !== window.location.origin ||
+    (url.origin !== window.location.origin &&
+      (!window.vibeVscodeTransport || url.origin !== new URL(document.baseURI).origin)) ||
     !/^\/(?:workspace(?:\/|$)|agents(?:\/|$))/.test(url.pathname)
   )
     return null
@@ -156,10 +163,11 @@ export function VibeVscodeBridge() {
   const createFromSelection = useCreateProjectSessionFromSelection()
 
   useEffect(() => {
-    if (window.parent === window) return
+    const transport = window.vibeVscodeTransport
+    if (!transport && window.parent === window) return
     const initialUrl = new URL(window.location.href)
     const surface = parseVibeVscodeSurface(initialUrl.searchParams.get(VIBE_VSCODE_SURFACE_PARAM))
-    const token = readBridgeToken(surface)
+    const token = transport?.token ?? readBridgeToken(surface)
     if (!token) return
 
     let hostContext: VibeVscodeHostContext | undefined
@@ -168,7 +176,9 @@ export function VibeVscodeBridge() {
     const creating = new Map<string, string>()
 
     const postToHost = (type: string, payload?: Record<string, unknown>) => {
-      window.parent.postMessage({ source: SIM_SOURCE, token, type, payload }, hostOrigin)
+      const message = { source: SIM_SOURCE, token, type, payload }
+      if (transport) transport.postMessage(message)
+      else window.parent.postMessage(message, hostOrigin)
     }
     const publishRoute = (userInitiated = false) => {
       postToHost('routeChanged', {
@@ -225,11 +235,10 @@ export function VibeVscodeBridge() {
       event.preventDefault()
       postToHost('openEditor', { path })
     }
-    const messageListener = (event: MessageEvent<unknown>) => {
-      if (event.source !== window.parent || !isHostBridgeMessage(event.data, token)) return
-      hostOrigin = event.origin
-      if (event.data.type === 'context' && isHostContext(event.data.payload)) {
-        hostContext = event.data.payload
+    const receiveMessage = (message: unknown) => {
+      if (!isHostBridgeMessage(message, token)) return
+      if (message.type === 'context' && isHostContext(message.payload)) {
+        hostContext = message.payload
         if (hostContext.language.toLowerCase().startsWith('zh')) setLocale('zh-CN')
         if (hostContext.language.toLowerCase().startsWith('en')) setLocale('en')
         window.dispatchEvent(
@@ -237,20 +246,20 @@ export function VibeVscodeBridge() {
         )
         return
       }
-      if (event.data.type === 'navigate' && isRecord(event.data.payload)) {
-        const path = event.data.payload.path
+      if (message.type === 'navigate' && isRecord(message.payload)) {
+        const path = message.payload.path
         if (isSafeNavigationPath(path)) {
           /** Native tab selection preserves the sidebar layout, queries and scroll position. */
           replaceRoute(withVibeVscodeSurface(path, surface), { scroll: false })
         }
         return
       }
-      if (event.data.type === 'createChat' && surface === 'sidebar') {
-        const parsed = vscodeCreateChatRequestSchema.safeParse(event.data.payload)
+      if (message.type === 'createChat' && surface === 'sidebar') {
+        const parsed = vscodeCreateChatRequestSchema.safeParse(message.payload)
         if (!parsed.success) {
-          if (isRecord(event.data.payload) && typeof event.data.payload.requestId === 'string') {
+          if (isRecord(message.payload) && typeof message.payload.requestId === 'string') {
             postToHost('chatCreated', {
-              requestId: event.data.payload.requestId,
+              requestId: message.payload.requestId,
               error: '无法创建 Sim Chat：项目或文件选区上下文无效。',
             })
           }
@@ -292,7 +301,12 @@ export function VibeVscodeBridge() {
           .finally(() => creating.delete(request.requestId))
         return
       }
-      if (event.data.type === 'ping') postToHost('ready', { path: window.location.pathname })
+      if (message.type === 'ping') postToHost('ready', { path: window.location.pathname })
+    }
+    const messageListener = (event: MessageEvent<unknown>) => {
+      if (transport || event.source !== window.parent) return
+      hostOrigin = event.origin
+      receiveMessage(event.data)
     }
 
     const originalPushState = window.history.pushState.bind(window.history)
@@ -342,6 +356,7 @@ export function VibeVscodeBridge() {
       },
     }
     window.addEventListener('message', messageListener)
+    const removeTransportListener = transport?.onMessage(receiveMessage)
     window.addEventListener('click', clickListener, true)
     window.addEventListener('click', newWindowListener)
     window.addEventListener('auxclick', newWindowListener)
@@ -365,6 +380,7 @@ export function VibeVscodeBridge() {
     return () => {
       lifecycle.abort()
       window.removeEventListener('message', messageListener)
+      removeTransportListener?.()
       window.removeEventListener('click', clickListener, true)
       window.removeEventListener('click', newWindowListener)
       window.removeEventListener('auxclick', newWindowListener)

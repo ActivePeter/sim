@@ -36,6 +36,23 @@ describe('getBrowserOrigin', () => {
     setLocation('https://example.com/some/path')
     expect(getBrowserOrigin()).toBe('https://example.com')
   })
+
+  it('uses the private transport virtual origin in a native VS Code webview', () => {
+    setLocation('vscode-webview://test/workspace')
+    mockGetEnv.mockImplementation((key) =>
+      key === 'NEXT_PUBLIC_APP_URL' ? 'https://sim.vscode.invalid' : undefined
+    )
+    window.vibeVscodeTransport = {
+      token: 'test-view',
+      postMessage: vi.fn(),
+      onMessage: () => () => {},
+    }
+    try {
+      expect(getBrowserOrigin()).toBe('https://sim.vscode.invalid')
+    } finally {
+      window.vibeVscodeTransport = undefined
+    }
+  })
 })
 
 describe('getBaseUrl', () => {

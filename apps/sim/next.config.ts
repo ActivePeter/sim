@@ -20,6 +20,8 @@ const nextConfig: NextConfig = {
     root: path.join(import.meta.dirname, '../..'),
   },
   images: {
+    /** The plugin serves immutable resources through VS Code, without a shared on-disk image cache. */
+    unoptimized: process.env.SIM_VSCODE_PLUGIN_BUILD === 'true',
     formats: ['image/avif', 'image/webp'],
     /**
      * Allowed `quality` values for next/image. 75 is the app-wide default;

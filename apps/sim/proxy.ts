@@ -1,4 +1,5 @@
 import { createLogger } from '@sim/logger'
+import { safeCompare } from '@sim/security/compare'
 import { getSessionCookie } from 'better-auth/cookies'
 import { type NextRequest, NextResponse } from 'next/server'
 import { sendToProfound } from './lib/analytics/profound'
@@ -318,6 +319,23 @@ function handleSecurityFiltering(request: NextRequest): NextResponse | null {
 
 export async function proxy(request: NextRequest) {
   const url = request.nextUrl
+
+  /** Plugin transport is private to its Extension Host; it is not a second browser login. */
+  if (getEnv('SIM_VSCODE_PLUGIN') === 'true') {
+    const gateway = getEnv('VIBE_VSCODE_AGENT_GATEWAY_SECRET')
+    const supplied = request.headers.get('x-vibe-agent-gateway')
+    const internal = getEnv('INTERNAL_API_SECRET')
+    const internalKey = request.headers.get('x-api-key')
+    const trustedGateway = !!gateway && !!supplied && safeCompare(gateway, supplied)
+    const trustedInternal =
+      url.pathname.startsWith('/api/internal/') &&
+      !!internal &&
+      !!internalKey &&
+      safeCompare(internal, internalKey)
+    if (!trustedGateway && !trustedInternal) {
+      return new NextResponse(null, { status: 403 })
+    }
+  }
 
   if (url.pathname.startsWith('/api/')) {
     const policy = resolveApiCorsPolicy(request)

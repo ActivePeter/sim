@@ -1,5 +1,6 @@
 import { spawn } from 'node:child_process'
 import { tmpdir } from 'node:os'
+import { isAbsolute } from 'node:path'
 import { createInterface } from 'node:readline'
 
 /** Provider adapters emit complete message blocks into Sim's existing native stream. */
@@ -52,18 +53,26 @@ function startLocalAgentProcess(options: LocalAgentProcessOptions) {
     if (process.env[key]) childEnv[key] = process.env[key]
   }
   Object.assign(childEnv, options.environment)
-  const child = spawn(options.executable, options.args, {
-    cwd: options.cwd,
-    env: childEnv,
-    stdio: ['pipe', 'pipe', 'pipe'],
-    detached: process.platform !== 'win32',
-  })
+  const supervisor = process.env.SIM_VSCODE_PROCESS_SUPERVISOR
+  if (process.env.SIM_VSCODE_PLUGIN === 'true' && (!supervisor || !isAbsolute(supervisor))) {
+    throw new Error('The plugin agent process owner is unavailable.')
+  }
+  const child = spawn(
+    supervisor || options.executable,
+    supervisor ? [options.executable, ...options.args] : options.args,
+    {
+      cwd: options.cwd,
+      env: childEnv,
+      stdio: ['pipe', 'pipe', 'pipe'],
+      detached: process.platform !== 'win32',
+    }
+  )
   let killTimer: ReturnType<typeof setTimeout> | undefined
   let closed = false
   const kill = (signal: NodeJS.Signals) => {
     if (closed || !child.pid) return
     try {
-      if (process.platform === 'win32') child.kill(signal)
+      if (supervisor || process.platform === 'win32') child.kill(signal)
       else process.kill(-child.pid, signal)
     } catch {
       /** Process already exited. */
@@ -72,7 +81,8 @@ function startLocalAgentProcess(options: LocalAgentProcessOptions) {
   const terminate = () => {
     if (closed) return
     kill('SIGTERM')
-    killTimer ??= setTimeout(() => kill('SIGKILL'), 3000)
+    /** The packaged supervisor escalates its own descendants and must remain alive to reap them. */
+    if (!supervisor) killTimer ??= setTimeout(() => kill('SIGKILL'), 3000)
   }
   const completion = new Promise<number | null>((resolve, reject) => {
     child.once('error', () =>

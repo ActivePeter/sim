@@ -18,7 +18,9 @@ const logger = createLogger('UploadsSetup')
 // Two routes doing so emit the swept config into same-named server chunks — when their
 // contents diverge, the build dies with "Two or more assets … same output path".
 const PROJECT_ROOT = path.resolve(/*turbopackIgnore: true*/ process.cwd())
-export const UPLOAD_DIR_SERVER = join(/*turbopackIgnore: true*/ PROJECT_ROOT, 'uploads')
+export const UPLOAD_DIR_SERVER = process.env.SIM_UPLOADS_DIR
+  ? path.resolve(/*turbopackIgnore: true*/ process.env.SIM_UPLOADS_DIR)
+  : join(/*turbopackIgnore: true*/ PROJECT_ROOT, 'uploads')
 
 /**
  * Server-only function to ensure uploads directory exists

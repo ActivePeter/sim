@@ -54,9 +54,123 @@ describe('uploadFileSession', () => {
 
   afterEach(() => {
     globalThis.XMLHttpRequest = originalXhr
+    window.vibeVscodeTransport = undefined
     vi.useRealTimers()
     vi.unstubAllGlobals()
     vi.restoreAllMocks()
+  })
+
+  describe('packaged VS Code transport', () => {
+    beforeEach(() => {
+      window.vibeVscodeTransport = {
+        token: 'test-webview',
+        postMessage: vi.fn(),
+        onMessage: () => () => undefined,
+      }
+    })
+
+    it('uses host fetch for a whole-file PUT and reports only confirmed progress', async () => {
+      const file = sizedFile(PUT_THRESHOLD)
+      const onProgress = vi.fn()
+      const complete = vi.fn(async () => 'done')
+      let resolveUpload!: (response: Response) => void
+      const fetchMock = vi.fn(
+        () =>
+          new Promise<Response>((resolve) => {
+            resolveUpload = resolve
+          })
+      )
+      vi.stubGlobal('fetch', fetchMock)
+      const result = uploadFileSession({
+        file,
+        transfer: { method: 'put', url: '/api/upload', headers: { 'Content-Type': file.type } },
+        onProgress,
+        complete,
+        abort: vi.fn(async () => undefined),
+      })
+      expect(onProgress).not.toHaveBeenCalled()
+      expect(complete).not.toHaveBeenCalled()
+      resolveUpload(new Response(null, { status: 204 }))
+      await expect(result).resolves.toBe('done')
+      expect(MockXhr.instances).toHaveLength(0)
+      expect(fetchMock).toHaveBeenCalledWith(
+        '/api/upload',
+        expect.objectContaining({
+          method: 'PUT',
+          body: file,
+          headers: { 'Content-Type': file.type },
+          signal: expect.any(AbortSignal),
+        })
+      )
+      expect(onProgress).toHaveBeenCalledExactlyOnceWith({
+        loaded: PUT_THRESHOLD,
+        total: PUT_THRESHOLD,
+        percent: 100,
+      })
+    })
+
+    it('keeps the existing retry and finalization contract after a lost PUT response', async () => {
+      vi.useFakeTimers()
+      const fetchMock = vi
+        .fn()
+        .mockRejectedValueOnce(new TypeError('network'))
+        .mockResolvedValueOnce(new Response(null, { status: 412 }))
+      vi.stubGlobal('fetch', fetchMock)
+      const abort = vi.fn(async () => undefined)
+      const result = uploadFileSession({
+        file: sizedFile(1),
+        transfer: { method: 'put', url: '/api/upload', headers: {} },
+        complete: async () => 'verified',
+        abort,
+      })
+      await vi.runAllTimersAsync()
+      await expect(result).resolves.toBe('verified')
+      expect(fetchMock).toHaveBeenCalledTimes(2)
+      expect(abort).not.toHaveBeenCalled()
+    })
+
+    it('does not retry authorization failures or finalize rejected uploads', async () => {
+      const fetchMock = vi.fn(async () => new Response(null, { status: 403 }))
+      vi.stubGlobal('fetch', fetchMock)
+      const abort = vi.fn(async () => undefined)
+      const complete = vi.fn()
+      await expect(
+        uploadFileSession({
+          file: sizedFile(1),
+          transfer: { method: 'put', url: '/api/upload', headers: {} },
+          complete,
+          abort,
+        })
+      ).rejects.toMatchObject({ status: 403 })
+      expect(fetchMock).toHaveBeenCalledTimes(1)
+      expect(abort).toHaveBeenCalledTimes(1)
+      expect(complete).not.toHaveBeenCalled()
+    })
+
+    it('forwards caller cancellation to host fetch and aborts the upload session once', async () => {
+      const controller = new AbortController()
+      const fetchMock = vi.fn(
+        (_url, { signal }: RequestInit) =>
+          new Promise((_resolve, reject) => {
+            signal!.addEventListener('abort', () => reject(signal!.reason), { once: true })
+          })
+      )
+      vi.stubGlobal('fetch', fetchMock)
+      const abort = vi.fn(async () => undefined)
+      const complete = vi.fn()
+      const result = uploadFileSession({
+        file: sizedFile(1),
+        transfer: { method: 'put', url: '/api/upload', headers: {} },
+        signal: controller.signal,
+        complete,
+        abort,
+      })
+      controller.abort()
+      await expect(result).rejects.toMatchObject({ name: 'AbortError' })
+      expect(fetchMock).toHaveBeenCalledTimes(1)
+      expect(abort).toHaveBeenCalledTimes(1)
+      expect(complete).not.toHaveBeenCalled()
+    })
   })
 
   it('uploads an exact-threshold file with PUT and completes with an empty body', async () => {

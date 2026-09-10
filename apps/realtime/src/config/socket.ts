@@ -1,5 +1,6 @@
 import type { Server as HttpServer } from 'http'
 import { createLogger } from '@sim/logger'
+import { safeCompare } from '@sim/security/compare'
 import { createAdapter } from '@socket.io/redis-adapter'
 import { createClient, type RedisClientType } from 'redis'
 import { Server } from 'socket.io'
@@ -52,6 +53,18 @@ export async function createSocketIOServer(httpServer: HttpServer): Promise<Serv
     pingTimeout: PING_TIMEOUT_MS,
     pingInterval: PING_INTERVAL_MS,
     maxHttpBufferSize: MAX_HTTP_BUFFER_SIZE,
+    /** Only the plugin's private transport can open an auth-disabled native socket. */
+    allowRequest:
+      env.SIM_VSCODE_PLUGIN === 'true'
+        ? (request, callback) => {
+            const supplied = request.headers['x-vibe-agent-gateway']
+            const secret = env.VIBE_VSCODE_AGENT_GATEWAY_SECRET
+            callback(
+              null,
+              !!secret && typeof supplied === 'string' && safeCompare(secret, supplied)
+            )
+          }
+        : undefined,
     cookie: {
       name: 'io',
       path: '/',
