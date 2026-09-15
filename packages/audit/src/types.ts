@@ -2,6 +2,9 @@
  * All auditable actions in the platform, grouped by resource type.
  */
 export const AuditAction = {
+  DAG_CREATED: 'dag.created',
+  DAG_UPDATED: 'dag.updated',
+  DAG_IMPORTED: 'dag.imported',
   // Accounts
   ACCOUNT_DELETED: 'account.deleted',
 
@@ -239,6 +242,7 @@ export type AuditActionType = (typeof AuditAction)[keyof typeof AuditAction]
  * All resource types that can appear in audit log entries.
  */
 export const AuditResourceType = {
+  DAG: 'dag',
   ACCOUNT: 'account',
   API_KEY: 'api_key',
   BILLING: 'billing',

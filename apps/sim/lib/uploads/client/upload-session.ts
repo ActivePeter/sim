@@ -131,6 +131,9 @@ interface UploadPutAttemptParams {
 
 function uploadPutAttempt(params: UploadPutAttemptParams): Promise<void> {
   if (params.signal?.aborted) return Promise.reject(uploadAbortError(params.file.name))
+  if (typeof window !== 'undefined' && window.vibeVscodeTransport) {
+    return uploadPutWithFetch(params)
+  }
 
   return new Promise((resolve, reject) => {
     const xhr = new XMLHttpRequest()
@@ -216,6 +219,44 @@ function uploadPutAttempt(params: UploadPutAttemptParams): Promise<void> {
     params.signal?.addEventListener('abort', handleSignalAbort, { once: true })
     xhr.send(params.file)
   })
+}
+
+/** The packaged Webview owns fetch transport; the ordinary browser keeps XHR upload progress. */
+async function uploadPutWithFetch(params: UploadPutAttemptParams): Promise<void> {
+  const timeout = AbortSignal.timeout(Math.ceil(calculateUploadTimeoutMs(params.file.size)))
+  const signal = params.signal ? AbortSignal.any([params.signal, timeout]) : timeout
+  try {
+    // boundary-raw-fetch: signed data-plane URL uses the host transport for local Sim
+    const response = await fetch(params.transfer.url, {
+      method: 'PUT',
+      body: params.file,
+      headers: params.transfer.headers,
+      signal,
+    })
+    await response.body?.cancel()
+    if (!response.ok) {
+      throw new UploadSessionTransportError(
+        `PUT upload failed for ${params.file.name}: ${response.status} ${response.statusText}`,
+        response.status,
+        parseRetryAfter(response.headers.get('Retry-After'), RETRY_MAX_MS),
+        isRetryableStatus(response.status)
+      )
+    }
+    // Fetch cannot observe upload progress. The caller reports completion only after success.
+  } catch (error) {
+    if (params.signal?.aborted) throw uploadAbortError(params.file.name)
+    if (timeout.aborted || error instanceof TypeError) {
+      throw new UploadSessionTransportError(
+        timeout.aborted
+          ? `Upload timed out for ${params.file.name}`
+          : `Network error uploading ${params.file.name}`,
+        undefined,
+        null,
+        true
+      )
+    }
+    throw error
+  }
 }
 
 async function uploadMultipart<T>(params: UploadMultipartFileSession<T>): Promise<void> {

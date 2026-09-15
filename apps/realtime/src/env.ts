@@ -14,7 +14,10 @@ const EnvSchema = z.object({
   INTERNAL_API_SECRET: z.string().min(32),
   NEXT_PUBLIC_APP_URL: z.string().url(),
   ALLOWED_ORIGINS: z.string().optional(),
-  PORT: z.coerce.number().int().positive().default(3002),
+  PORT: z.coerce.number().int().min(0).max(65535).default(3002),
+  SIM_VSCODE_PLUGIN: z.enum(['true']).optional(),
+  VIBE_VSCODE_AGENT_GATEWAY_SECRET: z.string().min(32).optional(),
+  INTERNAL_API_BASE_URL: z.string().url().optional(),
   SIM_DB_ROLE: z.enum(['web', 'trigger', 'realtime']).optional(),
   DISABLE_AUTH: z
     .string()
@@ -46,5 +49,5 @@ export const isHosted = appHostname === 'sim.ai' || appHostname.endsWith('.sim.a
 export const isAuthDisabled = env.DISABLE_AUTH === true && !isHosted
 
 export function getBaseUrl(): string {
-  return env.NEXT_PUBLIC_APP_URL
+  return env.INTERNAL_API_BASE_URL || env.NEXT_PUBLIC_APP_URL
 }

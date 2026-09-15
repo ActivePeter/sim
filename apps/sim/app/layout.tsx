@@ -5,6 +5,7 @@ import Script from 'next/script'
 import { PublicEnvScript as RuntimePublicEnvScript } from 'next-runtime-env'
 import { NuqsAdapter } from 'nuqs/adapters/next/app'
 import { BrandedLayout } from '@/components/branded-layout'
+import { VibeVscodeBridge } from '@/components/vibe-vscode-bridge'
 import { PasteAdmissionGuard } from '@/app/_shell/paste-admission-guard'
 import { PostHogProvider } from '@/app/_shell/providers/posthog-provider'
 import { generateBrandedMetadata, generateThemeCSS } from '@/ee/whitelabeling'
@@ -51,6 +52,7 @@ export default async function RootLayout({ children }: { children: React.ReactNo
             <SessionProvider>
               <TooltipProvider>
                 <I18nProvider initialLocale={initialLocale}>
+                  <VibeVscodeBridge />
                   <BrandedLayout>{children}</BrandedLayout>
                 </I18nProvider>
               </TooltipProvider>

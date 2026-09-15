@@ -43,6 +43,7 @@ import { isMacPlatform } from '@/lib/core/utils/platform'
 import { buildFolderTree, getFolderPathNames } from '@/lib/folders/tree'
 import { useI18n } from '@/lib/i18n'
 import { captureEvent } from '@/lib/posthog/client'
+import { ProjectLauncher } from '@/app/workspace/[workspaceId]/agents/components/project-launcher'
 import { CONNECT_MODE } from '@/app/workspace/[workspaceId]/integrations/connect-route'
 import { useRegisterGlobalCommands } from '@/app/workspace/[workspaceId]/providers/global-commands-provider'
 import { useWorkspaceHostContext } from '@/app/workspace/[workspaceId]/providers/workspace-host-provider'
@@ -119,7 +120,6 @@ import {
 import { useUpdateWorkflow } from '@/hooks/queries/workflows'
 import type { Workspace } from '@/hooks/queries/workspace'
 import { useContextMenu } from '@/hooks/use-context-menu'
-import { useMothershipChatEvents } from '@/hooks/use-mothership-chat-events'
 import { usePermissionConfig } from '@/hooks/use-permission-config'
 import { useSettingsNavigation } from '@/hooks/use-settings-navigation'
 import { SIDEBAR_WIDTH } from '@/stores/constants'
@@ -401,14 +401,17 @@ interface SidebarProps {
    * fight the card's width.
    */
   isPeeking?: boolean
+  /** Makes a host-projected sidebar fill its container and disables standalone window chrome. */
+  fixedExpanded?: boolean
 }
 
 export const Sidebar = memo(function Sidebar({
   isCollapsed: isCollapsedProp,
   isPeeking = false,
+  fixedExpanded = false,
 }: SidebarProps) {
   /** The peek card always renders the expanded layout, whatever the rail's state. */
-  const isCollapsed = isCollapsedProp && !isPeeking
+  const isCollapsed = isCollapsedProp && !isPeeking && !fixedExpanded
   const params = useParams()
   const workspaceId = params.workspaceId as string
   const workflowId = params.workflowId as string | undefined
@@ -799,6 +802,13 @@ export const Sidebar = memo(function Sidebar({
           additionalActivePaths: [`/workspace/${workspaceId}/skills`],
           hidden: permissionConfig.hideIntegrationsTab,
         },
+        {
+          id: 'agent-monitor',
+          label: '全局 Agent 监控',
+          icon: Home,
+          href: `/workspace/${workspaceId}/agents`,
+          hidden: !isChatEnabled,
+        },
       ].filter((item) => !item.hidden),
     [
       workspaceId,
@@ -877,8 +887,6 @@ export const Sidebar = memo(function Sidebar({
     workspaceId,
     { enabled: isChatEnabled }
   )
-
-  useMothershipChatEvents(workspaceId)
 
   /**
    * Stays empty when Chat is disabled, which also drops the command palette's
@@ -1354,16 +1362,24 @@ export const Sidebar = memo(function Sidebar({
         className='hidden'
         onChange={handleImportFileChange}
       />
-      <div className='relative h-full'>
+      <div
+        className={cn(
+          'relative h-full',
+          fixedExpanded && 'w-full min-w-0 overflow-hidden [--sidebar-width:100%]'
+        )}
+      >
         <aside
-          className='group/rail sidebar-container relative h-full overflow-hidden bg-[var(--surface-1)] [&_.group.cursor-pointer]:duration-0'
+          className={cn(
+            'group/rail sidebar-container relative h-full overflow-hidden bg-[var(--surface-1)] [&_.group.cursor-pointer]:duration-0',
+            fixedExpanded && 'max-w-full'
+          )}
           data-collapsed={isCollapsed || undefined}
           aria-label={t('sidebar.workspaceAria')}
           onClick={handleSidebarClick}
         >
           <div className='flex h-full flex-col'>
-            {/* The peek card already sits below the lane; reserving it again doubles the offset. */}
-            {!isPeeking && (
+            {/* Floating and host-projected sidebars already sit below their owner's chrome. */}
+            {!isPeeking && !fixedExpanded && (
               <div
                 aria-hidden
                 className='desktop-window-drag-region desktop-workspace-window-drag-region h-[var(--desktop-title-bar-height)]'
@@ -1373,6 +1389,7 @@ export const Sidebar = memo(function Sidebar({
               className={cn(
                 'relative flex flex-shrink-0 items-center px-2 pt-3',
                 !isPeeking &&
+                  !fixedExpanded &&
                   '[[data-sim-desktop-title-bar=inset]_&]:pt-[var(--desktop-title-bar-height)]'
               )}
             >
@@ -1426,7 +1443,9 @@ export const Sidebar = memo(function Sidebar({
                   'flex h-[30px] items-center gap-[1px] overflow-hidden transition-all duration-200 [transition-timing-function:cubic-bezier(0.25,0.1,0.25,1)]',
                   isCollapsed
                     ? 'w-0 opacity-0'
-                    : 'w-[65px] [[data-sim-desktop-title-bar=inset]_&]:w-[32px]'
+                    : fixedExpanded
+                      ? 'w-[32px]'
+                      : 'w-[65px] [[data-sim-desktop-title-bar=inset]_&]:w-[32px]'
                 )}
               >
                 <SidebarTooltip
@@ -1445,23 +1464,25 @@ export const Sidebar = memo(function Sidebar({
                     className={DRAG_EXEMPT_CLASS}
                   />
                 </SidebarTooltip>
-                <SidebarTooltip
-                  label={t('sidebar.collapse')}
-                  enabled={!isCollapsed}
-                  side='bottom'
-                  shortcut={isMac ? '⌘B' : 'Ctrl+B'}
-                >
-                  <Chip
-                    leftIcon={PanelLeft}
-                    aria-label={t('sidebar.collapse')}
-                    onClick={toggleCollapsed}
-                    tabIndex={isCollapsed ? -1 : undefined}
-                    className={cn(
-                      DRAG_EXEMPT_CLASS,
-                      '[[data-sim-desktop-title-bar=inset]_&]:hidden'
-                    )}
-                  />
-                </SidebarTooltip>
+                {!fixedExpanded && (
+                  <SidebarTooltip
+                    label={t('sidebar.collapse')}
+                    enabled={!isCollapsed}
+                    side='bottom'
+                    shortcut={isMac ? '⌘B' : 'Ctrl+B'}
+                  >
+                    <Chip
+                      leftIcon={PanelLeft}
+                      aria-label={t('sidebar.collapse')}
+                      onClick={toggleCollapsed}
+                      tabIndex={isCollapsed ? -1 : undefined}
+                      className={cn(
+                        DRAG_EXEMPT_CLASS,
+                        '[[data-sim-desktop-title-bar=inset]_&]:hidden'
+                      )}
+                    />
+                  </SidebarTooltip>
+                )}
               </div>
             </div>
 
@@ -1480,15 +1501,19 @@ export const Sidebar = memo(function Sidebar({
                     'flex flex-shrink-0 flex-col px-2'
                   )}
                 >
-                  {topNavItems.map((item) => (
-                    <SidebarNavItem
-                      key={item.id}
-                      item={item}
-                      active={isNavItemActive(item, pathname)}
-                      showCollapsedTooltips={showCollapsedTooltips}
-                      onContextMenu={item.href ? handleNavItemContextMenu : undefined}
-                    />
-                  ))}
+                  {topNavItems.map((item) =>
+                    fixedExpanded && isChatEnabled && item.id === 'home' ? (
+                      <ProjectLauncher key={item.id} compact triggerLabel={item.label} />
+                    ) : (
+                      <SidebarNavItem
+                        key={item.id}
+                        item={item}
+                        active={isNavItemActive(item, pathname)}
+                        showCollapsedTooltips={showCollapsedTooltips}
+                        onContextMenu={item.href ? handleNavItemContextMenu : undefined}
+                      />
+                    )
+                  )}
                 </div>
 
                 <div
@@ -1909,9 +1934,8 @@ export const Sidebar = memo(function Sidebar({
           </div>
         </aside>
 
-        {/* Not on the peek card: the resize hook writes an inline `--sidebar-width` that
-            out-specifies the `[data-peek]` rule, stranding the card at a stale width. */}
-        {!isPeeking && (
+        {/* Floating and host-projected sidebars are sized by their outer container. */}
+        {!isPeeking && !fixedExpanded && (
           <div
             className={cn(
               'absolute top-0 right-0 bottom-0 z-20 w-[8px] translate-x-1/2',

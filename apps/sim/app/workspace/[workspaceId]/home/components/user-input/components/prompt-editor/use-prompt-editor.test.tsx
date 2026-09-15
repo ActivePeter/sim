@@ -14,6 +14,7 @@ vi.mock('@/blocks/integration-matcher', () => ({
 import { SIM_SELECTION_MIME } from '@/lib/copilot/chat/selection-clipboard'
 import type { PlusMenuHandle } from '@/app/workspace/[workspaceId]/home/components/user-input/components/constants'
 import {
+  type PromptEditorKeyPolicy,
   type UsePromptEditorProps,
   usePromptEditor,
 } from '@/app/workspace/[workspaceId]/home/components/user-input/components/prompt-editor/use-prompt-editor'
@@ -72,6 +73,83 @@ function typeInto(textarea: HTMLTextAreaElement, value: string, caret = value.le
   textarea.setSelectionRange(caret, caret)
   textarea.dispatchEvent(new Event('input', { bubbles: true }))
 }
+
+describe('usePromptEditor history keyboard policy', () => {
+  const key = (textarea: HTMLTextAreaElement, name: string, options: KeyboardEventInit = {}) => {
+    const nativeEvent = new KeyboardEvent('keydown', { key: name, cancelable: true, ...options })
+    return {
+      key: name,
+      target: textarea,
+      currentTarget: textarea,
+      shiftKey: nativeEvent.shiftKey,
+      ctrlKey: nativeEvent.ctrlKey,
+      metaKey: nativeEvent.metaKey,
+      altKey: nativeEvent.altKey,
+      nativeEvent,
+      preventDefault: () => nativeEvent.preventDefault(),
+    } as React.KeyboardEvent<HTMLTextAreaElement>
+  }
+
+  it.each([
+    ['ArrowUp', 0, 0, 'previous'],
+    ['ArrowDown', 16, 16, 'next'],
+    ['ArrowUp', 9, 9, undefined],
+    ['ArrowDown', 3, 3, undefined],
+    ['ArrowUp', 0, 3, undefined],
+  ] as const)(
+    'respects multiline and selection boundaries for %s at %i:%i',
+    (name, start, end, direction) => {
+      const { result, textarea, unmount } = renderPromptEditor({ workspaceId: 'ws-1' })
+      const onHistoryNavigate = vi.fn(() => true)
+      act(() => result().setValue('first\nlast line!', { chipify: false }))
+      textarea.value = result().getValue()
+      textarea.setSelectionRange(start, end)
+      const event = key(textarea, name)
+      act(() => result().handleKeyDown(event, { onHistoryNavigate }))
+      expect({
+        calls: onHistoryNavigate.mock.calls,
+        consumed: event.nativeEvent.defaultPrevented,
+      }).toEqual({ calls: direction ? [[direction]] : [], consumed: !!direction })
+      unmount()
+    }
+  )
+
+  it.each([
+    { isComposing: true },
+    { shiftKey: true },
+    { ctrlKey: true },
+    { metaKey: true },
+    { altKey: true },
+  ])('does not intercept IME or modified arrows: %j', (options) => {
+    const { result, textarea, unmount } = renderPromptEditor({ workspaceId: 'ws-1' })
+    const policy: PromptEditorKeyPolicy = {
+      onArrowUpOnEmpty: vi.fn(() => true),
+      onHistoryNavigate: vi.fn(() => true),
+    }
+    const event = key(textarea, 'ArrowUp', options)
+    act(() => result().handleKeyDown(event, policy))
+    expect({
+      queued: vi.mocked(policy.onArrowUpOnEmpty!).mock.calls,
+      history: vi.mocked(policy.onHistoryNavigate!).mock.calls,
+      consumed: event.nativeEvent.defaultPrevented,
+    }).toEqual({ queued: [], history: [], consumed: false })
+    unmount()
+  })
+
+  it.each([true, false])(
+    'gives queued recall priority only when it handles the key: %s',
+    (queued) => {
+      const { result, textarea, unmount } = renderPromptEditor({ workspaceId: 'ws-1' })
+      const onHistoryNavigate = vi.fn(() => true)
+      const event = key(textarea, 'ArrowUp')
+      act(() =>
+        result().handleKeyDown(event, { onArrowUpOnEmpty: () => queued, onHistoryNavigate })
+      )
+      expect(onHistoryNavigate.mock.calls).toEqual(queued ? [] : [['previous']])
+      unmount()
+    }
+  )
+})
 
 describe('usePromptEditor mention menu dismissal', () => {
   let openMenu: PlusMenuHandle

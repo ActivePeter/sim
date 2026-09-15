@@ -8,6 +8,7 @@ interface TestPlanNode {
   execution?: { lease: { fencingToken: number; state: string } }
   id: string
   lifecycle: string
+  localRepositoryPath?: string
   primaryPr: { checks: string; number: number | null; review: string; state: string }
   summary: string
   title: string
@@ -49,6 +50,7 @@ async function runPlanNode(
       SIM_API_URL: `http://127.0.0.1:${server.port}`,
       SIM_API_KEY: 'test-key',
       SIM_WORKSPACE_ID: 'workspace-test',
+      SIM_PLAN_ID: '',
     },
     stderr: 'pipe',
     stdout: 'pipe',
@@ -62,6 +64,28 @@ async function runPlanNode(
 }
 
 describe('plan-node skill script', () => {
+  it.each([0, 2])('requires a DAG selection when the database lists %s graphs', async (count) => {
+    const paths: string[] = []
+    const server = Bun.serve({
+      port: 0,
+      fetch(request) {
+        const path = new URL(request.url).pathname
+        paths.push(path)
+        return Response.json({
+          data: Array.from({ length: count }, (_, index) => ({ id: `dag-${index}` })),
+        })
+      },
+    })
+    try {
+      const result = await runPlanNode(process.cwd(), server, ['inspect'])
+      expect(result.exitCode).toBe(1)
+      expect(result.stderr).toContain('Set SIM_PLAN_ID')
+      expect(paths).toEqual(['/api/v2/dags'])
+    } finally {
+      server.stop(true)
+    }
+  })
+
   it('claims once, provisions an isolated worktree, and binds the PR', async () => {
     const root = mkdtempSync(join(tmpdir(), 'sim-plan-node-'))
     temporaryPaths.push(root)
@@ -77,10 +101,9 @@ describe('plan-node skill script', () => {
     git(repository, ['remote', 'add', 'fork', remote])
     git(repository, ['push', '-u', 'fork', 'main'])
 
-    let version = '2026-08-31T00:00:00.000Z'
     let plan: TestPlan = {
       schemaVersion: 1,
-      id: 'agent-session-prs',
+      id: 'database-only-plan',
       name: 'Test plan',
       repository: 'example/sim',
       remote: 'fork',
@@ -93,6 +116,7 @@ describe('plan-node skill script', () => {
           title: 'First node',
           summary: 'Deliver the first node.',
           lifecycle: 'planned',
+          localRepositoryPath: repository,
           primaryPr: { number: null, state: 'Unopened', checks: 'Pending', review: 'Pending' },
         },
       ],
@@ -101,47 +125,41 @@ describe('plan-node skill script', () => {
       port: 0,
       async fetch(request) {
         const url = new URL(request.url)
-        if (request.method === 'GET' && url.pathname === '/api/v2/files') {
+        if (request.method === 'GET' && url.pathname === '/api/v2/dags') {
           return Response.json({
             data: [
               {
-                id: 'file-1',
-                name: 'sim-plan-agent-session-prs.json',
-                contentUpdatedAt: version,
+                id: plan.id,
+                name: plan.name,
+                revision: plan.revision,
               },
             ],
           })
         }
-        if (request.method === 'GET' && url.pathname === '/api/v2/files/file-1/text') {
-          return Response.json({ data: { text: JSON.stringify(plan) } })
+        if (request.method === 'GET' && url.pathname === `/api/v2/dags/${plan.id}`) {
+          return Response.json({ data: plan })
         }
-        if (request.method === 'PUT' && url.pathname === '/api/v2/files/file-1/content') {
+        if (request.method === 'PUT' && url.pathname === `/api/v2/dags/${plan.id}`) {
           const body = (await request.json()) as {
-            content: string
-            expectedContentUpdatedAt: string
+            document: TestPlan
+            expectedRevision: number
           }
-          if (body.expectedContentUpdatedAt !== version) {
+          if (body.expectedRevision !== plan.revision) {
             return Response.json(
-              { error: { code: 'CONFLICT', message: 'content version conflict' } },
+              { error: { code: 'CONFLICT', message: 'DAG revision conflict' } },
               { status: 409 }
             )
           }
-          plan = JSON.parse(body.content) as TestPlan
-          version = new Date(new Date(version).getTime() + 1).toISOString()
-          return Response.json({
-            data: {
-              id: 'file-1',
-              name: 'sim-plan-agent-session-prs.json',
-              contentUpdatedAt: version,
-            },
-          })
+          expect(body.document.revision).toBe(plan.revision + 1)
+          plan = body.document
+          return Response.json({ data: plan })
         }
         return new Response('not found', { status: 404 })
       },
     })
 
     try {
-      const claimed = await runPlanNode(repository, server, [
+      const claimed = await runPlanNode(root, server, [
         'claim',
         '--node',
         'PG-01',
@@ -154,6 +172,7 @@ describe('plan-node skill script', () => {
       expect(plan.items[0]).toMatchObject({
         lifecycle: 'active',
         agent: 'codex-test',
+        localRepositoryPath: repository,
         execution: { lease: { state: 'active', fencingToken: 1 } },
       })
 

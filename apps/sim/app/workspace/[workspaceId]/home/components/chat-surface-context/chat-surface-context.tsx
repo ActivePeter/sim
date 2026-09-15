@@ -24,6 +24,8 @@ interface ChatSurfaceContextValue {
   chatId?: string
   /** Id of the user interacting with this surface. */
   userId?: string
+  /** Whether this runtime supports the native service's fork and feedback operations. */
+  serviceActionsEnabled: boolean
   /** Notifies the surface owner that a context chip was added to the input. */
   onContextAdd: (context: ChatContext) => void
   /**
@@ -38,6 +40,7 @@ interface ChatSurfaceContextValue {
 }
 
 const ChatSurfaceContext = createContext<ChatSurfaceContextValue>({
+  serviceActionsEnabled: true,
   onContextAdd: noop,
   onContextRemove: noop,
   onWorkspaceResourceSelect: noop,
@@ -46,6 +49,7 @@ const ChatSurfaceContext = createContext<ChatSurfaceContextValue>({
 interface ChatSurfaceProviderProps {
   chatId?: string
   userId?: string
+  serviceActionsEnabled?: boolean
   onContextAdd?: (context: ChatContext) => void
   onContextRemove?: (context: ChatContext, remaining: ChatContext[]) => void
   onWorkspaceResourceSelect?: (resource: WorkspaceResourceRef) => void
@@ -55,12 +59,13 @@ interface ChatSurfaceProviderProps {
 /**
  * Provides the chat-surface identity and interaction callbacks to descendants.
  * Callbacks are latched in refs and exposed as stable wrappers so the memoized
- * context value only changes when `chatId` or `userId` change — consumers do
+ * context value only changes when identity or capabilities change — consumers do
  * not re-render when a parent re-creates a handler.
  */
 export function ChatSurfaceProvider({
   chatId,
   userId,
+  serviceActionsEnabled = true,
   onContextAdd,
   onContextRemove,
   onWorkspaceResourceSelect,
@@ -90,11 +95,19 @@ export function ChatSurfaceProvider({
     () => ({
       chatId,
       userId,
+      serviceActionsEnabled,
       onContextAdd: stableOnContextAdd,
       onContextRemove: stableOnContextRemove,
       onWorkspaceResourceSelect: stableOnWorkspaceResourceSelect,
     }),
-    [chatId, userId, stableOnContextAdd, stableOnContextRemove, stableOnWorkspaceResourceSelect]
+    [
+      chatId,
+      userId,
+      serviceActionsEnabled,
+      stableOnContextAdd,
+      stableOnContextRemove,
+      stableOnWorkspaceResourceSelect,
+    ]
   )
 
   return <ChatSurfaceContext.Provider value={value}>{children}</ChatSurfaceContext.Provider>

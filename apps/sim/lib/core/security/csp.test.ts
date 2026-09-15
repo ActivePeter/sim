@@ -25,6 +25,7 @@ import {
   generateRuntimeCSP,
   getChatEmbedCSPPolicy,
   getMainCSPPolicy,
+  getVibeVscodeEmbedCSPPolicy,
   getWorkflowExecutionCSPPolicy,
   removeCSPSource,
 } from './csp'
@@ -295,6 +296,26 @@ describe('getChatEmbedCSPPolicy', () => {
 
   it('does not regress object-src or base-uri restrictions', () => {
     const policy = getChatEmbedCSPPolicy()
+    expect(policy).toContain("object-src 'none'")
+    expect(policy).toContain("base-uri 'self'")
+  })
+})
+
+describe('getVibeVscodeEmbedCSPPolicy', () => {
+  it('admits only the Sim origin and trusted VS Code webview ancestors', () => {
+    const policy = getVibeVscodeEmbedCSPPolicy()
+    const frameAncestors = policy
+      .split('; ')
+      .find((directive) => directive.startsWith('frame-ancestors '))
+
+    expect(frameAncestors).toBe("frame-ancestors 'self' https://*.vscode-cdn.net vscode-webview:")
+    expect(frameAncestors).not.toContain('* ')
+  })
+
+  it('keeps the main document restrictions intact', () => {
+    const policy = getVibeVscodeEmbedCSPPolicy()
+
+    expect(policy).toContain("default-src 'self'")
     expect(policy).toContain("object-src 'none'")
     expect(policy).toContain("base-uri 'self'")
   })

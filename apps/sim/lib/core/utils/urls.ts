@@ -77,6 +77,14 @@ function isTriggerWorkerRuntime(): boolean {
 }
 
 export function getInternalApiBaseUrl(): string {
+  /** Next assigns PORT before initializing the packaged application's request handlers. */
+  if (typeof window === 'undefined' && getEnv('SIM_VSCODE_PLUGIN') === 'true') {
+    const port = Number(process.env.PORT)
+    if (!Number.isInteger(port) || port < 1 || port > 65535) {
+      throw new Error('The plugin application transport is not ready')
+    }
+    return `http://127.0.0.1:${port}`
+  }
   const internalBaseUrl = getEnv('INTERNAL_API_BASE_URL')?.trim()
   /*
    * `INTERNAL_API_BASE_URL` describes a route that exists only from inside the
@@ -230,7 +238,9 @@ export function isLocalhostUrl(url: string): boolean {
  * baked into the client bundle at build time can't pin requests to the wrong host.
  */
 export function getBrowserOrigin(): string | null {
-  return typeof window !== 'undefined' ? window.location.origin : null
+  if (typeof window === 'undefined') return null
+  /** Webviews may have a non-HTTP origin; their owned transport resolves the virtual HTTP origin. */
+  return window.vibeVscodeTransport ? getBaseUrl() : window.location.origin
 }
 
 /**
@@ -253,6 +263,11 @@ export function isSafeHttpUrl(url: string): boolean {
  * Reads from SOCKET_SERVER_URL with a localhost fallback for development.
  */
 export function getSocketServerUrl(): string {
+  if (getEnv('SIM_VSCODE_PLUGIN') === 'true') {
+    const url = getEnv('SOCKET_SERVER_URL')
+    if (!url) throw new Error('The plugin realtime transport is not ready')
+    return url
+  }
   return env.SOCKET_SERVER_URL || DEFAULT_SOCKET_URL
 }
 
@@ -261,7 +276,7 @@ export function getSocketServerUrl(): string {
  *
  * Resolution order:
  * 1. `NEXT_PUBLIC_SOCKET_URL` if explicitly set (subdomain, separate host:port)
- * 2. In the browser when the page is served from a non-localhost origin, the
+ * 2. In the browser when the page uses HTTPS or a non-localhost origin, the
  *    page's own origin — assumes the reverse proxy routes `/socket.io` to the
  *    realtime service. This avoids shipping a hardcoded `localhost:3002` to
  *    self-hosters behind nginx/Cloudflare.
@@ -272,7 +287,11 @@ export function getSocketUrl(): string {
   if (explicit) return explicit
 
   const browserOrigin = getBrowserOrigin()
-  if (browserOrigin && !isLoopbackHostname(new URL(browserOrigin).hostname)) {
+  if (
+    browserOrigin &&
+    (new URL(browserOrigin).protocol === 'https:' ||
+      !isLoopbackHostname(new URL(browserOrigin).hostname))
+  ) {
     return browserOrigin
   }
 

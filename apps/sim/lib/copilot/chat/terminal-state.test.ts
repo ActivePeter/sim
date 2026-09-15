@@ -15,7 +15,7 @@ vi.mock('@/lib/copilot/chat/messages-store', () => ({
   appendCopilotChatMessages: mockAppendCopilotChatMessages,
 }))
 
-import { finalizeAssistantTurn } from './terminal-state'
+import { finalizeAssistantTurn } from '@/lib/copilot/chat/terminal-state'
 
 const assistantMessage = {
   id: 'assistant-1',
@@ -142,4 +142,30 @@ describe('finalizeAssistantTurn', () => {
     expect(dbChainMockFns.set).not.toHaveBeenCalled()
     expect(mockAppendCopilotChatMessages).not.toHaveBeenCalled()
   })
+
+  it.each(['active-only', 'active-or-cleared'] as const)(
+    'does not overwrite a newer turn under the %s policy',
+    async (streamMarkerPolicy) => {
+      mockReads({
+        chat: { conversationId: 'newer-user', workspaceId: 'ws-1', model: null },
+        last: { messageId: 'newer-user', role: 'user' },
+      })
+
+      const result = await finalizeAssistantTurn({
+        chatId: 'chat-1',
+        userMessageId: 'user-1',
+        streamMarkerPolicy,
+        assistantMessage,
+      })
+
+      expect(result).toMatchObject({
+        found: true,
+        updated: false,
+        appendedAssistant: false,
+        outcome: 'stale_user_message',
+      })
+      expect(dbChainMockFns.set).not.toHaveBeenCalled()
+      expect(mockAppendCopilotChatMessages).not.toHaveBeenCalled()
+    }
+  )
 })

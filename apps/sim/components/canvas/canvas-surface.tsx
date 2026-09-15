@@ -5,6 +5,7 @@ import { cn } from '@sim/emcn'
 import { createLogger } from '@sim/logger'
 import ReactFlow, { type ReactFlowProps, useStoreApi } from 'reactflow'
 import 'reactflow/dist/style.css'
+import { CANVAS_FIT_VIEW_OPTIONS } from '@/components/canvas/canvas-constants'
 import type { CanvasDocumentKind } from '@/lib/canvas/types'
 
 export interface CanvasSurfaceProps extends ReactFlowProps {
@@ -26,6 +27,7 @@ const CANVAS_SURFACE_STYLES = [
 export function CanvasSurface({
   className,
   documentKind,
+  fitViewOptions = CANVAS_FIT_VIEW_OPTIONS,
   onError,
   proOptions = DEFAULT_PRO_OPTIONS,
   ...reactFlowProps
@@ -71,6 +73,7 @@ export function CanvasSurface({
       {...reactFlowProps}
       className={surfaceClassName}
       data-canvas-document-kind={documentKind}
+      fitViewOptions={fitViewOptions}
       onError={handleError}
       proOptions={proOptions}
     />

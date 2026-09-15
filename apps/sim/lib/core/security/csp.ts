@@ -173,6 +173,12 @@ const STATIC_FRAME_SRC = [
   'https://giphy.com',
 ] as const
 
+const VIBE_VSCODE_FRAME_ANCESTORS = [
+  "'self'",
+  'https://*.vscode-cdn.net',
+  'vscode-webview:',
+] as const
+
 // Build-time CSP directives (for next.config.ts)
 export const buildTimeCSPDirectives: CSPDirectives = {
   'default-src': ["'self'"],
@@ -227,7 +233,7 @@ export function buildCSPString(directives: CSPDirectives): string {
  * but resolves env vars at request time via getEnv() to fix Docker
  * deployments where build-time values may be stale placeholders.
  */
-export function generateRuntimeCSP(): string {
+export function generateRuntimeCSP(options?: { frameAncestors?: readonly string[] }): string {
   const appUrl = getEnv('NEXT_PUBLIC_APP_URL') || ''
 
   // Must permit whatever getSocketUrl() actually connects to, or the browser
@@ -261,9 +267,22 @@ export function generateRuntimeCSP(): string {
       ...privacyDomains,
       ...termsDomains,
     ],
+    'frame-ancestors': options?.frameAncestors
+      ? [...options.frameAncestors]
+      : buildTimeCSPDirectives['frame-ancestors'],
   }
 
   return buildCSPString(runtimeDirectives)
+}
+
+/**
+ * CSP for the trusted Vibe VS Code editor host.
+ *
+ * The document remains same-origin with the Vibe HTTPS gateway while its immediate parent is a
+ * VS Code webview origin. Both ancestors must be admitted for Chromium to render the frame.
+ */
+export function getVibeVscodeEmbedCSPPolicy(): string {
+  return generateRuntimeCSP({ frameAncestors: VIBE_VSCODE_FRAME_ANCESTORS })
 }
 
 /**

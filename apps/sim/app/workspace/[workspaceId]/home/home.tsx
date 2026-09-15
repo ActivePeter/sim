@@ -33,8 +33,15 @@ import {
   type MothershipSendMessageDetail,
 } from '@/lib/mothership/events'
 import { captureEvent } from '@/lib/posthog/client'
+import {
+  getProjectAgentPermission,
+  type ProjectAgentSettings,
+} from '@/lib/vibe-vscode/agent-config'
+import type { VscodeSessionOrigin } from '@/lib/vibe-vscode/types'
 import { persistImportedWorkflow } from '@/lib/workflows/operations/import-export'
+import { ProjectLauncher } from '@/app/workspace/[workspaceId]/agents/components/project-launcher'
 import { RESOURCE_HEADER_CLASSES } from '@/app/workspace/[workspaceId]/home/components/mothership-view/components/resource-tabs/resource-tab-controls'
+import { ProjectAgentControls } from '@/app/workspace/[workspaceId]/home/components/project-agent-controls'
 import { resolveWorkspaceResourceRef } from '@/app/workspace/[workspaceId]/home/resolve-resource-ref'
 import {
   resolveResourceEventPresentation,
@@ -43,9 +50,11 @@ import {
 import { resourceParam, resourceUrlKeys } from '@/app/workspace/[workspaceId]/home/search-params'
 import { useFolders } from '@/hooks/queries/folders'
 import { useMarkMothershipChatRead } from '@/hooks/queries/mothership-chats'
+import { useProjectAgentConfig, useUpdateProjectAgentConfig } from '@/hooks/queries/vscode-agents'
 import { useWorkflows } from '@/hooks/queries/workflows'
 import { getWorkspaceFilesQueryOptions, useWorkspaceFiles } from '@/hooks/queries/workspace-files'
 import { useOAuthReturnRouter } from '@/hooks/use-oauth-return'
+import { useVscodeEmbedded, useVscodeSurface } from '@/hooks/use-vscode-surface'
 import type { ChatContext } from '@/stores/panel'
 import {
   ChatSurfaceProvider,
@@ -87,12 +96,39 @@ interface HomeProps {
   chatId?: string
   userName?: string
   userId?: string
+  projectOrigin?: VscodeSessionOrigin
 }
 
-export function Home({ chatId, userName, userId }: HomeProps) {
+export function Home(props: HomeProps) {
+  const embedded = useVscodeEmbedded()
+  if (embedded && !props.chatId) {
+    return (
+      <div className='flex h-full items-center justify-center overflow-y-auto p-6'>
+        <div className='w-full max-w-md'>
+          <h1 className='mb-3 text-heading'>新建项目 Chat</h1>
+          <p className='mb-5 text-[var(--text-muted)] text-small'>
+            选择 VS Code 项目，创建由 Sim 管理的原生 Agent 会话。
+          </p>
+          <ProjectLauncher />
+        </div>
+      </div>
+    )
+  }
+  return <ChatHome {...props} embedded={embedded} />
+}
+
+function ChatHome({
+  chatId,
+  userName,
+  userId,
+  projectOrigin,
+  embedded,
+}: HomeProps & { embedded: boolean }) {
   useOAuthReturnRouter()
   const { workspaceId } = useParams<{ workspaceId: string }>()
   const router = useRouter()
+  const compact = useVscodeSurface() === 'sidebar'
+  const resourceSurfaceEnabled = !compact && !projectOrigin
   const queryClient = useQueryClient()
   /**
    * URL is the single source of truth for the selected resource. `Home` renders
@@ -254,6 +290,7 @@ export function Home({ chatId, userName, userId }: HomeProps) {
     isChatHistoryPending,
     isSending,
     isReconnecting,
+    error,
     sendMessage,
     stopGeneration,
     resolvedChatId,
@@ -292,6 +329,47 @@ export function Home({ chatId, userName, userId }: HomeProps) {
   )
 
   const { mothershipRef, handleResizePointerDown, clearWidth } = useMothershipResize(desktopScopeId)
+  const agentConfigQuery = useProjectAgentConfig(
+    workspaceId,
+    projectOrigin ? (resolvedChatId ?? undefined) : undefined
+  )
+  const { mutateAsync: saveAgentConfig, isPending: isAgentConfigSaving } =
+    useUpdateProjectAgentConfig()
+  const handleSaveAgentConfig = useCallback(
+    (settings: ProjectAgentSettings, expectedRevision: number) => {
+      if (!resolvedChatId) return Promise.reject(new Error('项目会话尚未就绪'))
+      return saveAgentConfig({
+        chatId: resolvedChatId,
+        body: { workspaceId, settings, expectedRevision },
+      })
+    },
+    [resolvedChatId, workspaceId, saveAgentConfig]
+  )
+  const currentProjectAgent = agentConfigQuery.data?.agents.find(
+    (agent) => agent.id === agentConfigQuery.data?.config.agentId
+  )
+  const agentSubmissionBlocked =
+    !!projectOrigin &&
+    (!agentConfigQuery.data ||
+      isAgentConfigSaving ||
+      !currentProjectAgent?.available ||
+      !getProjectAgentPermission(
+        currentProjectAgent?.permissions,
+        agentConfigQuery.data.config.permissionMode
+      ))
+  const agentToolbar = projectOrigin ? (
+    <ProjectAgentControls
+      key={`${workspaceId}:${resolvedChatId}`}
+      data={agentConfigQuery.data}
+      loadError={agentConfigQuery.error}
+      saving={isAgentConfigSaving}
+      hasMessages={messages.length > 0 || isSending || isReconnecting}
+      onRefresh={() => {
+        void agentConfigQuery.refetch()
+      }}
+      onSave={handleSaveAgentConfig}
+    />
+  ) : undefined
   const effectiveActiveResourceIdRef = useRef(activeResourceId)
   effectiveActiveResourceIdRef.current = activeResourceId
   const resourceAttentionChatIdRef = useRef(resolvedChatId)
@@ -624,7 +702,50 @@ export function Home({ chatId, userName, userId }: HomeProps) {
   return (
     <div className={cn('relative flex h-full bg-[var(--bg)]', RESOURCE_HEADER_CLASSES.layout)}>
       <div className='relative flex h-full min-w-[240px] flex-1 flex-col'>
-        {showEmptyState && (
+        {projectOrigin && !compact && (
+          <header className='shrink-0 border-[var(--border)] border-b px-5 py-3 text-small'>
+            {projectOrigin.project.name} · 项目 Agent
+            <span className='ml-2 text-[var(--text-muted)] text-caption'>
+              {projectOrigin.logicalWorkspace?.name ?? projectOrigin.physicalWorkspace.name} · Sim
+              原生会话
+            </span>
+          </header>
+        )}
+        {projectOrigin?.selection && !compact && (
+          <details className='shrink-0 border-[var(--border)] border-b px-5 py-3 text-small'>
+            <summary className='cursor-pointer'>
+              文件选区：{projectOrigin.selection.uri.split('/').pop()} · L
+              {projectOrigin.selection.range.startLine + 1}:C
+              {projectOrigin.selection.range.startCharacter + 1}–L
+              {projectOrigin.selection.range.endLine + 1}:C
+              {projectOrigin.selection.range.endCharacter + 1}
+            </summary>
+            <p className='mt-2 break-all text-[var(--text-muted)] text-caption'>
+              {projectOrigin.selection.uri}
+            </p>
+            <pre className='mt-2 max-h-48 overflow-auto whitespace-pre-wrap break-words text-caption'>
+              {projectOrigin.selection.text}
+            </pre>
+          </details>
+        )}
+        {embedded && !projectOrigin && !compact && (
+          <div className='shrink-0 border-[var(--border)] border-b px-5 py-3 text-small'>
+            <p className='mb-2 text-[var(--text-muted)]'>
+              这条旧会话未绑定 VS Code 项目，使用的是 Sim 云 Agent。要在本地项目工作，请新建项目
+              Chat；原会话记录会保留。
+            </p>
+            <ProjectLauncher compact triggerLabel='新建项目 Chat' />
+          </div>
+        )}
+        {error && !compact && (
+          <div
+            role='alert'
+            className='shrink-0 break-words px-5 py-3 text-[var(--text-error)] text-small'
+          >
+            {error}
+          </div>
+        )}
+        {showEmptyState && resourceSurfaceEnabled && (
           <div
             className={cn(
               'z-10',
@@ -646,9 +767,16 @@ export function Home({ chatId, userName, userId }: HomeProps) {
         {showEmptyState ? (
           <div className='h-full overflow-y-auto [scrollbar-gutter:stable_both-edges]'>
             {/* Asymmetric padding biases the group up so the full cluster (heading + input + suggestions) sits at the optical center */}
-            <div className='flex min-h-full flex-col items-center justify-center px-6 pt-[2vh] pb-[22vh]'>
+            <div
+              className={cn(
+                'flex min-h-full flex-col items-center justify-center',
+                compact ? 'px-3 py-5' : 'px-6 pt-[2vh] pb-[22vh]'
+              )}
+            >
               <h1 className='mb-7 max-w-chat text-balance font-season text-[26px] text-[var(--text-primary)] leading-[1.15] tracking-[-0.01em] sm:text-[28px]'>
-                What should we get done{firstName ? `, ${firstName}` : ''}?
+                {compact
+                  ? '开始项目会话'
+                  : `What should we get done${firstName ? `, ${firstName}` : ''}?`}
               </h1>
               <div ref={initialViewInputRef} className='relative w-full max-w-chat'>
                 <ChatSurfaceProvider
@@ -661,23 +789,33 @@ export function Home({ chatId, userName, userId }: HomeProps) {
                     defaultValue={initialPrompt}
                     draftScopeKey={draftScopeKey}
                     onSubmit={handleSubmit}
+                    textOnly={!!projectOrigin}
+                    toolbar={agentToolbar}
+                    submissionBlocked={agentSubmissionBlocked}
                     isSending={isSending}
                     onStopGeneration={handleStopGeneration}
                   />
                 </ChatSurfaceProvider>
                 {/* Anchored out of flow so expanding/collapsing never shifts the centered input */}
-                <div className='absolute inset-x-0 top-full'>
-                  <SuggestedActions
-                    onSelectPrompt={(prompt) =>
-                      initialViewUserInputRef.current?.populatePrompt(prompt)
-                    }
-                  />
-                </div>
+                {resourceSurfaceEnabled && (
+                  <div className='absolute inset-x-0 top-full'>
+                    <SuggestedActions
+                      onSelectPrompt={(prompt) =>
+                        initialViewUserInputRef.current?.populatePrompt(prompt)
+                      }
+                    />
+                  </div>
+                )}
               </div>
             </div>
           </div>
         ) : (
           <MothershipChat
+            textOnly={!!projectOrigin}
+            toolbar={agentToolbar}
+            submissionBlocked={agentSubmissionBlocked}
+            serviceActionsEnabled={!projectOrigin}
+            layout={compact ? 'copilot-view' : 'mothership-view'}
             workspaceId={workspaceId}
             messages={messages}
             isSending={isSending}
@@ -699,13 +837,15 @@ export function Home({ chatId, userName, userId }: HomeProps) {
             draftScopeKey={draftScopeKey}
             animateInput={isInputEntering}
             onInputAnimationEnd={isInputEntering ? () => setIsInputEntering(false) : undefined}
-            initialScrollBlocked={resources.length > 0 && isResourceCollapsed}
+            initialScrollBlocked={
+              resourceSurfaceEnabled && resources.length > 0 && isResourceCollapsed
+            }
           />
         )}
       </div>
 
       {/* Resize handle — zero-width flex child whose absolute child straddles the border */}
-      {!isResourceCollapsed && (
+      {resourceSurfaceEnabled && !isResourceCollapsed && (
         <div className='relative z-20 w-0 flex-none'>
           <div
             className='absolute inset-y-0 left-[-4px] w-[8px] cursor-ew-resize'
@@ -717,54 +857,62 @@ export function Home({ chatId, userName, userId }: HomeProps) {
         </div>
       )}
 
-      <MothershipResourcesProvider
-        selectResource={selectResourceFromUser}
-        addResource={addResourceFromUser}
-        removeResource={removeResource}
-        reorderResources={reorderResources}
-        collapseResource={collapseResource}
-      >
-        <Suspense fallback={null}>
-          <MothershipView
-            ref={mothershipRef}
-            workspaceId={workspaceId}
-            chatId={resolvedChatId}
-            desktopScopeId={desktopScopeId}
-            resources={resources}
-            activeResourceId={activeResourceId}
-            activityResourceIds={resourceActivityIds}
-            isCollapsed={isResourceCollapsed}
-            previewSession={previewSession}
-            isAgentResponding={isSending}
-            genericResourceData={genericResourceData ?? undefined}
-            onUserInteraction={handleResourceInteraction}
-            className={skipResourceTransition ? '!transition-none' : undefined}
-          />
-        </Suspense>
-      </MothershipResourcesProvider>
-
-      <div
-        className={cn('z-30', RESOURCE_HEADER_CLASSES.overlay, RESOURCE_HEADER_CLASSES.endPosition)}
-      >
-        <Button
-          variant='ghost'
-          size={null}
-          type='button'
-          onClick={isResourceCollapsed ? expandResource : collapseResource}
-          className="after:-translate-x-1/2 after:-translate-y-1/2 relative size-[var(--resource-header-toggle-size)] rounded-[8px] after:absolute after:top-1/2 after:left-1/2 after:size-[var(--resource-header-toggle-hit-size)] after:content-[''] hover-hover:bg-[var(--surface-active)]"
-          aria-label={resourceToggleLabel}
+      {resourceSurfaceEnabled && (
+        <MothershipResourcesProvider
+          selectResource={selectResourceFromUser}
+          addResource={addResourceFromUser}
+          removeResource={removeResource}
+          reorderResources={reorderResources}
+          collapseResource={collapseResource}
         >
-          <span className='relative'>
-            <PanelLeft className='-scale-x-100 size-[16px] text-[var(--text-icon)]' />
-            {isResourceCollapsed && resourceActivityIds.size > 0 && (
-              <span
-                aria-hidden='true'
-                className='-top-0.5 -right-0.5 absolute size-1.5 rounded-full bg-[var(--brand-primary)]'
-              />
-            )}
-          </span>
-        </Button>
-      </div>
+          <Suspense fallback={null}>
+            <MothershipView
+              ref={mothershipRef}
+              workspaceId={workspaceId}
+              chatId={resolvedChatId}
+              desktopScopeId={desktopScopeId}
+              resources={resources}
+              activeResourceId={activeResourceId}
+              activityResourceIds={resourceActivityIds}
+              isCollapsed={isResourceCollapsed}
+              previewSession={previewSession}
+              isAgentResponding={isSending}
+              genericResourceData={genericResourceData ?? undefined}
+              onUserInteraction={handleResourceInteraction}
+              className={skipResourceTransition ? '!transition-none' : undefined}
+            />
+          </Suspense>
+        </MothershipResourcesProvider>
+      )}
+
+      {resourceSurfaceEnabled && (
+        <div
+          className={cn(
+            'z-30',
+            RESOURCE_HEADER_CLASSES.overlay,
+            RESOURCE_HEADER_CLASSES.endPosition
+          )}
+        >
+          <Button
+            variant='ghost'
+            size={null}
+            type='button'
+            onClick={isResourceCollapsed ? expandResource : collapseResource}
+            className="after:-translate-x-1/2 after:-translate-y-1/2 relative size-[var(--resource-header-toggle-size)] rounded-[8px] after:absolute after:top-1/2 after:left-1/2 after:size-[var(--resource-header-toggle-hit-size)] after:content-[''] hover-hover:bg-[var(--surface-active)]"
+            aria-label={resourceToggleLabel}
+          >
+            <span className='relative'>
+              <PanelLeft className='-scale-x-100 size-[16px] text-[var(--text-icon)]' />
+              {isResourceCollapsed && resourceActivityIds.size > 0 && (
+                <span
+                  aria-hidden='true'
+                  className='-top-0.5 -right-0.5 absolute size-1.5 rounded-full bg-[var(--brand-primary)]'
+                />
+              )}
+            </span>
+          </Button>
+        </div>
+      )}
     </div>
   )
 }

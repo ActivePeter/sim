@@ -35,6 +35,9 @@ export const auditMock = {
   auditUpdatedFields: (updateValues: object): string[] =>
     Object.keys(updateValues).filter((key) => key !== 'updatedAt'),
   AuditAction: {
+    DAG_CREATED: 'dag.created',
+    DAG_UPDATED: 'dag.updated',
+    DAG_IMPORTED: 'dag.imported',
     API_KEY_CREATED: 'api_key.created',
     API_KEY_UPDATED: 'api_key.updated',
     API_KEY_REVOKED: 'api_key.revoked',
@@ -195,6 +198,7 @@ export const auditMock = {
     ACCOUNT_DELETED: 'account.deleted',
   },
   AuditResourceType: {
+    DAG: 'dag',
     ACCOUNT: 'account',
     API_KEY: 'api_key',
     BILLING: 'billing',

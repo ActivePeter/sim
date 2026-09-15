@@ -30,6 +30,7 @@ import {
   usePromptEditor,
 } from '@/app/workspace/[workspaceId]/home/components/user-input/components'
 import { handleMothershipAddContextEvent } from '@/app/workspace/[workspaceId]/home/components/user-input/mothership-context-event'
+import { PromptHistoryNavigation } from '@/app/workspace/[workspaceId]/home/components/user-input/prompt-history'
 import type {
   FileAttachmentForApi,
   MothershipResource,
@@ -69,7 +70,14 @@ interface UserInputProps {
   onStopGeneration: () => void
   isInitialView?: boolean
   onSendQueuedHead?: () => void
-  onEditQueuedTail?: () => void
+  onEditQueuedTail?: () => boolean
+  /** User prompts from this chat's native transcript, in chronological order. */
+  promptHistory?: readonly string[]
+  /** The native composer is shared by runtimes with different input capabilities. */
+  textOnly?: boolean
+  /** Runtime controls are composed by the chat owner, not another input implementation. */
+  toolbar?: React.ReactNode
+  submissionBlocked?: boolean
 }
 
 export interface UserInputHandle {
@@ -97,6 +105,10 @@ const UserInputImpl = forwardRef<UserInputHandle, UserInputProps>(function UserI
     isInitialView = true,
     onSendQueuedHead,
     onEditQueuedTail,
+    promptHistory = [],
+    textOnly = false,
+    toolbar,
+    submissionBlocked = false,
   },
   ref
 ) {
@@ -104,6 +116,7 @@ const UserInputImpl = forwardRef<UserInputHandle, UserInputProps>(function UserI
   const { navigateToSettings } = useSettingsNavigation()
   const { userId, onContextAdd, onContextRemove } = useChatSurface()
   const [microphonePermissionHelpOpen, setMicrophonePermissionHelpOpen] = useState(false)
+  const historyNavigationRef = useRef(new PromptHistoryNavigation())
 
   const [initialValue] = useState(() => {
     if (defaultValue) return defaultValue
@@ -117,7 +130,7 @@ const UserInputImpl = forwardRef<UserInputHandle, UserInputProps>(function UserI
   const files = useFileAttachments({
     userId,
     workspaceId,
-    disabled: false,
+    disabled: textOnly,
     isLoading: isSending,
   })
   const hasFiles = files.attachedFiles.some((f) => !f.uploading && f.key)
@@ -133,8 +146,8 @@ const UserInputImpl = forwardRef<UserInputHandle, UserInputProps>(function UserI
   const editor = usePromptEditor({
     workspaceId,
     initialValue,
-    onContextAdd,
-    onPasteFiles: handlePasteFiles,
+    onContextAdd: textOnly ? undefined : onContextAdd,
+    onPasteFiles: textOnly ? undefined : handlePasteFiles,
   })
   const editorRef = useRef(editor)
   editorRef.current = editor
@@ -147,13 +160,14 @@ const UserInputImpl = forwardRef<UserInputHandle, UserInputProps>(function UserI
    * input consumed it and skips its persist-and-navigate fallback.
    */
   useEffect(() => {
+    if (textOnly) return
     const handleAddContext = (event: Event) => {
       handleMothershipAddContextEvent(event, editorRef.current)
     }
 
     window.addEventListener(MOTHERSHIP_ADD_CONTEXT_EVENT, handleAddContext)
     return () => window.removeEventListener(MOTHERSHIP_ADD_CONTEXT_EVENT, handleAddContext)
-  }, [])
+  }, [textOnly])
 
   const draftScopeKeyRef = useRef(draftScopeKey)
   draftScopeKeyRef.current = draftScopeKey
@@ -191,8 +205,8 @@ const UserInputImpl = forwardRef<UserInputHandle, UserInputProps>(function UserI
       useMothershipDraftsStore.getState().clearDraft(draftScopeKey)
       return
     }
-    if (restoredContexts) editor.setContexts(restoredContexts)
-    if (restoredFiles) files.restoreAttachedFiles(restoredFiles)
+    if (restoredContexts && !textOnly) editor.setContexts(restoredContexts)
+    if (restoredFiles && !textOnly) files.restoreAttachedFiles(restoredFiles)
     if (caretText !== null) {
       const textarea = textareaRef.current
       if (textarea) {
@@ -278,7 +292,11 @@ const UserInputImpl = forwardRef<UserInputHandle, UserInputProps>(function UserI
     prevSelectedContextsRef.current = curr
   }, [editor.contexts])
 
-  const canSubmit = (editor.value.trim().length > 0 || hasFiles) && !isSending && !hasUploadingFiles
+  const canSubmit =
+    (editor.value.trim().length > 0 || hasFiles) &&
+    !isSending &&
+    !hasUploadingFiles &&
+    !submissionBlocked
 
   /**
    * Sync the editor when the `defaultValue` prop changes post-mount — e.g.
@@ -388,6 +406,7 @@ const UserInputImpl = forwardRef<UserInputHandle, UserInputProps>(function UserI
     ref,
     () => ({
       loadQueuedMessage: (msg: QueuedMessage) => {
+        historyNavigationRef.current.reset()
         const currentEditor = editorRef.current
         currentEditor.setValue(msg.content)
         const restored: AttachedFile[] = (msg.fileAttachments ?? []).map((a) => ({
@@ -405,6 +424,7 @@ const UserInputImpl = forwardRef<UserInputHandle, UserInputProps>(function UserI
         currentEditor.focusAtEnd()
       },
       populatePrompt: (text: string) => {
+        historyNavigationRef.current.reset()
         // `text` is a curated prompt, so opt its bare integration names into
         // `@`-mention form before chipification (the auto-mention pipeline only
         // chips already-`@`-prefixed names). Curated prompts arriving via the
@@ -518,6 +538,7 @@ const UserInputImpl = forwardRef<UserInputHandle, UserInputProps>(function UserI
   }
 
   const handleSubmit = useCallback(() => {
+    if (submissionBlocked) return
     const currentFiles = filesRef.current
     const currentEditor = editorRef.current
 
@@ -536,10 +557,11 @@ const UserInputImpl = forwardRef<UserInputHandle, UserInputProps>(function UserI
     // so the message reads as clean `/skill-name` (skills travel via contexts
     // regardless). Only the submitted copy is converted; the live input is not.
     const activeContexts = currentEditor.getActiveContexts()
+    historyNavigationRef.current.reset()
     onSubmit(
       currentEditor.getPlainValue(),
-      fileAttachmentsForApi.length > 0 ? fileAttachmentsForApi : undefined,
-      activeContexts.length > 0 ? activeContexts : undefined
+      !textOnly && fileAttachmentsForApi.length > 0 ? fileAttachmentsForApi : undefined,
+      !textOnly && activeContexts.length > 0 ? activeContexts : undefined
     )
     currentEditor.clear()
     sttPrefixRef.current = ''
@@ -554,7 +576,7 @@ const UserInputImpl = forwardRef<UserInputHandle, UserInputProps>(function UserI
     resetTranscript()
     currentFiles.clearAttachedFiles()
     prevSelectedContextsRef.current = []
-  }, [onSubmit, resetTranscript])
+  }, [onSubmit, resetTranscript, textOnly, submissionBlocked])
 
   /**
    * Enter policy for the editor: mirror canSubmit's uploading guard (Enter
@@ -562,6 +584,7 @@ const UserInputImpl = forwardRef<UserInputHandle, UserInputProps>(function UserI
    * on an empty input mid-stream, and otherwise submit.
    */
   const handleEnterSubmit = useCallback(() => {
+    if (submissionBlocked) return
     if (filesRef.current.attachedFiles.some((f) => f.uploading)) return
     const hasSubmitPayload =
       editorRef.current.getValue().trim().length > 0 ||
@@ -573,7 +596,7 @@ const UserInputImpl = forwardRef<UserInputHandle, UserInputProps>(function UserI
       return
     }
     handleSubmit()
-  }, [handleSubmit])
+  }, [handleSubmit, submissionBlocked])
 
   /**
    * ArrowUp-on-empty policy: recall the queued tail message for editing. Only
@@ -583,9 +606,33 @@ const UserInputImpl = forwardRef<UserInputHandle, UserInputProps>(function UserI
     if (filesRef.current.attachedFiles.length > 0) return false
     const onEditQueuedTail = onEditQueuedTailRef.current
     if (!onEditQueuedTail) return false
-    onEditQueuedTail()
-    return true
+    return onEditQueuedTail()
   }, [])
+
+  const handleHistoryNavigate = useCallback(
+    (direction: 'previous' | 'next'): boolean => {
+      const currentEditor = editorRef.current
+      /** Text recall must not silently replace an attached file or resource draft. */
+      if (filesRef.current.attachedFiles.length || currentEditor.getActiveContexts().length)
+        return false
+      const value = historyNavigationRef.current.navigate(
+        direction,
+        currentEditor.getValue(),
+        promptHistory,
+        draftScopeKey
+      )
+      if (value === undefined) return false
+      currentEditor.setValue(value, { chipify: false })
+      requestAnimationFrame(() => {
+        const textarea = textareaRef.current
+        if (!textarea || textarea.value !== value) return
+        const caret = direction === 'previous' ? 0 : value.length
+        textarea.setSelectionRange(caret, caret)
+      })
+      return true
+    },
+    [promptHistory, draftScopeKey, textareaRef]
+  )
 
   const handlePlusClick = useCallback((e: React.MouseEvent<HTMLButtonElement>) => {
     const rect = e.currentTarget.getBoundingClientRect()
@@ -611,12 +658,14 @@ const UserInputImpl = forwardRef<UserInputHandle, UserInputProps>(function UserI
         'relative z-10 mx-auto w-full max-w-chat cursor-text rounded-2xl border border-[var(--border-1)] bg-[var(--white)] px-2.5 py-2 dark:bg-[var(--surface-4)]',
         isInitialView && 'shadow-ambient'
       )}
-      onDragEnter={handleDragEnter}
-      onDragLeave={handleDragLeave}
-      onDragOver={handleContainerDragOver}
-      onDrop={handleContainerDrop}
+      onDragEnter={textOnly ? undefined : handleDragEnter}
+      onDragLeave={textOnly ? undefined : handleDragLeave}
+      onDragOver={textOnly ? (event) => event.preventDefault() : handleContainerDragOver}
+      onDrop={textOnly ? (event) => event.preventDefault() : handleContainerDrop}
     >
-      <AnimatedPlaceholderEffect textareaRef={textareaRef} isInitialView={isInitialView} />
+      {!textOnly && (
+        <AnimatedPlaceholderEffect textareaRef={textareaRef} isInitialView={isInitialView} />
+      )}
 
       <AttachedFilesList
         attachedFiles={files.attachedFiles}
@@ -626,59 +675,70 @@ const UserInputImpl = forwardRef<UserInputHandle, UserInputProps>(function UserI
 
       <PromptEditor
         editor={editor}
-        placeholder='Ask Sim to '
+        contextMenus={!textOnly}
+        placeholder={textOnly ? '描述项目任务…' : 'Ask Sim to '}
         onSubmit={handleEnterSubmit}
         onArrowUpOnEmpty={handleArrowUpOnEmpty}
+        onHistoryNavigate={handleHistoryNavigate}
         className={cn('max-h-[200px]', isInitialView && 'min-h-[56px]')}
       />
 
       <div className='flex items-center justify-between'>
-        <div className='flex items-center gap-1'>
-          <Tooltip.Root>
-            <Tooltip.Trigger asChild>
-              <Button
-                type='button'
-                variant='ghost'
-                onClick={handlePlusClick}
-                aria-label='Add resources'
-                className='size-[28px] rounded-full p-0 hover-hover:bg-[var(--surface-hover)]'
-              >
-                <Plus className='size-[16px] text-[var(--text-icon)]' />
-              </Button>
-            </Tooltip.Trigger>
-            <Tooltip.Content side='top'>Add resources</Tooltip.Content>
-          </Tooltip.Root>
-          <Tooltip.Root>
-            <Tooltip.Trigger asChild>
-              <Button
-                type='button'
-                variant='ghost'
-                onClick={handleFileSelectStable}
-                aria-label='Attach file'
-                className='size-[28px] rounded-full p-0 hover-hover:bg-[var(--surface-hover)]'
-              >
-                <Paperclip className='size-[16px] text-[var(--text-icon)]' />
-              </Button>
-            </Tooltip.Trigger>
-            <Tooltip.Content side='top'>Attach file</Tooltip.Content>
-          </Tooltip.Root>
-          <Tooltip.Root>
-            <Tooltip.Trigger asChild>
-              <Button
-                type='button'
-                variant='ghost'
-                onClick={handleSlashTriggerClick}
-                aria-label='Skills'
-                className='size-[28px] rounded-full p-0 hover-hover:bg-[var(--surface-hover)]'
-              >
-                <Slash className='size-[16px] text-[var(--text-icon)]' />
-              </Button>
-            </Tooltip.Trigger>
-            <Tooltip.Content side='top'>Skills</Tooltip.Content>
-          </Tooltip.Root>
+        <div className='flex min-w-0 flex-1 items-center gap-1'>
+          {toolbar ??
+            (textOnly ? (
+              <span className='px-1 text-[var(--text-muted)] text-caption'>
+                项目文件可直接按路径引用
+              </span>
+            ) : (
+              <>
+                <Tooltip.Root>
+                  <Tooltip.Trigger asChild>
+                    <Button
+                      type='button'
+                      variant='ghost'
+                      onClick={handlePlusClick}
+                      aria-label='Add resources'
+                      className='size-[28px] rounded-full p-0 hover-hover:bg-[var(--surface-hover)]'
+                    >
+                      <Plus className='size-[16px] text-[var(--text-icon)]' />
+                    </Button>
+                  </Tooltip.Trigger>
+                  <Tooltip.Content side='top'>Add resources</Tooltip.Content>
+                </Tooltip.Root>
+                <Tooltip.Root>
+                  <Tooltip.Trigger asChild>
+                    <Button
+                      type='button'
+                      variant='ghost'
+                      onClick={handleFileSelectStable}
+                      aria-label='Attach file'
+                      className='size-[28px] rounded-full p-0 hover-hover:bg-[var(--surface-hover)]'
+                    >
+                      <Paperclip className='size-[16px] text-[var(--text-icon)]' />
+                    </Button>
+                  </Tooltip.Trigger>
+                  <Tooltip.Content side='top'>Attach file</Tooltip.Content>
+                </Tooltip.Root>
+                <Tooltip.Root>
+                  <Tooltip.Trigger asChild>
+                    <Button
+                      type='button'
+                      variant='ghost'
+                      onClick={handleSlashTriggerClick}
+                      aria-label='Skills'
+                      className='size-[28px] rounded-full p-0 hover-hover:bg-[var(--surface-hover)]'
+                    >
+                      <Slash className='size-[16px] text-[var(--text-icon)]' />
+                    </Button>
+                  </Tooltip.Trigger>
+                  <Tooltip.Content side='top'>Skills</Tooltip.Content>
+                </Tooltip.Root>
+              </>
+            ))}
         </div>
         <div className='flex items-center gap-1.5'>
-          {isSttSupported && (
+          {!textOnly && isSttSupported && (
             <MicButton
               audioLevelsRef={audioLevelsRef}
               isListening={isListening}

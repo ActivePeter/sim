@@ -81,7 +81,10 @@ export interface CreateRunSegmentInput {
   status?: CopilotRunStatus
 }
 
-export async function createRunSegment(input: CreateRunSegmentInput) {
+export async function createRunSegment(
+  input: CreateRunSegmentInput,
+  executor: Pick<typeof db, 'insert'> = db
+) {
   return await withDbSpan(
     TraceSpan.CopilotAsyncRunsCreateRunSegment,
     'INSERT',
@@ -98,7 +101,7 @@ export async function createRunSegment(input: CreateRunSegmentInput) {
       [TraceAttr.CopilotRunStatus]: input.status ?? 'active',
     },
     async () => {
-      const [run] = await db
+      const [run] = await executor
         .insert(copilotRuns)
         .values({
           ...(input.id ? { id: input.id } : {}),
@@ -170,6 +173,20 @@ export async function getLatestRunForStream(streamId: string, userId?: string) {
     .orderBy(desc(copilotRuns.startedAt))
     .limit(1)
   return run ?? null
+}
+
+/** Reads the native run authority for an already-authorized, bounded chat catalog. */
+export async function getLatestRunsForChats(chatIds: string[], userId: string) {
+  if (chatIds.length === 0) return []
+  return await db
+    .selectDistinctOn([copilotRuns.chatId], {
+      chatId: copilotRuns.chatId,
+      streamId: copilotRuns.streamId,
+      status: copilotRuns.status,
+    })
+    .from(copilotRuns)
+    .where(and(eq(copilotRuns.userId, userId), inArray(copilotRuns.chatId, chatIds)))
+    .orderBy(copilotRuns.chatId, desc(copilotRuns.startedAt), desc(copilotRuns.id))
 }
 
 export async function getRunSegment(runId: string) {

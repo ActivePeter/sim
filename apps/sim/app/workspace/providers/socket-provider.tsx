@@ -404,7 +404,8 @@ export function SocketProvider({ children, user }: SocketProviderProps) {
         })
 
         const socketInstance = io(socketUrl, {
-          transports: ['websocket', 'polling'],
+          /** The plugin carries WebSocket frames over its owned VS Code message channel. */
+          transports: window.vibeVscodeTransport ? ['websocket'] : ['websocket', 'polling'],
           withCredentials: true,
           reconnectionAttempts: Number.POSITIVE_INFINITY,
           reconnectionDelay: 1000,

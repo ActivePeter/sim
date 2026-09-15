@@ -135,6 +135,15 @@ export const env = createEnv({
 
     // Copilot
     COPILOT_API_KEY:                       z.string().min(1).optional(),           // Secret for internal sim agent API authentication
+    VIBE_VSCODE_AGENT_GATEWAY_SECRET:       z.string().min(32).optional(),          // Server-only capability injected after the main VS Code login gate
+    SIM_VSCODE_PROJECT_ROOTS:              z.string().optional(),                  // JSON array of permitted local project roots
+    SIM_VSCODE_REMOTE_AUTHORITIES:         z.string().optional(),                  // JSON array of VS Code remote authorities mapped to this host
+    SIM_VSCODE_CODEX_BINARY:               z.string().optional(),                  // Local Codex executable; defaults to PATH lookup
+    SIM_VSCODE_CODEX_HOME:                 z.string().optional(),                  // Environment-owned Codex credentials and thread state
+    SIM_VSCODE_CODEX_SANDBOX:              z.enum(['read-only', 'workspace-write']).optional(),
+    SIM_VSCODE_ALLOW_UNRESTRICTED:         z.enum(['true', 'false']).optional(),
+    SIM_VSCODE_CLAUDE_BINARY:              z.string().optional(),                  // Local Claude Code executable; defaults to PATH lookup
+    SIM_VSCODE_CLAUDE_HOME:                z.string().optional(),                  // Environment-owned Claude Code credentials and thread state
     /** Gates risky copilot tools behind an Allow / Skip prompt. Off by default. */
     COPILOT_TOOL_PERMISSIONS_ENABLED:      z.boolean().optional(),
     SIM_AGENT_API_URL:                     z.string().url().optional(),            // URL for internal sim agent API

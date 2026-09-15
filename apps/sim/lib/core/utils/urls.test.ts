@@ -36,6 +36,23 @@ describe('getBrowserOrigin', () => {
     setLocation('https://example.com/some/path')
     expect(getBrowserOrigin()).toBe('https://example.com')
   })
+
+  it('uses the private transport virtual origin in a native VS Code webview', () => {
+    setLocation('vscode-webview://test/workspace')
+    mockGetEnv.mockImplementation((key) =>
+      key === 'NEXT_PUBLIC_APP_URL' ? 'https://sim.vscode.invalid' : undefined
+    )
+    window.vibeVscodeTransport = {
+      token: 'test-view',
+      postMessage: vi.fn(),
+      onMessage: () => () => {},
+    }
+    try {
+      expect(getBrowserOrigin()).toBe('https://sim.vscode.invalid')
+    } finally {
+      window.vibeVscodeTransport = undefined
+    }
+  })
 })
 
 describe('getBaseUrl', () => {
@@ -131,6 +148,11 @@ describe('getSocketUrl', () => {
   it('returns the page origin when served from a non-localhost host', () => {
     setLocation('https://10.0.3.36/signup')
     expect(getSocketUrl()).toBe('https://10.0.3.36')
+  })
+
+  it('uses the HTTPS gateway on loopback instead of an insecure realtime port', () => {
+    setLocation('https://127.0.0.1:18082/workspace/ws/agents')
+    expect(getSocketUrl()).toBe('https://127.0.0.1:18082')
   })
 
   it('falls back to localhost:3002 when served from localhost', () => {

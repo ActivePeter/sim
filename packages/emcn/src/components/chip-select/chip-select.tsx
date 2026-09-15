@@ -14,11 +14,14 @@ import {
   DropdownMenuSearchInput,
   DropdownMenuTrigger,
 } from '../dropdown-menu/dropdown-menu'
+import { Tooltip } from '../tooltip/tooltip'
 
 /** A selectable option in a {@link ChipSelect}. */
 export interface ChipSelectOption {
   label: string
   value: string
+  /** Supplemental detail shown when the option is hovered or keyboard-focused. */
+  tooltip?: string
   /** Additional search-only terms. These are never rendered in the option label. */
   searchTerms?: readonly string[]
   /** Optional leading icon. */
@@ -218,23 +221,20 @@ export function ChipSelect({
 
   const renderOption = (opt: ChipSelectOption) => {
     const Icon = opt.icon
-    if (multiSelect) {
-      return (
-        <DropdownMenuCheckboxItem
-          key={opt.value}
-          checked={selectedValues.includes(opt.value)}
-          disabled={opt.disabled}
-          onSelect={(event) => {
-            event.preventDefault()
-            toggleValue(opt.value)
-          }}
-        >
-          {Icon ? <Icon className='mr-2 size-[14px] text-[var(--text-icon)]' /> : null}
-          {opt.label}
-        </DropdownMenuCheckboxItem>
-      )
-    }
-    return (
+    const item = multiSelect ? (
+      <DropdownMenuCheckboxItem
+        key={opt.value}
+        checked={selectedValues.includes(opt.value)}
+        disabled={opt.disabled}
+        onSelect={(event) => {
+          event.preventDefault()
+          toggleValue(opt.value)
+        }}
+      >
+        {Icon ? <Icon className='mr-2 size-[14px] text-[var(--text-icon)]' /> : null}
+        {opt.tooltip ? <span>{opt.label}</span> : opt.label}
+      </DropdownMenuCheckboxItem>
+    ) : (
       <DropdownMenuItem
         key={opt.value}
         disabled={opt.disabled}
@@ -243,6 +243,13 @@ export function ChipSelect({
         {Icon ? <Icon /> : null}
         <span>{opt.label}</span>
       </DropdownMenuItem>
+    )
+    if (!opt.tooltip) return item
+    return (
+      <Tooltip.Root key={opt.value}>
+        <Tooltip.Trigger asChild>{item}</Tooltip.Trigger>
+        <Tooltip.Content className='whitespace-normal break-words'>{opt.tooltip}</Tooltip.Content>
+      </Tooltip.Root>
     )
   }
 

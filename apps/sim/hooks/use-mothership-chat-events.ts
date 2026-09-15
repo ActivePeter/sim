@@ -158,7 +158,7 @@ export function resyncMothershipChatCaches(
  * Subscribes to chat status SSE events and invalidates chat caches on changes.
  * The SSE event name remains `task_status` for wire compatibility.
  *
- * No-ops when Chat is disabled — this is mounted from the persistent sidebar, so
+ * No-ops when Chat is disabled — this is mounted from the persistent workspace chrome, so
  * without the guard every session would hold an open connection to an endpoint
  * that cannot serve it.
  */

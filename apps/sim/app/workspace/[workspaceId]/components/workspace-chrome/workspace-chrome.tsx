@@ -1,13 +1,16 @@
 'use client'
 
 import { useEffect, useLayoutEffect, useRef, useState } from 'react'
-import { cn } from '@sim/emcn'
+import { cn, ModalLayoutProvider } from '@sim/emcn'
 import { ArrowLeft, ArrowRight, PanelLeft } from '@sim/emcn/icons'
-import { usePathname } from 'next/navigation'
+import { useParams, usePathname } from 'next/navigation'
 import { getDesktopBridge } from '@/lib/desktop'
 import { applyDesktopTitleBarMode, type DesktopTitleBarMode } from '@/app/_shell/desktop-title-bar'
 import { useSidebarPeek } from '@/app/workspace/[workspaceId]/components/workspace-chrome/use-sidebar-peek'
+import { VscodeEditorTitle } from '@/app/workspace/[workspaceId]/components/workspace-chrome/vscode-editor-title'
 import { Sidebar, SidebarTooltip } from '@/app/workspace/[workspaceId]/w/components/sidebar/sidebar'
+import { useMothershipChatEvents } from '@/hooks/use-mothership-chat-events'
+import { useVscodeSurface } from '@/hooks/use-vscode-surface'
 import { useFullscreenOriginStore } from '@/stores/fullscreen-origin'
 import { useSearchModalStore } from '@/stores/modals/search/store'
 import { useSidebarStore } from '@/stores/sidebar/store'
@@ -179,7 +182,41 @@ function isFullscreenPath(pathname: string | null): boolean {
  * re-points `--sidebar-width` at the restore width. The sidebar is never re-mounted
  * or duplicated for this — see {@link useSidebarPeek}.
  */
-export function WorkspaceChrome({
+export function WorkspaceChrome({ children, initialSidebarCollapsed }: WorkspaceChromeProps) {
+  const { workspaceId } = useParams<{ workspaceId: string }>()
+  useMothershipChatEvents(workspaceId)
+  const surface = useVscodeSurface()
+
+  if (surface === 'sidebar' || surface === 'editor') {
+    return (
+      <ModalLayoutProvider center='viewport'>
+        <div
+          className={cn(
+            'flex min-h-0 w-full flex-1 overflow-hidden',
+            surface === 'sidebar' ? 'bg-[var(--surface-1)]' : 'bg-[var(--bg)]'
+          )}
+        >
+          {surface === 'sidebar' ? (
+            <Sidebar isCollapsed={false} fixedExpanded />
+          ) : (
+            <>
+              <VscodeEditorTitle />
+              {children}
+            </>
+          )}
+        </div>
+      </ModalLayoutProvider>
+    )
+  }
+
+  return (
+    <DefaultWorkspaceChrome initialSidebarCollapsed={initialSidebarCollapsed}>
+      {children}
+    </DefaultWorkspaceChrome>
+  )
+}
+
+function DefaultWorkspaceChrome({
   children,
   initialSidebarCollapsed = false,
 }: WorkspaceChromeProps) {

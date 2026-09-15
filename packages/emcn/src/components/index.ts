@@ -150,6 +150,8 @@ export {
   ModalDescription,
   ModalFooter,
   ModalHeader,
+  ModalLayoutProvider,
+  type ModalLayoutProviderProps,
   ModalOverlay,
   ModalPortal,
   ModalTabs,

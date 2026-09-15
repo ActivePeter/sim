@@ -107,6 +107,8 @@ export interface PromptEditorKeyPolicy {
    * `false` to fall through to native caret movement.
    */
   onArrowUpOnEmpty?: () => boolean
+  /** Plain Up/Down on the first/last visual line, after menus and queued-input recall. */
+  onHistoryNavigate?: (direction: 'previous' | 'next') => boolean
 }
 
 export interface UsePromptEditorProps {
@@ -776,6 +778,8 @@ export function usePromptEditor({
 
   const handleKeyDown = useCallback(
     (e: React.KeyboardEvent<HTMLTextAreaElement>, policy?: PromptEditorKeyPolicy) => {
+      if (e.nativeEvent.isComposing || e.nativeEvent.keyCode === 229) return
+
       if (mentionRangeRef.current && !e.nativeEvent.isComposing) {
         if (e.key === 'ArrowDown') {
           e.preventDefault()
@@ -826,6 +830,37 @@ export function usePromptEditor({
         if (valueRef.current.length === 0 && policy?.onArrowUpOnEmpty?.()) {
           e.preventDefault()
           return
+        }
+      }
+
+      if (
+        policy?.onHistoryNavigate &&
+        (e.key === 'ArrowUp' || e.key === 'ArrowDown') &&
+        !e.shiftKey &&
+        !e.metaKey &&
+        !e.ctrlKey &&
+        !e.altKey
+      ) {
+        const textarea = textareaRef.current
+        if (textarea && textarea.selectionStart === textarea.selectionEnd) {
+          const value = valueRef.current
+          const caret = textarea.selectionStart
+          const previous = e.key === 'ArrowUp'
+          const boundary = previous ? 0 : value.length
+          const sameLogicalLine = !(previous ? value.slice(0, caret) : value.slice(caret)).includes(
+            '\n'
+          )
+          /** Respect soft-wrapped lines as well as explicit newlines. */
+          const sameVisualLine =
+            sameLogicalLine &&
+            (caret === boundary ||
+              Math.abs(
+                getCaretAnchor(textarea, caret).top - getCaretAnchor(textarea, boundary).top
+              ) < 1)
+          if (sameVisualLine && policy.onHistoryNavigate(previous ? 'previous' : 'next')) {
+            e.preventDefault()
+            return
+          }
         }
       }
 

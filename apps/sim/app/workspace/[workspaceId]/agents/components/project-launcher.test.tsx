@@ -1,0 +1,258 @@
+/** @vitest-environment jsdom */
+import { act, type ComponentProps } from 'react'
+import type { ChipSelectProps } from '@sim/emcn'
+import { createRoot, type Root } from 'react-dom/client'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import type { VibeVscodeHostContext, VscodeHost } from '@/lib/api/contracts/vscode-agents'
+
+const mocks = vi.hoisted(() => ({
+  create: vi.fn(),
+  push: vi.fn(),
+  openEditor: vi.fn(),
+  refetch: vi.fn(),
+  context: undefined as VibeVscodeHostContext | undefined,
+  host: undefined as VscodeHost | undefined,
+  hosts: [] as VscodeHost[],
+}))
+vi.mock('next/navigation', () => ({
+  useParams: () => ({ workspaceId: 'workspace-1' }),
+  useRouter: () => ({ push: mocks.push }),
+  useSearchParams: () => new URLSearchParams('_vscodeSurface=sidebar'),
+}))
+vi.mock('nuqs', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('nuqs')>()),
+  useQueryState: () => [null, vi.fn()],
+}))
+vi.mock('@/hooks/queries/vscode-agents', () => ({
+  useVscodeHosts: () => ({
+    data: { hosts: mocks.hosts },
+    isPending: false,
+    refetch: mocks.refetch,
+  }),
+  useCreateProjectSession: () => ({ mutateAsync: mocks.create, isPending: false }),
+}))
+vi.mock('@/hooks/use-vscode-host-context', () => ({ useVscodeHostContext: () => mocks.context }))
+vi.mock('@/hooks/use-vscode-catalog-projection', () => ({
+  useVscodeCatalogProjection: () => ({ host: mocks.host, isSyncing: false, retry: vi.fn() }),
+}))
+vi.mock('@sim/emcn', () => ({
+  Chip: ({ children, onClick, disabled }: ComponentProps<'button'>) => (
+    <button type='button' onClick={onClick} disabled={disabled}>
+      {children}
+    </button>
+  ),
+  ChipSelect: ({ value, options = [], onChange }: ChipSelectProps) => (
+    <select value={value} onChange={(event) => onChange?.(event.target.value)}>
+      {options.map((item) => (
+        <option key={item.value} value={item.value} title={item.tooltip}>
+          {item.label}
+        </option>
+      ))}
+    </select>
+  ),
+  OverflowText: ({ label }: { label: string }) => <span>{label}</span>,
+  Popover: ({ children }: ComponentProps<'div'>) => <div>{children}</div>,
+  PopoverTrigger: ({ children }: ComponentProps<'div'>) => <div>{children}</div>,
+  PopoverContent: ({ children }: ComponentProps<'div'>) => <div>{children}</div>,
+}))
+
+import { ProjectLauncher } from '@/app/workspace/[workspaceId]/agents/components/project-launcher'
+
+let root: Root
+let container: HTMLDivElement
+function createButton() {
+  return Array.from(container.querySelectorAll('button')).find(
+    (button) => button.textContent === '新建项目 Agent 会话'
+  )!
+}
+function deferred<T>() {
+  let resolve!: (value: T) => void
+  const promise = new Promise<T>((done) => {
+    resolve = done
+  })
+  return { promise, resolve }
+}
+beforeEach(() => {
+  ;(globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true
+  vi.clearAllMocks()
+  window.vibeVscode = undefined
+  mocks.host = {
+    id: 'host-1',
+    revision: 1,
+    updatedAt: '',
+    catalog: {
+      physicalWorkspace: {
+        id: 'physical-1',
+        name: 'Workspace',
+        remoteAuthority: '',
+        folders: [
+          { name: 'A', uri: 'file:///project-a', index: 0 },
+          { name: 'B', uri: 'file:///project-b', index: 1 },
+        ],
+      },
+      logicalWorkspaces: [{ id: 'logical-1', name: 'Logical' }],
+    },
+  }
+  mocks.context = {
+    language: 'zh-cn',
+    ...mocks.host.catalog,
+    logicalWorkspace: mocks.host.catalog.logicalWorkspaces[0],
+    project: mocks.host.catalog.physicalWorkspace.folders[0],
+  }
+  mocks.hosts = [
+    mocks.host,
+    {
+      id: 'host-2',
+      revision: 1,
+      updatedAt: '',
+      catalog: {
+        physicalWorkspace: {
+          id: 'physical-2',
+          name: 'Other Workspace',
+          remoteAuthority: '',
+          folders: [{ name: 'C', uri: 'file:///project-c', index: 0 }],
+        },
+        logicalWorkspaces: [],
+      },
+    },
+  ]
+  container = document.createElement('div')
+  document.body.appendChild(container)
+  root = createRoot(container)
+  act(() => root.render(<ProjectLauncher compact />))
+})
+afterEach(() => {
+  act(() => root.unmount())
+  container.remove()
+  window.vibeVscode = undefined
+})
+
+describe('project Agent launch intent', () => {
+  it('limits sidebar projects to the current host, not another entry point', () => {
+    expect(
+      Array.from(container.querySelectorAll('option'), (option) => option.textContent)
+    ).toEqual(['A', 'B'])
+  })
+
+  it('keeps projects from all hosts available in the full Sim launcher', () => {
+    act(() => root.render(<ProjectLauncher />))
+    expect(
+      Array.from(container.querySelectorAll('option'), (option) => option.textContent)
+    ).toEqual(['A · Workspace', 'B · Workspace', 'C · Other Workspace'])
+  })
+
+  it.each([true, false])('exposes catalog paths for each project (compact=%s)', (compact) => {
+    act(() => root.render(<ProjectLauncher compact={compact} />))
+    expect(Array.from(container.querySelectorAll('option'), (option) => option.title)).toEqual(
+      compact
+        ? ['file:///project-a', 'file:///project-b']
+        : ['file:///project-a', 'file:///project-b', 'file:///project-c']
+    )
+  })
+
+  it('distinguishes same-named projects without losing remote location information', () => {
+    mocks.host!.catalog.physicalWorkspace.folders = [
+      { name: 'repo', uri: 'vscode-remote://ssh-remote+runner/worktrees/repo-a', index: 0 },
+      { name: 'repo', uri: 'vscode-remote://ssh-remote+runner/worktrees/repo-b', index: 1 },
+    ]
+    act(() => root.render(<ProjectLauncher compact />))
+    expect(
+      Array.from(container.querySelectorAll('option'), (option) => ({
+        label: option.textContent,
+        tooltip: option.title,
+      }))
+    ).toEqual([
+      { label: 'repo', tooltip: 'vscode-remote://ssh-remote+runner/worktrees/repo-a' },
+      { label: 'repo', tooltip: 'vscode-remote://ssh-remote+runner/worktrees/repo-b' },
+    ])
+  })
+
+  it('does not expose cached projects before the current host is resolved', () => {
+    mocks.host = undefined
+    act(() => root.render(<ProjectLauncher compact />))
+    expect({
+      projects: container.querySelectorAll('option').length,
+      canCreate: !createButton().disabled,
+    }).toEqual({ projects: 0, canCreate: false })
+  })
+
+  it('guards same-tick duplicate clicks and opens the native chat ID', async () => {
+    const pending = deferred<{ id: string; workspaceId: string }>()
+    mocks.create.mockReturnValueOnce(pending.promise)
+    act(() => {
+      createButton().click()
+      createButton().click()
+    })
+    expect(mocks.create).toHaveBeenCalledTimes(1)
+    expect(mocks.create.mock.calls[0][0]).toMatchObject({
+      hostId: 'host-1',
+      projectUri: 'file:///project-a',
+      logicalWorkspaceId: 'logical-1',
+    })
+    await act(async () => pending.resolve({ id: 'native-chat', workspaceId: 'workspace-1' }))
+    expect(mocks.push).toHaveBeenCalledWith(
+      '/workspace/workspace-1/chat/native-chat?_vscodeSurface=sidebar'
+    )
+  })
+
+  it('opens the created native session in the VS Code editor, not in the navigation sidebar', async () => {
+    window.vibeVscode = {
+      getSurface: () => 'sidebar',
+      getContext: () => mocks.context,
+      openEditor: mocks.openEditor,
+      setEditorTitle: vi.fn(),
+      openMonitor: vi.fn(),
+      openFile: vi.fn(),
+      openDiff: vi.fn(),
+      openTerminal: vi.fn(),
+      openExternal: vi.fn(),
+    }
+    mocks.create.mockResolvedValueOnce({ id: 'native-chat', workspaceId: 'workspace-1' })
+    await act(async () => createButton().click())
+    expect(mocks.openEditor).toHaveBeenCalledExactlyOnceWith(
+      '/workspace/workspace-1/chat/native-chat'
+    )
+    expect(mocks.push).not.toHaveBeenCalled()
+  })
+
+  it('selects a sidebar project without navigating the current chat', async () => {
+    const select = container.querySelector('select')!
+    act(() => {
+      select.value = 'host-1:file:///project-b'
+      select.dispatchEvent(new Event('change', { bubbles: true }))
+    })
+    mocks.create.mockResolvedValueOnce({ id: 'project-b-chat', workspaceId: 'workspace-1' })
+    await act(async () => createButton().click())
+    expect(mocks.create.mock.calls[0][0].projectUri).toBe('file:///project-b')
+  })
+
+  it('does not navigate back to a stale project after selection changes while creating', async () => {
+    const pending = deferred<{ id: string; workspaceId: string }>()
+    mocks.create.mockReturnValueOnce(pending.promise)
+    act(() => createButton().click())
+    mocks.context = { ...mocks.context!, project: mocks.host!.catalog.physicalWorkspace.folders[1] }
+    act(() => root.render(<ProjectLauncher compact />))
+    await act(async () => pending.resolve({ id: 'agent-for-a', workspaceId: 'workspace-1' }))
+    expect(mocks.create.mock.calls[0][0].projectUri).toBe('file:///project-a')
+    expect(mocks.push).not.toHaveBeenCalled()
+  })
+
+  it('reuses the creation key after an unknown network outcome', async () => {
+    mocks.create
+      .mockRejectedValueOnce(new Error('Offline'))
+      .mockResolvedValueOnce({ id: 'same-chat', workspaceId: 'workspace-1' })
+    await act(async () => createButton().click())
+    await act(async () => createButton().click())
+    expect(mocks.create.mock.calls[0][0].requestId).toBe(mocks.create.mock.calls[1][0].requestId)
+    expect(mocks.push).toHaveBeenCalledWith(
+      '/workspace/workspace-1/chat/same-chat?_vscodeSurface=sidebar'
+    )
+  })
+
+  it('waits for authoritative host context instead of launching the first cached project', () => {
+    mocks.context = undefined
+    act(() => root.render(<ProjectLauncher compact />))
+    expect(createButton().disabled).toBe(true)
+    expect(container.textContent).toContain('读取 VS Code 项目')
+  })
+})

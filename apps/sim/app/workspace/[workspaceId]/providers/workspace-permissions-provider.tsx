@@ -14,6 +14,7 @@ import {
 } from '@/hooks/queries/workspace'
 import { useStableFlag } from '@/hooks/use-stable-flag'
 import { useUserPermissions, type WorkspaceUserPermissions } from '@/hooks/use-user-permissions'
+import { useVscodeEmbedded } from '@/hooks/use-vscode-surface'
 import { useOperationQueueStore } from '@/stores/operation-queue/store'
 
 const logger = createLogger('WorkspacePermissionsProvider')
@@ -124,6 +125,7 @@ export function WorkspacePermissionsProvider({ children }: WorkspacePermissionsP
 
   const hasOperationError = useOperationQueueStore((state) => state.hasOperationError)
   const { isReconnecting, isRetryingWorkflowJoin, blockedJoinWorkflowId } = useSocket()
+  const isVibeVscodeEmbedded = useVscodeEmbedded()
 
   const isOfflineMode = hasOperationError
   const isJoinBlocked = Boolean(blockedJoinWorkflowId) && blockedJoinWorkflowId === urlWorkflowId
@@ -133,7 +135,7 @@ export function WorkspacePermissionsProvider({ children }: WorkspacePermissionsP
   })
   const realtimeStatusMessage = isOfflineMode
     ? null
-    : showReconnecting
+    : showReconnecting && !isVibeVscodeEmbedded
       ? 'Reconnecting...'
       : isRetryingWorkflowJoin
         ? 'Joining workflow...'

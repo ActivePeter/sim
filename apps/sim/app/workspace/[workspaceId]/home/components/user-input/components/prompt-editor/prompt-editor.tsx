@@ -37,6 +37,8 @@ export interface PromptEditorProps extends PromptEditorKeyPolicy {
    * with chips but not be edited.
    */
   readOnly?: boolean
+  /** Text-only runtimes keep the shared editor without cloud resource/skill menus. */
+  contextMenus?: boolean
   /**
    * Layout/sizing only — a height cap (`max-h-[200px]`) or fill (`flex-1`)
    * for the scroll container. The text chrome is owned by the editor.
@@ -67,10 +69,12 @@ export function PromptEditor({
   placeholder,
   autoFocus = false,
   readOnly = false,
+  contextMenus = true,
   className,
   'aria-label': ariaLabel,
   onSubmit,
   onArrowUpOnEmpty,
+  onHistoryNavigate,
 }: PromptEditorProps) {
   const { textareaRef, value } = editor
   const scrollerRef = useRef<HTMLDivElement>(null)
@@ -247,7 +251,9 @@ export function PromptEditor({
           readOnly={readOnly}
           onChange={readOnly ? undefined : editor.handleInputChange}
           onKeyDown={
-            readOnly ? undefined : (e) => editor.handleKeyDown(e, { onSubmit, onArrowUpOnEmpty })
+            readOnly
+              ? undefined
+              : (e) => editor.handleKeyDown(e, { onSubmit, onArrowUpOnEmpty, onHistoryNavigate })
           }
           onFocus={readOnly ? undefined : () => setHasFocused(true)}
           onPaste={readOnly ? undefined : editor.handlePaste}
@@ -269,7 +275,7 @@ export function PromptEditor({
         />
       </div>
 
-      {!readOnly && (
+      {!readOnly && contextMenus && (
         <>
           <PlusMenuDropdown
             ref={editor.plusMenuRef}

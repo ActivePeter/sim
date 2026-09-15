@@ -96,17 +96,14 @@
       }
     },
     "app/workspace/[workspaceId]/d/[dagId]/page.tsx": {
-      "modules": 2048,
+      "modules": 46,
       "gateways": {
-        "apps/sim/app/plan-graph-demo/plan-graph-demo.tsx": 2046,
-        "apps/sim/app/plan-graph-demo/components/index.ts": 1977,
-        "apps/sim/app/plan-graph-demo/components/dag-canvas-adapter.tsx": 1970,
-        "apps/sim/app/workspace/[workspaceId]/w/[workflowId]/workflow-constants.ts": 1962,
-        "apps/sim/app/workspace/[workspaceId]/w/[workflowId]/components/index.ts": 588,
-        "apps/sim/triggers/registry.ts": 508,
-        "apps/sim/app/workspace/[workspaceId]/w/[workflowId]/components/panel/index.ts": 473,
-        "apps/sim/blocks/registry.ts": 338
+        "apps/sim/app/workspace/[workspaceId]/d/[dagId]/dag.tsx": 45
       }
+    },
+    "app/workspace/[workspaceId]/d/page.tsx": {
+      "modules": 18,
+      "gateways": {}
     },
     "app/workspace/[workspaceId]/error.tsx": {
       "modules": 142,

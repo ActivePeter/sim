@@ -2,7 +2,6 @@
 
 import { cn } from '@sim/emcn'
 import { Split } from '@sim/emcn/icons'
-import { DEFAULT_DEMO_DAG_ID, DEMO_DAGS } from '@/lib/dags/demo-catalog'
 import { useI18n } from '@/lib/i18n'
 import {
   CollapsedResourceFlyout,
@@ -11,6 +10,7 @@ import {
 import { SidebarNavChip } from '@/app/workspace/[workspaceId]/w/components/sidebar/components/sidebar-nav-chip'
 import { SIDEBAR_ITEM_GAP_CLASS } from '@/app/workspace/[workspaceId]/w/components/sidebar/constants'
 import { useHoverMenu } from '@/app/workspace/[workspaceId]/w/components/sidebar/hooks'
+import { useDags } from '@/hooks/queries/dags'
 
 interface DagListProps {
   currentDagId?: string
@@ -21,15 +21,16 @@ interface DagListProps {
 export function DagList({ currentDagId, isCollapsed, workspaceId }: DagListProps) {
   const hover = useHoverMenu()
   const { t } = useI18n()
-  const getName = (dag: (typeof DEMO_DAGS)[number]) =>
-    dag.id === DEFAULT_DEMO_DAG_ID ? t('plan.demo.name') : dag.name
-  const flyoutEntries = DEMO_DAGS.map((dag) => ({
+  const query = useDags(workspaceId)
+  const entries = (query.isError ? [] : (query.data?.dags ?? [])).map((dag) => ({
     kind: 'item' as const,
     id: dag.id,
-    name: getName(dag),
+    name: dag.name,
     pinned: false,
-    href: `/workspace/${workspaceId}/d/${dag.id}`,
+    href: `/workspace/${encodeURIComponent(workspaceId)}/d/${encodeURIComponent(dag.id)}`,
   }))
+  const emptyLabel =
+    query.error?.message ?? (query.isPending ? t('plan.loading') : t('sidebar.noDags'))
 
   if (isCollapsed) {
     return (
@@ -40,30 +41,32 @@ export function DagList({ currentDagId, isCollapsed, workspaceId }: DagListProps
           ariaLabel={t('sidebar.dags')}
         >
           <CollapsedResourceFlyout
-            entries={flyoutEntries}
+            entries={entries}
             icon={Split}
             currentItemId={currentDagId}
-            emptyLabel={t('sidebar.noDags')}
+            emptyLabel={emptyLabel}
           />
         </CollapsedSidebarMenu>
       </div>
     )
   }
-
   return (
     <div className={cn(SIDEBAR_ITEM_GAP_CLASS, 'flex flex-col px-2')}>
-      {DEMO_DAGS.map((dag) => (
+      {entries.map((entry) => (
         <SidebarNavChip
-          key={dag.id}
-          item={{
-            id: dag.id,
-            label: getName(dag),
-            icon: Split,
-            href: `/workspace/${workspaceId}/d/${dag.id}`,
-          }}
-          active={dag.id === currentDagId}
+          key={entry.id}
+          item={{ id: entry.id, label: entry.name, icon: Split, href: entry.href }}
+          active={entry.id === currentDagId}
         />
       ))}
+      {entries.length === 0 && (
+        <p
+          role={query.isError ? 'alert' : 'status'}
+          className='px-2 py-1 text-[var(--text-muted)] text-xs'
+        >
+          {emptyLabel}
+        </p>
+      )}
     </div>
   )
 }

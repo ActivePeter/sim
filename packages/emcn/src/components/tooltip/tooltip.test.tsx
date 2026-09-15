@@ -32,6 +32,7 @@ afterEach(() => {
   container?.remove()
   root = null
   container = null
+  vi.unstubAllGlobals()
   vi.useRealTimers()
 })
 
@@ -70,6 +71,19 @@ function tooltipUi(withTrigger: boolean) {
 function mountTooltip() {
   mount(tooltipUi(true))
 }
+
+describe('floating tooltip viewport placement', () => {
+  it.each([280, 1440])('constrains horizontal placement to a %spx viewport', (width) => {
+    vi.stubGlobal('innerWidth', width)
+    mountTooltip()
+    hover(trigger())
+    expect(tooltipElement()?.style.translate).toBe(
+      width === 280
+        ? 'clamp(16px, calc(184px - 100%), calc(100vw - 100% - 16px)) 216px'
+        : 'clamp(16px, 216px, calc(100vw - 100% - 16px)) 216px'
+    )
+  })
+})
 
 describe('floating tooltip trigger visibility watcher', () => {
   it('keeps the tooltip shown while the trigger stays visible', () => {

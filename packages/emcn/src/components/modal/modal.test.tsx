@@ -9,15 +9,16 @@ import {
   Modal,
   ModalClose,
   ModalContent,
+  ModalLayoutProvider,
   ModalTrigger,
   NATIVE_SURFACE_OCCLUSION_PREPARE_EVENT,
   type NativeSurfaceOcclusionPrepareDetail,
   useNativeSurfaceOcclusionReady,
 } from './modal'
 
-vi.mock('next/navigation', () => ({
-  usePathname: () => '/workspace/workspace-1/home',
-}))
+const navigation = vi.hoisted(() => ({ pathname: '/workspace/workspace-1/home' }))
+
+vi.mock('next/navigation', () => ({ usePathname: () => navigation.pathname }))
 
 let root: Root | null = null
 let container: HTMLDivElement | null = null
@@ -76,21 +77,85 @@ function TriggeredModal() {
   )
 }
 
+beforeEach(() => {
+  vi.useRealTimers()
+  navigation.pathname = '/workspace/workspace-1/home'
+})
+
+afterEach(() => {
+  if (root) act(() => root?.unmount())
+  root = null
+  container?.remove()
+  container = null
+  document.body.replaceChildren()
+  document.body.removeAttribute('style')
+  vi.restoreAllMocks()
+})
+
+describe('modal layout boundary', () => {
+  it('preserves content-area alignment when the shell does not supply a layout', () => {
+    mount(<FullModal />)
+
+    expect(renderedModalLayers().contentLayer.style.paddingLeft).toBe('var(--sidebar-width)')
+  })
+
+  it.each([
+    { center: 'content', workflow: false, paddingLeft: 'var(--sidebar-width)' },
+    {
+      center: 'content',
+      workflow: true,
+      paddingLeft: 'calc(var(--sidebar-width) - var(--panel-width))',
+    },
+    { center: 'viewport', workflow: false, paddingLeft: '' },
+    { center: 'viewport', workflow: true, paddingLeft: '' },
+  ] as const)(
+    'centers portaled modals within $center on workflow=$workflow',
+    ({ center, workflow, paddingLeft }) => {
+      if (workflow) navigation.pathname = '/workspace/workspace-1/w/workflow-1'
+      mount(
+        <ModalLayoutProvider center={center}>
+          <FullModal />
+        </ModalLayoutProvider>
+      )
+
+      const { contentLayer, dialog, overlay } = renderedModalLayers()
+      expect({
+        paddingLeft: contentLayer.style.paddingLeft,
+        portaled: dialog !== null && !container?.contains(dialog),
+        visible: overlay.style.visibility !== 'hidden' && dialog?.style.visibility !== 'hidden',
+      }).toEqual({ paddingLeft, portaled: true, visible: true })
+    }
+  )
+
+  it('keeps full-size modals centered on the viewport regardless of content offsets', () => {
+    mount(
+      <Modal open>
+        <ModalContent size='full' srTitle='Full viewport modal'>
+          Content
+        </ModalContent>
+      </Modal>
+    )
+
+    expect(renderedModalLayers().contentLayer.style.paddingLeft).toBe('')
+  })
+
+  it('updates alignment without remounting an open dialog', () => {
+    const renderModal = (center: 'content' | 'viewport') => (
+      <ModalLayoutProvider center={center}>
+        <FullModal />
+      </ModalLayoutProvider>
+    )
+    mount(renderModal('content'))
+    const dialog = renderedModalLayers().dialog
+
+    act(() => root?.render(renderModal('viewport')))
+
+    expect(renderedModalLayers().dialog).toBe(dialog)
+    expect(renderedModalLayers().contentLayer.style.paddingLeft).toBe('')
+  })
+})
+
 describe('native-surface modal preparation', () => {
-  beforeEach(() => {
-    vi.useRealTimers()
-  })
-
-  afterEach(() => {
-    if (root) act(() => root?.unmount())
-    root = null
-    container?.remove()
-    container = null
-    document.body.replaceChildren()
-    document.body.removeAttribute('style')
-    vi.restoreAllMocks()
-  })
-
   it('keeps both the scrim and content hidden until every registered preparation settles', async () => {
     vi.useFakeTimers()
     const backgroundInput = document.createElement('input')

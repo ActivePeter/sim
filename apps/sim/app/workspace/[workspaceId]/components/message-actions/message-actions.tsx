@@ -50,7 +50,7 @@ export const MessageActions = memo(function MessageActions({
 }: MessageActionsProps) {
   const router = useRouter()
   const params = useParams<{ workspaceId: string }>()
-  const { chatId } = useChatSurface()
+  const { chatId, serviceActionsEnabled } = useChatSurface()
   const { copied, copy: copyMessage } = useCopyToClipboard({ resetMs: 1500 })
   const [copiedRequestId, setCopiedRequestId] = useState(false)
   const [pendingFeedback, setPendingFeedback] = useState<'up' | 'down' | null>(null)
@@ -90,7 +90,7 @@ export const MessageActions = memo(function MessageActions({
   }
 
   const handleFeedbackClick = (type: 'up' | 'down') => {
-    if (chatId && userQuery) {
+    if (serviceActionsEnabled && chatId && userQuery) {
       setPendingFeedback(type)
       setFeedbackText('')
       setCopiedRequestId(false)
@@ -98,7 +98,7 @@ export const MessageActions = memo(function MessageActions({
   }
 
   const handleSubmitFeedback = () => {
-    if (!pendingFeedback || !chatId || !userQuery) return
+    if (!serviceActionsEnabled || !pendingFeedback || !chatId || !userQuery) return
     const text = feedbackText.trim()
     if (!text) {
       setPendingFeedback(null)
@@ -125,7 +125,7 @@ export const MessageActions = memo(function MessageActions({
   }
 
   const handleFork = async () => {
-    if (!chatId || !messageId || forkChat.isPending) return
+    if (!serviceActionsEnabled || !chatId || !messageId || forkChat.isPending) return
     try {
       const result = await forkChat.mutateAsync({ chatId, upToMessageId: messageId })
       if (result.failedFileCopies) {
@@ -141,11 +141,13 @@ export const MessageActions = memo(function MessageActions({
   }
 
   const canCopyContent = hasCopyContent ?? Boolean(content)
-  const canSubmitFeedback = Boolean(chatId && userQuery)
+  const canSubmitFeedback = Boolean(serviceActionsEnabled && chatId && userQuery)
   // A live (just-streamed) assistant message carries a synthetic id that the
   // persisted transcript doesn't know — forking it would 400. The button
   // appears once the transcript refetch swaps in the persisted message id.
-  const canFork = Boolean(chatId && messageId && !isLiveAssistantMessageId(messageId))
+  const canFork = Boolean(
+    serviceActionsEnabled && chatId && messageId && !isLiveAssistantMessageId(messageId)
+  )
   if (!canCopyContent && !canSubmitFeedback && !canFork) return null
 
   return (

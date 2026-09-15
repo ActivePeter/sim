@@ -17,6 +17,11 @@ import {
   UPGRADE_REASON_PARAM,
 } from '@/lib/billing/upgrade-reasons'
 import { WorkspaceRecencyStorage } from '@/lib/core/utils/browser-storage'
+import {
+  parseVibeVscodeSurface,
+  VIBE_VSCODE_SURFACE_PARAM,
+  withVibeVscodeSurface,
+} from '@/lib/vibe-vscode/surface'
 import { DesktopTitleBarLane } from '@/app/_shell/desktop-title-bar'
 import { useWorkspacesWithMetadata } from '@/hooks/queries/workspace'
 
@@ -124,15 +129,21 @@ export default function WorkspacePage() {
     const redirectWorkflowId = urlParams.get('redirect_workflow')
     const redirectTarget = urlParams.get('redirect')
     const rawReason = urlParams.get(UPGRADE_REASON_PARAM)
+    const vibeVscodeSurface = parseVibeVscodeSurface(urlParams.get(VIBE_VSCODE_SURFACE_PARAM))
 
     // `?redirect=upgrade` is how a caller that cannot know a workspace id — a
     // self-hosted deployment, an email — reaches the plan picker. It has to
     // survive workspace creation too: a first-time visitor has no workspace to
     // resolve, and dropping the intent lands them on home with no explanation.
-    const destinationFor = (id: string) =>
-      redirectTarget === 'upgrade'
-        ? buildUpgradeHref(id, isUpgradeReason(rawReason) ? rawReason : undefined)
-        : `/workspace/${id}`
+    const destinationFor = (id: string) => {
+      const destination =
+        redirectTarget === 'upgrade'
+          ? buildUpgradeHref(id, isUpgradeReason(rawReason) ? rawReason : undefined)
+          : redirectTarget === 'agents'
+            ? `/workspace/${id}/agents`
+            : `/workspace/${id}`
+      return withVibeVscodeSurface(destination, vibeVscodeSurface)
+    }
 
     const { workspaces, lastActiveWorkspaceId, creationPolicy } = data
 
@@ -168,7 +179,7 @@ export default function WorkspacePage() {
       findWorkspace(localRecentId) ?? findWorkspace(lastActiveWorkspaceId) ?? workspaces[0]
 
     if (redirectWorkflowId) {
-      handleWorkflowRedirect(redirectWorkflowId, targetWorkspace.id, router)
+      handleWorkflowRedirect(redirectWorkflowId, targetWorkspace.id, router, vibeVscodeSurface)
       return
     }
 
@@ -238,7 +249,8 @@ export default function WorkspacePage() {
 async function handleWorkflowRedirect(
   workflowId: string,
   fallbackWorkspaceId: string,
-  router: ReturnType<typeof useRouter>
+  router: ReturnType<typeof useRouter>,
+  vibeVscodeSurface: ReturnType<typeof parseVibeVscodeSurface>
 ): Promise<void> {
   try {
     const workflowData = await requestJson(getWorkflowStateContract, {
@@ -247,13 +259,15 @@ async function handleWorkflowRedirect(
     const workspaceId = workflowData.data.workspaceId
     if (workspaceId) {
       logger.info(`Redirecting workflow ${workflowId} to workspace ${workspaceId}`)
-      router.replace(`/workspace/${workspaceId}/w/${workflowId}`)
+      router.replace(
+        withVibeVscodeSurface(`/workspace/${workspaceId}/w/${workflowId}`, vibeVscodeSurface)
+      )
       return
     }
   } catch (error) {
     logger.error('Error fetching workflow for redirect:', error)
   }
-  router.replace(`/workspace/${fallbackWorkspaceId}`)
+  router.replace(withVibeVscodeSurface(`/workspace/${fallbackWorkspaceId}`, vibeVscodeSurface))
 }
 
 async function handleNoWorkspaces(

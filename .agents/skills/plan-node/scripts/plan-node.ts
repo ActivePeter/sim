@@ -6,10 +6,9 @@ import { generateShortId } from '@sim/utils/id'
 
 type Command = 'bind-pr' | 'claim' | 'heartbeat' | 'inspect'
 
-interface PlanFile {
-  contentUpdatedAt: string
+interface PlanVersion {
   id: string
-  name: string
+  revision: number
 }
 
 interface PlanDependency {
@@ -42,6 +41,7 @@ interface PlanItem {
   execution?: PlanExecution
   id: string
   lifecycle: 'active' | 'done' | 'planned' | 'review'
+  localRepositoryPath?: string
   repository?: string
   primaryPr: {
     checks: 'Failed' | 'Passed' | 'Pending' | 'Running'
@@ -121,18 +121,12 @@ function requireString(value: unknown, label: string): string {
   return value
 }
 
-function parseFile(value: unknown): PlanFile {
-  const record = asRecord(value, 'Plan file')
-  return {
-    id: requireString(record.id, 'Plan file id'),
-    name: requireString(record.name, 'Plan file name'),
-    contentUpdatedAt: requireString(record.contentUpdatedAt, 'Plan file content version'),
-  }
-}
-
 function parseDocument(value: unknown): PlanDocument {
   const record = asRecord(value, 'Plan document')
   if (record.schemaVersion !== 1) fail('Unsupported Plan Graph schema version')
+  requireString(record.id, 'DAG ID')
+  if (!Number.isSafeInteger(record.revision) || Number(record.revision) < 0)
+    fail('Invalid DAG revision')
   if (!Array.isArray(record.items) || !Array.isArray(record.dependencies)) {
     fail('Plan document is missing items or dependencies')
   }
@@ -178,53 +172,55 @@ async function loadPlan(
   apiUrl: string,
   apiKey: string,
   workspaceId: string,
-  planId: string
-): Promise<{ document: PlanDocument; file: PlanFile }> {
-  const fileName = `sim-plan-${planId}.json`
-  const list = asRecord(
+  requestedPlanId?: string
+): Promise<{ document: PlanDocument; version: PlanVersion }> {
+  let planId = requestedPlanId
+  if (!planId) {
+    const list = asRecord(
+      await requestJson(
+        apiUrl,
+        apiKey,
+        `/api/v2/dags?workspaceId=${encodeURIComponent(workspaceId)}`
+      ),
+      'DAG list response'
+    )
+    if (!Array.isArray(list.data) || list.data.length !== 1) {
+      fail('Set SIM_PLAN_ID to an existing DAG ID; the workspace does not contain exactly one DAG')
+    }
+    planId = requireString(asRecord(list.data[0], 'DAG list entry').id, 'DAG ID')
+  }
+  const response = asRecord(
     await requestJson(
       apiUrl,
       apiKey,
-      `/api/v2/files?workspaceId=${encodeURIComponent(workspaceId)}&search=${encodeURIComponent(fileName)}&limit=100`
+      `/api/v2/dags/${encodeURIComponent(planId)}?workspaceId=${encodeURIComponent(workspaceId)}`
     ),
-    'File list response'
+    'DAG response'
   )
-  if (!Array.isArray(list.data)) fail('File list response is missing data')
-  const file = list.data.map(parseFile).find((candidate) => candidate.name === fileName)
-  if (!file) fail(`Plan file ${fileName} was not found; open the Plan Graph once to initialize it`)
-  const textResponse = asRecord(
-    await requestJson(
-      apiUrl,
-      apiKey,
-      `/api/v2/files/${encodeURIComponent(file.id)}/text?workspaceId=${encodeURIComponent(workspaceId)}&maxBytes=1048576`
-    ),
-    'File text response'
-  )
-  const data = asRecord(textResponse.data, 'File text data')
-  const document = parseDocument(JSON.parse(requireString(data.text, 'Plan file text')))
-  return { document, file }
+  const document = parseDocument(response.data)
+  if (document.id !== planId) fail('DAG response identity does not match the selected DAG')
+  return { document, version: { id: document.id, revision: document.revision } }
 }
 
 async function savePlan(
   apiUrl: string,
   apiKey: string,
   workspaceId: string,
-  file: PlanFile,
+  version: PlanVersion,
   document: PlanDocument
-): Promise<PlanFile> {
+): Promise<PlanVersion> {
   const response = asRecord(
-    await requestJson(apiUrl, apiKey, `/api/v2/files/${encodeURIComponent(file.id)}/content`, {
+    await requestJson(apiUrl, apiKey, `/api/v2/dags/${encodeURIComponent(version.id)}`, {
       method: 'PUT',
-      body: JSON.stringify({
-        workspaceId,
-        content: `${JSON.stringify(document, null, 2)}\n`,
-        encoding: 'utf-8',
-        expectedContentUpdatedAt: file.contentUpdatedAt,
-      }),
+      body: JSON.stringify({ workspaceId, document, expectedRevision: version.revision }),
     }),
-    'File update response'
+    'DAG update response'
   )
-  return parseFile(response.data)
+  const saved = parseDocument(response.data)
+  if (saved.id !== version.id || saved.revision !== version.revision + 1) {
+    fail('DAG update returned an unexpected identity or revision')
+  }
+  return { id: saved.id, revision: saved.revision }
 }
 
 function nodeIsReady(document: PlanDocument, node: PlanItem, now: Date): boolean {
@@ -271,7 +267,7 @@ async function claimNode(args: {
   apiKey: string
   apiUrl: string
   document: PlanDocument
-  file: PlanFile
+  version: PlanVersion
   options: Map<string, string | true>
   workspaceId: string
 }): Promise<void> {
@@ -284,7 +280,9 @@ async function claimNode(args: {
     fail(`Plan node ${nodeId} is not ready; inspect its dependencies or active lease`)
   }
 
-  const repositoryRoot = resolve(stringOption(args.options, 'repo-root') ?? process.cwd())
+  const repositoryRoot = resolve(
+    stringOption(args.options, 'repo-root') ?? node.localRepositoryPath ?? process.cwd()
+  )
   runGit(repositoryRoot, ['rev-parse', '--show-toplevel'])
   runGit(repositoryRoot, ['fetch', args.document.remote, args.document.defaultBranch])
   const baseSha = runGit(repositoryRoot, [
@@ -315,6 +313,7 @@ async function claimNode(args: {
   if (!claimedNode) fail(`Plan node ${nodeId} disappeared during claim preparation`)
   claimedNode.lifecycle = 'active'
   claimedNode.agent = agent
+  claimedNode.localRepositoryPath = repositoryRoot
   claimedNode.execution = {
     attemptId,
     sessionId,
@@ -332,11 +331,11 @@ async function claimNode(args: {
     },
   }
   claimedDocument.revision += 1
-  const claimedFile = await savePlan(
+  const claimedVersion = await savePlan(
     args.apiUrl,
     args.apiKey,
     args.workspaceId,
-    args.file,
+    args.version,
     claimedDocument
   )
 
@@ -359,7 +358,7 @@ async function claimNode(args: {
       claimedNode.execution.status = 'failed'
       claimedNode.execution.lease.state = 'released'
       claimedDocument.revision += 1
-      await savePlan(args.apiUrl, args.apiKey, args.workspaceId, claimedFile, claimedDocument)
+      await savePlan(args.apiUrl, args.apiKey, args.workspaceId, claimedVersion, claimedDocument)
       fail(`Worktree provisioning failed: ${result.stderr.toString().trim()}`)
     }
   }
@@ -370,6 +369,7 @@ async function claimNode(args: {
       `Attempt: ${attemptId}`,
       `Session: ${sessionId}`,
       `Fencing token: ${fencingToken}`,
+      `Repository root: ${repositoryRoot}`,
       `Worktree: ${worktree}`,
       `Branch: ${branch}`,
       `Base: ${baseSha}`,
@@ -383,7 +383,7 @@ async function bindPullRequest(args: {
   apiKey: string
   apiUrl: string
   document: PlanDocument
-  file: PlanFile
+  version: PlanVersion
   options: Map<string, string | true>
   workspaceId: string
 }): Promise<void> {
@@ -404,7 +404,7 @@ async function bindPullRequest(args: {
     url: `https://github.com/${node.repository ?? next.repository}/pull/${pullRequestNumber}`,
   }
   next.revision += 1
-  await savePlan(args.apiUrl, args.apiKey, args.workspaceId, args.file, next)
+  await savePlan(args.apiUrl, args.apiKey, args.workspaceId, args.version, next)
   process.stdout.write(`Bound ${nodeId} to PR #${pullRequestNumber} at revision ${next.revision}\n`)
 }
 
@@ -412,7 +412,7 @@ async function heartbeat(args: {
   apiKey: string
   apiUrl: string
   document: PlanDocument
-  file: PlanFile
+  version: PlanVersion
   options: Map<string, string | true>
   workspaceId: string
 }): Promise<void> {
@@ -428,7 +428,7 @@ async function heartbeat(args: {
   }
   node.execution.lease.expiresAt = new Date(Date.now() + 60 * 60 * 1000).toISOString()
   next.revision += 1
-  await savePlan(args.apiUrl, args.apiKey, args.workspaceId, args.file, next)
+  await savePlan(args.apiUrl, args.apiKey, args.workspaceId, args.version, next)
   process.stdout.write(
     `Extended ${nodeId} attempt ${attemptId} to ${node.execution.lease.expiresAt}\n`
   )
@@ -439,7 +439,7 @@ async function main(): Promise<void> {
   const apiUrl = requireEnvironment('SIM_API_URL')
   const apiKey = requireEnvironment('SIM_API_KEY')
   const workspaceId = requireEnvironment('SIM_WORKSPACE_ID')
-  const planId = process.env.SIM_PLAN_ID?.trim() || 'agent-session-prs'
+  const planId = process.env.SIM_PLAN_ID?.trim() || undefined
   const loaded = await loadPlan(apiUrl, apiKey, workspaceId, planId)
   if (command === 'inspect') return printInspection(loaded.document)
   if (command === 'claim') {

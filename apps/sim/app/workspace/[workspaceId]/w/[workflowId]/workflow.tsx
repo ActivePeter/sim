@@ -35,6 +35,7 @@ import {
 } from 'reactflow'
 import { useShallow } from 'zustand/react/shallow'
 import {
+  CANVAS_FIT_VIEW_OPTIONS,
   CanvasEditorFrame,
   useWorkflowConnectionGesture,
   useWorkflowNodeDrag,
@@ -118,8 +119,6 @@ import {
   embeddedFitViewOptions,
   embeddedResizeFitViewOptions,
   nodeTypes,
-  reactFlowFitViewOptions,
-  reactFlowProOptions,
   reactFlowStyles,
 } from '@/app/workspace/[workspaceId]/w/[workflowId]/workflow-constants'
 import { useSocket } from '@/app/workspace/providers/socket-provider'
@@ -5021,15 +5020,14 @@ const WorkflowContent = React.memo(
                       setIsCanvasReady(true)
                       return
                     }
-                    instance.fitView(reactFlowFitViewOptions)
+                    instance.fitView(CANVAS_FIT_VIEW_OPTIONS)
                     setIsCanvasReady(true)
                   })
                 }}
-                fitViewOptions={embedded ? embeddedFitViewOptions : reactFlowFitViewOptions}
+                fitViewOptions={embedded ? embeddedFitViewOptions : CANVAS_FIT_VIEW_OPTIONS}
                 minZoom={0.1}
                 maxZoom={1.3}
                 defaultEdgeOptions={defaultEdgeOptions}
-                proOptions={reactFlowProOptions}
                 connectionLineContainerStyle={WORKFLOW_CONNECTION_LINE_CONTAINER_STYLE}
                 onPaneClick={onPaneClick}
                 onEdgeClick={embedded ? undefined : onEdgeClick}
